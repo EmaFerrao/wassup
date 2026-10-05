@@ -28,8 +28,8 @@ export function waMarkup(text: string): string {
   }
   inline('*', '{bold}', '{/bold}')
   inline('_', '{underline}', '{/underline}')
-  inline('~', '{gray-fg}~', '~{/gray-fg}')
-  s = s.replace(/^(&gt;|>) ?(.*)$/gm, '{gray-fg}│ $2{/gray-fg}')
+  inline('~', `{${DIM}-fg}~`, `~{/${DIM}-fg}`)
+  s = s.replace(/^(&gt;|>) ?(.*)$/gm, (_m, _q, line: string) => dim(`│ ${line}`))
   s = s.replace(/\u0000(\d+)\u0000/g, (_m, i: string) => `{yellow-fg}${blocks[Number(i)]}{/yellow-fg}`)
   return s
 }
@@ -39,10 +39,19 @@ export function waMarkup(text: string): string {
 const PALETTE_DARK_BG = [81, 213, 221, 120, 210, 111, 179, 151, 177, 216, 73]
 const PALETTE_LIGHT_BG = [31, 127, 130, 28, 160, 25, 94, 65, 91, 166, 30]
 let palette = PALETTE_DARK_BG
+// Cinzento do texto secundário (horas, legendas, citações): da rampa de 256, porque o "gray" do tema (cor 8) costuma
+// ser quase invisível sobre fundo escuro.
+let DIM = 247
 
-/** Escolhe a paleta dos nomes conforme o fundo do terminal é escuro ou claro. */
-export function setNameColors(darkBg: boolean): void {
+/** Escolhe a paleta dos nomes e o cinzento secundário conforme o fundo do terminal é escuro ou claro. */
+export function setTheme(darkBg: boolean): void {
   palette = darkBg ? PALETTE_DARK_BG : PALETTE_LIGHT_BG
+  DIM = darkBg ? 247 : 242
+}
+
+/** Texto secundário, no cinzento do tema. */
+export function dim(s: string): string {
+  return `{${DIM}-fg}${s}{/${DIM}-fg}`
 }
 
 export function colorFor(key: string): number {

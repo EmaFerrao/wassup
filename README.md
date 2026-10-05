@@ -23,10 +23,12 @@ ligação e os avisos encostados à direita. Sem molduras nem fundos próprios: 
 e o tab activo marcado só pelo texto, a negrito e na cor mais forte do tema.
 
 As cores são as do tema do terminal: fundo e texto por omissão em todos os painéis, e os realces nas 16 cores
-nomeadas (cinzento, vermelho, amarelo…), que o tema já garante legíveis. No arranque o cliente pergunta ao terminal a
-cor real do fundo (OSC 11) para saber se o tema é escuro ou claro: os nomes nas mensagens usam tons claros ou
-escuros conforme o caso, o tab activo fica branco vivo ou preto, e a mensagem seleccionada ganha um fundo cinzento
-afastado do fundo real. Se o terminal não responder, assume-se escuro e o cinzento é médio.
+nomeadas (vermelho, amarelo…), que o tema já garante legíveis; só o texto secundário (horas, legendas, citações) usa
+um cinzento da rampa de 256 com contraste garantido, porque o cinzento do tema costuma ser quase invisível sobre
+fundo escuro. No arranque o cliente pergunta ao terminal a cor real do fundo (OSC 11) para saber se o tema é escuro
+ou claro: os nomes e o texto secundário usam tons claros ou escuros conforme o caso, o tab activo fica branco vivo
+ou preto, e a mensagem seleccionada ganha um fundo cinzento afastado do fundo real. Se o terminal não responder,
+assume-se escuro e o cinzento da selecção é médio.
 
 - **Tabs**: um por conversa aberta, com o número de não lidas a vermelho e um `×` para fechar. Clique no nome activa,
   clique no `×` fecha. O tab activo fica sempre em primeiro, junto da escrita: activar outro roda a barra até ele lá

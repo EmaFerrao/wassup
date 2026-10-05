@@ -5,7 +5,7 @@ import QRCode from 'qrcode'
 import { store, type ChatRow, type MessageRow, type ReactionRow } from './db.js'
 import { chatName, contactName, thumbPath, jidUser, type ConnState } from './wa.js'
 import type { Backend } from './backend.js'
-import { waMarkup, esc, colorFor, setNameColors, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, fold, graphemes, wrapChars } from './format.js'
+import { waMarkup, esc, colorFor, setTheme, dim, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, fold, graphemes, wrapChars } from './format.js'
 import { decode, cached, cellSize, halfBlocks, detectImageMode, KittyImages, type Decoded, type ImageMode } from './image.js'
 import { logger, uiLog } from './log.js'
 import { patchBlessedUnicode } from './unicode.js'
@@ -45,7 +45,7 @@ const HELP = 'Tab muda de tab · Ctrl-T conversas · Esc fecha · PgUp/PgDn hist
 // Cores do tema do terminal, nunca assumidas: texto e fundo por omissão e as 16 nomeadas, que o tema garante
 // legíveis sobre o seu fundo. Os avisos passageiros são discretos; só a espera do QR e as quebras de ligação se
 // destacam. Ligado não se mostra.
-const FG = { tab: 'default', tabDim: 'gray', badge: 'red', note: 'gray', warn: 'yellow', error: 'red' }
+const FG = { tab: 'default', badge: 'red', warn: 'yellow', error: 'red' }
 
 /** Cinzento da rampa de 256 cores (232..255, de #080808 a #eeeeee em passos de 10) mais próximo de uma luminosidade. */
 function gray256(luma: number): number {
@@ -142,7 +142,7 @@ export class Ui {
   constructor(private wa: Backend, caps: TermCaps) {
     this.mode = detectImageMode(caps.kittyGraphics)
     ;({ dark: this.dark, selected: this.selectedBg } = theme(caps.bg))
-    setNameColors(this.dark)
+    setTheme(this.dark)
     patchBlessedUnicode()
     this.screen = blessed.screen({ smartCSR: true, fullUnicode: caps.utf8, title: 'wa', warnings: false })
     // Com localização UTF-8 as molduras saem em caracteres de caixa Unicode (─│┌). Sem isto o blessed muda para o
@@ -578,14 +578,14 @@ export class Ui {
       this.segments.push({ x0: x, x1: x + w, index: t.i, closeX0, closeX1: closeX0 + 1 })
       const badge = t.badge ? ` {${FG.badge}-fg}{bold}${t.badge}{/bold}{/${FG.badge}-fg}` : ''
       out += t.i === this.active && !this.pickerOpen
-        ? `{${strong}-fg}{bold} ${esc(name)}{/bold}{/${strong}-fg}${badge} {${FG.tabDim}-fg}×{/${FG.tabDim}-fg} `
-        : `{${FG.tab}-fg} ${esc(name)}{/${FG.tab}-fg}${badge} {${FG.tabDim}-fg}×{/${FG.tabDim}-fg} `
+        ? `{${strong}-fg}{bold} ${esc(name)}{/bold}{/${strong}-fg}${badge} ${dim('×')} `
+        : `{${FG.tab}-fg} ${esc(name)}{/${FG.tab}-fg}${badge} ${dim('×')} `
       x += w
     }
     // Estado encostado à direita: a mensagem passageira (amarela) ou a ligação; cortado se não couber.
     // Ligado não se anuncia: só avisos passageiros e os estados que pedem atenção (QR, ligação caída).
     const avail = width - x - 2
-    const text = this.transient ? `{${FG.note}-fg}${esc(truncate(this.transient, avail))}{/${FG.note}-fg}` : this.connText
+    const text = this.transient ? dim(esc(truncate(this.transient, avail))) : this.connText
     if (avail >= 6 && text) out += ' '.repeat(Math.max(1, width - x - visibleWidth(text) - 1)) + text
     this.tabsBar.setContent(out)
   }
@@ -646,7 +646,7 @@ export class Ui {
         const body = last.type === 'text' ? last.text.replace(/\s+/g, ' ') : last.type === 'deleted' ? 'mensagem apagada' : `[${kind[last.type] ?? last.type}]${last.text ? ' ' + last.text.replace(/\s+/g, ' ') : ''}`
         preview = truncate(`${fmtTime(last.ts)} ${who}${body}`, width - nameW - 2)
       }
-      return `${left}${' '.repeat(Math.max(1, nameW - visibleWidth(left)))}{gray-fg}${esc(preview)}{/gray-fg}`
+      return `${left}${' '.repeat(Math.max(1, nameW - visibleWidth(left)))}${dim(esc(preview))}`
     })
     this.picker.setItems(items as unknown as string[])
     // Lista encostada ao fundo, junto ao prompt, quando é mais curta que o painel.
@@ -749,7 +749,7 @@ export class Ui {
     }
     const visible = lines.slice(this.inputTop, this.inputTop + rowsAvail)
     const out = visible.map((l, i) => (this.inputTop + i === 0 ? '> ' : '  ') + render(l, this.inputTop + i))
-    if (header) out.unshift(`{gray-fg}${esc(truncate(header, w))}{/gray-fg}`)
+    if (header) out.unshift(dim(esc(truncate(header, w))))
     this.input.setContent(out.join('\n'))
   }
 
@@ -787,7 +787,7 @@ export class Ui {
       if (day !== lastDay) {
         lastDay = day
         const label = `── ${fmtDay(row.ts)} ──`
-        push(`{gray-fg}${' '.repeat(Math.max(0, Math.floor((width - strWidth(label)) / 2)))}${label}{/gray-fg}`, null)
+        push(dim(`${' '.repeat(Math.max(0, Math.floor((width - strWidth(label)) / 2)))}${label}`), null)
       }
       // As minhas mensagens ficam encostadas à direita: parto eu as linhas (o blessed só parte pela esquerda) e
       // encosto cada uma ao bordo; as dos outros ficam à esquerda, partidas da mesma forma.
@@ -798,31 +798,31 @@ export class Ui {
       }
       const name = mine ? 'eu' : isGroup ? contactName(row.sender_jid) : chatName(jid)
       const color = mine ? 'green' : colorFor(row.sender_jid)
-      const ticks = !mine ? '' : (row.status ?? 0) >= 4 ? '{cyan-fg}✓✓{/cyan-fg}' : (row.status ?? 0) >= 3 ? '✓✓' : (row.status ?? 0) >= 2 ? '✓' : '{gray-fg}○{/gray-fg}'
+      const ticks = !mine ? '' : (row.status ?? 0) >= 4 ? '{cyan-fg}✓✓{/cyan-fg}' : (row.status ?? 0) >= 3 ? '✓✓' : (row.status ?? 0) >= 2 ? '✓' : dim('○')
       // Nas minhas a hora vem antes do "eu"; nomes sem negrito, só a cor.
       out(mine
-        ? `{gray-fg}${fmtTime(row.ts)}{/gray-fg} {${color}-fg}${esc(name)}{/${color}-fg} ${ticks}`
-        : `{${color}-fg}${esc(name)}{/${color}-fg} {gray-fg}${fmtTime(row.ts)}{/gray-fg}`, row)
+        ? `${dim(fmtTime(row.ts))} {${color}-fg}${esc(name)}{/${color}-fg} ${ticks}`
+        : `{${color}-fg}${esc(name)}{/${color}-fg} ${dim(fmtTime(row.ts))}`, row)
       if (row.quoted) {
         const [who, text] = row.quoted.split('\t')
         const author = who === this.wa.me ? '' : `${esc(contactName(who ?? ''))}: `
-        out(`{gray-fg}│ ${author}${esc(truncate(text ?? '', width - 6))}{/gray-fg}`, row)
+        out(dim(`│ ${author}${esc(truncate(text ?? '', width - 6))}`), row)
       }
 
       const type = row.type
-      const mediaHint = row.media_path ? '{gray-fg}(clique para abrir){/gray-fg}' : row.media_err ? '{gray-fg}(indisponível){/gray-fg}' : '{gray-fg}(clique para descarregar){/gray-fg}'
-      if (type === 'deleted') out('{gray-fg}⊘ mensagem apagada{/gray-fg}', row)
+      const mediaHint = row.media_path ? dim('(clique para abrir)') : row.media_err ? dim('(indisponível)') : dim('(clique para descarregar)')
+      if (type === 'deleted') out(dim('⊘ mensagem apagada'), row)
       else if (type === 'image' || type === 'sticker' || type === 'gif' || type === 'video') {
         this.pushImage(row, push, images, lines, width, mine)
         if (type === 'video' || type === 'gif') out(`{magenta-fg}▶ ${type === 'gif' ? 'gif' : 'vídeo'}{/magenta-fg} ${mediaHint}`, row)
       } else if (type === 'document') {
         out(`{yellow-fg}📎 ${esc(row.media_name ?? 'ficheiro')}{/yellow-fg} ${mediaHint}`, row)
       } else if (type === 'audio' || type === 'voice') {
-        out(`{yellow-fg}${type === 'voice' ? '🎤' : '🎵'} ${type === 'voice' ? 'mensagem de voz' : 'áudio'} ${esc(row.text)}{/yellow-fg} ${row.media_path ? '{gray-fg}(clique para ouvir){/gray-fg}' : mediaHint}`, row)
+        out(`{yellow-fg}${type === 'voice' ? '🎤' : '🎵'} ${type === 'voice' ? 'mensagem de voz' : 'áudio'} ${esc(row.text)}{/yellow-fg} ${row.media_path ? dim('(clique para ouvir)') : mediaHint}`, row)
       } else if (type === 'location') out(`{yellow-fg}📍 ${waMarkup(row.text)}{/yellow-fg}`, row)
       else if (type === 'contact') out(`{yellow-fg}👤 ${esc(row.text)}{/yellow-fg}`, row)
       else if (type === 'poll') for (const l of row.text.split('\n')) out(`{yellow-fg}${esc(l)}{/yellow-fg}`, row)
-      else if (type !== 'text') out(`{gray-fg}${esc(row.text || `[${type}]`)}{/gray-fg}`, row)
+      else if (type !== 'text') out(dim(esc(row.text || `[${type}]`)), row)
 
       if (row.text && (type === 'text' || type === 'image' || type === 'video' || type === 'gif' || type === 'document')) {
         for (const l of waMarkup(row.text).split('\n')) out(l, row)
@@ -833,7 +833,7 @@ export class Ui {
         const byEmoji = new Map<string, string[]>()
         for (const r of rs) byEmoji.set(r.emoji, [...(byEmoji.get(r.emoji) ?? []), r.sender_jid === this.wa.me ? 'eu' : contactName(r.sender_jid)])
         const parts = [...byEmoji].map(([emoji, who]) => `${emoji} ${who.length > 1 ? who.length : who[0]}`)
-        out(`{gray-fg}${esc(parts.join('  '))}{/gray-fg}`, row)
+        out(dim(esc(parts.join('  '))), row)
       }
       push('', null)
     }
@@ -849,11 +849,11 @@ export class Ui {
    * quando a imagem fica visível no painel (loadVisibleImages), nunca para as 300 mensagens de uma vez.
    */
   private pushImage(row: MessageRow, push: (l: string, r: MessageRow | null) => void, images: ImageSlot[], lines: string[], width: number, mine = false) {
-    if (this.mode === 'none') { push(`{gray-fg}[${row.type}]{/gray-fg}`, row); return }
-    if (row.media_err && !this.imagePathFor(row)) { push(`{gray-fg}[${row.type} indisponível]{/gray-fg}`, row); return }
+    if (this.mode === 'none') { push(dim(`[${row.type}]`), row); return }
+    if (row.media_err && !this.imagePathFor(row)) { push(dim(`[${row.type} indisponível]`), row); return }
     const path = this.imagePathFor(row)
     const d = path ? cached(path) : undefined
-    if (d instanceof Error) { push(`{gray-fg}[${row.type} ilegível: ${esc(d.message)}]{/gray-fg}`, row); return }
+    if (d instanceof Error) { push(dim(`[${row.type} ilegível: ${esc(d.message)}]`), row); return }
     // Tamanho: dos pixels se já os temos, senão das dimensões que a mensagem traz, senão um rectângulo por omissão.
     const w = d?.w ?? row.media_w ?? 4, h = d?.h ?? row.media_h ?? 3
     // Em blocos a imagem ocupa a largura toda do painel, para se ver melhor com tão pouca resolução; em Kitty, com
@@ -865,7 +865,7 @@ export class Ui {
     const pad = mine ? Math.max(0, width - 1 - cols) : 0
     if (!d) {
       images.push({ row, origLine: lines.length, cols, rows, pad })
-      push(`${' '.repeat(pad)}{gray-fg}[${row.type}${path ? ' a carregar…' : row.media_path ? '' : ' a descarregar…'}]{/gray-fg}`, row)
+      push(`${' '.repeat(pad)}${dim(`[${row.type}${path ? ' a carregar…' : row.media_path ? '' : ' a descarregar…'}]`)}`, row)
       for (let i = 1; i < rows; i++) push('', row)
       return
     }
