@@ -18,6 +18,16 @@ type Focus = 'picker' | 'messages' | 'input'
 /** Uma imagem no painel: pronta (com pixels) ou só reservada, à espera de ser descarregada e descodificada quando ficar visível. */
 interface ImageSlot { row: MessageRow; origLine: number; cols: number; rows: number; pad: number; path?: string; d?: Decoded }
 
+/** O que cada terminal guarda em `state`: os seus tabs, o processo que os tem e a última interacção. */
+interface TerminalState { tabs: string[]; active: number; pid?: number; lastActive?: number }
+
+function pidAlive(pid: number): boolean {
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8')
+    return stat.charAt(stat.lastIndexOf(')') + 2) !== 'Z'
+  } catch { return false }
+}
+
 /** Um troço da barra de tabs: a que tab corresponde e onde está o seu × (ou se é o +). */
 interface TabSegment { x0: number; x1: number; index: number; closeX0: number; closeX1: number; plus?: boolean }
 
@@ -176,14 +186,14 @@ export class Ui {
     this.wa.on('chats', () => { this.dirtyTabs = true; if (this.pickerOpen) this.refreshPicker(); this.scheduleRender() })
     this.wa.on('messages', jid => { if (jid === '*' || jid === this.current) this.dirtyMessages = true; this.dirtyTabs = true; this.scheduleRender() })
     this.wa.on('notify', (jid, row) => {
-      // Mensagem nova numa conversa sem tab: abre-se um tab no fim, sem o activar nem reordenar os outros.
-      if (!this.tabs.includes(jid)) this.openTab(jid, false)
-      if (jid === this.current) {
-        this.wa.markRead(jid).catch(e => logger.warn({ e }, 'markRead'))
-      } else {
-        this.screen.program.bell()
-        this.flash(`${chatName(jid)}: ${truncate(row.text || `[${row.type}]`, 60)}`)
-      }
+      if (jid === this.current) { this.wa.markRead(jid).catch(e => logger.warn({ e }, 'markRead')); return }
+      if (this.tabs.includes(jid)) { this.screen.program.bell(); this.flash(`${chatName(jid)}: ${truncate(row.text || `[${row.type}]`, 60)}`); return }
+      // Conversa sem tab: com vários terminais, só o usado mais recentemente abre o tab, e nunca se a conversa já
+      // tiver tab noutro terminal vivo.
+      if (this.openElsewhere(jid) || !this.isMostRecentTerminal()) return
+      this.openTab(jid, false)
+      this.screen.program.bell()
+      this.flash(`${chatName(jid)}: ${truncate(row.text || `[${row.type}]`, 60)}`)
     })
     this.wa.on('status', text => this.flash(text))
   }
@@ -195,8 +205,10 @@ export class Ui {
       // Só sequências de escape (rato, teclas especiais), nunca o texto escrito.
       if (b[0] === 0x1b) uiLog.info({ raw: JSON.stringify(b.toString('latin1')) }, 'bytes')
     })
-    this.screen.on('mouse', (d: { action: string; button?: string; x: number; y: number; shift?: boolean; ctrl?: boolean }) =>
-      uiLog.info({ action: d.action, button: d.button, x: d.x, y: d.y, shift: d.shift, ctrl: d.ctrl }, 'rato'))
+    this.screen.on('mouse', (d: { action: string; button?: string; x: number; y: number; shift?: boolean; ctrl?: boolean }) => {
+      this.touchActivity()
+      uiLog.info({ action: d.action, button: d.button, x: d.x, y: d.y, shift: d.shift, ctrl: d.ctrl }, 'rato')
+    })
     const named: [string, blessed.Widgets.BlessedElement][] = [['tabs', this.tabsBar], ['mensagens', this.msgBox], ['escrita', this.input], ['escolhedor', this.picker]]
     for (const [name, w] of named) {
       ;(w as unknown as { on: (ev: string, fn: (el: blessed.Widgets.BlessedElement, d: { action: string; x: number; y: number }) => void) => void })
@@ -231,6 +243,7 @@ export class Ui {
   }
 
   private onKey(ch: string, key: blessed.Widgets.Events.IKeyEventArg) {
+    this.touchActivity()
     const k = key.full
     if (k === 'C-c') return this.quit()
     // ESC fecha, por ordem: o filtro do escolhedor, o escolhedor, o tab activo, o programa.
@@ -315,20 +328,50 @@ export class Ui {
 
   // ---------- tabs ----------
 
-  /** Cada terminal tem os seus tabs: a chave é o dispositivo do terminal (/dev/pts/N), que se mantém enquanto ele existir. */
+  /**
+   * Cada terminal tem os seus tabs, guardados em `state` sob o dispositivo do terminal (/dev/pts/N). O registo leva
+   * também o pid e a hora da última interacção: é assim que os vários processos sabem, só pela base, que tabs estão
+   * abertos noutros terminais vivos e qual foi o terminal usado mais recentemente.
+   */
   private tabsKey(): string {
-    try { return `tabs:${fs.readlinkSync('/proc/self/fd/0')}` } catch { return 'tabs' }
+    try { return `tabs:${fs.readlinkSync('/proc/self/fd/0')}` } catch { return `tabs:pid${process.pid}` }
   }
 
+  private lastActive = Date.now()
+  private lastActiveSaved = 0
+
   private loadTabs() {
-    const saved = store.getState<{ tabs: string[]; active: number }>(this.tabsKey())
-    if (!saved) return
-    this.tabs = saved.tabs.filter(jid => store.getChat(jid))
-    this.active = this.tabs.length ? Math.min(Math.max(saved.active, 0), this.tabs.length - 1) : -1
+    const saved = store.getState<TerminalState>(this.tabsKey())
+    if (saved) {
+      this.tabs = saved.tabs.filter(jid => store.getChat(jid))
+      this.active = this.tabs.length ? Math.min(Math.max(saved.active, 0), this.tabs.length - 1) : -1
+    }
+    this.saveTabs()
   }
 
   private saveTabs() {
-    store.setState(this.tabsKey(), { tabs: this.tabs, active: this.active })
+    this.lastActiveSaved = this.lastActive
+    store.setState(this.tabsKey(), { tabs: this.tabs, active: this.active, pid: process.pid, lastActive: this.lastActive } satisfies TerminalState)
+  }
+
+  /** Marca este terminal como o usado mais recentemente; grava no máximo de dois em dois segundos. */
+  private touchActivity() {
+    this.lastActive = Date.now()
+    if (this.lastActive - this.lastActiveSaved > 2000) this.saveTabs()
+  }
+
+  /** Registos dos outros terminais cujo processo ainda está vivo. */
+  private otherTerminals(): TerminalState[] {
+    const mine = this.tabsKey()
+    return store.listState<TerminalState>('tabs:').filter(r => r.key !== mine && r.value.pid && pidAlive(r.value.pid)).map(r => r.value)
+  }
+
+  private openElsewhere(jid: string): boolean {
+    return this.otherTerminals().some(t => t.tabs.includes(jid))
+  }
+
+  private isMostRecentTerminal(): boolean {
+    return this.otherTerminals().every(t => (t.lastActive ?? 0) <= this.lastActive)
   }
 
   /** Abre (ou encontra) o tab da conversa; com `activate` passa a ser o activo e a conversa marca-se como lida. */

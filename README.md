@@ -39,8 +39,10 @@ ligação e os avisos encostados à direita. Painéis distinguidos pelo fundo, s
 - Mensagens novas noutra conversa fazem soar a campainha do terminal e aparecem à direita na barra de tabs; abrir ou activar
   o tab marca-as como lidas.
 - **Vários terminais**: podes abrir o `wa` em quantos terminais quiseres. O primeiro processo é o servidor, com a
-  ligação ao WhatsApp, e abre um socket em `$XDG_RUNTIME_DIR/wa-<id>.sock`; os seguintes ligam-se a ele e são só interface, cada um
-  com os seus tabs, guardados por terminal. Se o servidor terminar, um dos outros assume a ligação sozinho.
+  ligação ao WhatsApp, e abre um socket em `$XDG_RUNTIME_DIR/wa-<id>.sock`; os seguintes ligam-se a ele e são só
+  interface, cada um com os seus tabs, guardados por terminal. Uma conversa com tab num terminal não abre tab noutro, e
+  uma mensagem nova numa conversa sem tab abre-o só no terminal usado mais recentemente. Se o servidor terminar, um
+  dos outros assume a ligação sozinho.
 
 ### Comandos na linha de escrita
 

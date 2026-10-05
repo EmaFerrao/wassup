@@ -139,6 +139,7 @@ const q = {
   lastMessage: db.prepare(`SELECT * FROM messages WHERE chat_jid = ? ORDER BY ts DESC LIMIT 1`),
   lidContactsUnmapped: db.prepare(`SELECT * FROM contacts k WHERE k.jid LIKE '%@lid' AND (k.name IS NOT NULL OR k.notify IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM lids l WHERE l.lid = k.jid)`),
   getState: db.prepare(`SELECT value FROM state WHERE key = ?`),
+  listState: db.prepare(`SELECT key, value FROM state WHERE key LIKE ? ESCAPE '\\'`),
   setState: db.prepare(`INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)`),
 }
 
@@ -242,6 +243,13 @@ export const store = {
   },
   setState(key: string, value: unknown) {
     q.setState.run(key, JSON.stringify(value))
+  },
+  /** Todos os registos cuja chave começa por `prefix`. */
+  listState<T>(prefix: string): { key: string; value: T }[] {
+    const rows = q.listState.all(prefix.replace(/[%_\\]/g, '\\$&') + '%') as unknown as { key: string; value: string }[]
+    const out: { key: string; value: T }[] = []
+    for (const r of rows) { try { out.push({ key: r.key, value: JSON.parse(r.value) as T }) } catch { /* ignora */ } }
+    return out
   },
 
   close() {
