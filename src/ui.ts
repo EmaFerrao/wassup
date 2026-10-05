@@ -464,8 +464,6 @@ export class Ui {
         }
         if (k === 'enter' || k === 'return') return this.acceptSuggestion()
       }
-      // Apagar numa linha vazia abre a última mensagem minha para a corrigir; Enter envia a edição, Esc desiste.
-      if ((k === 'backspace' || k === 'delete') && !this.inputValue && !this.editing && !this.replyTo && !this.reactTo) return this.editLast()
       // → com o cursor no fim aceita a sugestão do modelo (a correcção, se houver; senão a continuação).
       if (k === 'right' && this.ghostShown()) return this.acceptGhost()
       if (k === 'enter' || k === 'return') { const v = this.inputValue; this.inputValue = ''; this.cursor = 0; this.stopComposing(); this.updateSuggestions(); this.drawInput(); this.screen.render(); return void this.submit(v) }
@@ -481,6 +479,8 @@ export class Ui {
     }
     if (this.focus === 'messages') {
       if (k === 'up' || k === 'down') return this.moveSelection(k === 'up' ? -1 : 1)
+      // Delete sobre uma mensagem minha de texto abre-a na escrita para a corrigir; Enter envia a edição, Esc desiste.
+      if (k === 'delete' && this.selected) return this.editMessage(this.selected)
       // Escrever sobre a seleccionada começa logo a resposta, com o que se escreveu; ":" começa uma reacção, e fica
       // já escrito para se continuar com o :código: do emoji. O cabeçalho da escrita diz a que mensagem.
       if (this.selected && ch && !key.ctrl && !key.meta && ch >= ' ' && ch !== '\x7f') {
@@ -529,18 +529,17 @@ export class Ui {
     else if (bottom >= base + h) this.msgBox.scrollTo(bottom - h + 1)
   }
 
-  /** Põe a última mensagem de texto minha na escrita, para a corrigir e reenviar como edição. */
-  private editLast() {
-    const jid = this.current
-    if (!jid) return
-    const row = store.lastTextFromMe(jid)
-    if (!row) return this.flash('não há mensagem tua para editar')
+  /** Põe uma mensagem de texto minha na escrita, para a corrigir e reenviar como edição. */
+  private editMessage(row: MessageRow) {
+    if (!row.from_me || row.type !== 'text') return this.flash('só podes corrigir mensagens de texto tuas')
     this.editing = row
+    this.replyTo = this.reactTo = null
+    this.setFocus('input')
     this.inputValue = row.text.replace(/\n\(editada\)$/, '')
     this.cursor = graphemes(this.inputValue).length
     this.updateSuggestions()
     this.drawInput()
-    this.screen.render()
+    this.renderNow()
   }
 
   private who(row: MessageRow): string {
