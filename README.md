@@ -1,0 +1,104 @@
+# wa
+
+Cliente WhatsApp em modo terminal, inspirado no [wechit](https://github.com/LingDong-/wechit). Liga-se como
+"dispositivo associado" através da biblioteca [baileys](https://github.com/WhiskeySockets/Baileys), guarda tudo em
+SQLite local e desenha a interface com painéis, rato e imagens no próprio terminal.
+
+## Arrancar
+
+```sh
+npm install
+./wa            # ou: npm start
+```
+
+Na primeira vez aparece um código QR: no telemóvel, WhatsApp › Definições › Dispositivos associados › Associar
+dispositivo. A sessão fica guardada e nas vezes seguintes liga directamente.
+
+Requisitos: Node 22.13 ou mais recente (usa o SQLite embutido no Node). Testado com Node 26.
+
+## Interface
+
+Mensagens a toda a largura, duas linhas de escrita com o prompt `>`, e no fundo a barra de tabs, com o estado da
+ligação e os avisos encostados à direita. Painéis distinguidos pelo fundo, sem molduras; o painel activo fica um tom mais claro.
+
+- **Tabs**: um por conversa aberta, com o número de não lidas a vermelho e um `×` para fechar. Clique no nome activa,
+  clique no `×` fecha. Ctrl-W fecha o tab activo; Tab e Shift-Tab percorrem os tabs e, a seguir ao último, as "outras
+  conversas", que Ctrl-T também abre; Ctrl-N e Ctrl-P também mudam de tab. O tab "outras conversas", com a soma das
+  não lidas das conversas sem tab, só aparece enquanto essa lista está aberta. Mensagens novas numa conversa sem tab abrem um tab no fim,
+  sem o activar nem reordenar os outros. Os tabs abertos e o activo ficam guardados e voltam no arranque seguinte.
+- **Outras conversas**: a lista de conversas, com as mais recentes em baixo, mostrando o nome, as não lidas, um `·`
+  nas que já têm tab e um excerto da última mensagem. O que se escreve vai para a linha do prompt e filtra a lista, sem
+  acentos nem maiúsculas; setas, Enter ou clique abrem a conversa num tab e activam-no; Esc limpa o filtro e depois
+  fecha a lista.
+- **Mensagens**: as tuas à direita, as dos outros à esquerda. Roda do rato, setas, PgUp/PgDn. Clique num anexo
+  (imagem, vídeo, ficheiro, áudio) abre-o com `xdg-open`; se ainda não estiver descarregado, descarrega-o.
+- **Escrita**: duas linhas, texto partido por palavras; Enter envia. Ctrl-U limpa a linha. Clique num painel
+  activa-o; `i` no painel de mensagens volta à escrita.
+- Esc fecha, por ordem: o filtro do escolhedor, o escolhedor, o tab activo. Fechar o último tab leva às "outras
+  conversas"; Esc aí, sem tabs abertos, sai do programa. Ctrl-C e `:q` saem logo.
+- Mensagens novas noutra conversa fazem soar a campainha do terminal e aparecem à direita na barra de tabs; abrir ou activar
+  o tab marca-as como lidas.
+- Só corre uma instância por sessão: arrancar outra termina a anterior (o WhatsApp só aceita uma ligação por
+  dispositivo associado; duas instâncias expulsam-se uma à outra).
+
+### Comandos na linha de escrita
+
+| Comando | Efeito |
+|---|---|
+| `:up caminho [legenda]` | Envia ficheiro (imagens como imagem, mp4 como vídeo, o resto como documento) |
+| `:down` | Copia todos os anexos da conversa para `~/Downloads/wa/<conversa>/` |
+| `/texto` | Abre o escolhedor de conversas já filtrado |
+| `:help` | Mostra os atalhos na barra de estado |
+| `:q` | Sai |
+
+### Formatação e emojis
+
+A marcação do WhatsApp é mostrada com atributos do terminal: `*negrito*` a negrito, `_itálico_` sublinhado (o
+blessed não sabe itálico), `~riscado~` a cinzento, `` `código` `` e blocos a amarelo, linhas `> citação` a cinzento,
+endereços a azul. Ao enviar, escreve-se a marcação tal como no telemóvel.
+
+Códigos `:nome:` na linha de escrita são trocados por emojis ao enviar, com nomes em português de Portugal, sem
+acentos, e em inglês: `:fixe:` ou `:thumbsup:` 👍, `:gargalhada:` 😂, `:beijinho:` 😘, `:coracao:` ❤️, `:fogo:` 🔥,
+`:certo:` ✅, `:bica:` ☕, `:imperial:` 🍺, `:galo:` 🐓, `:autocarro:` 🚌, `:telemovel:` 📱, `:portugal:` 🇵🇹 … A lista
+completa está em `src/emoji.ts`. Os smileys clássicos também são convertidos quando isolados por espaços: `:)` 🙂,
+`:-D` 😃, `:(` 🙁, `;)` 😉, `:P` 😛, `:*` 😘, `:O` 😮, `:'(` 😢, `:/` 😕, `<3` ❤️, `xD` 😆, `B)` 😎 … Um `:/` dentro de
+`http://` fica intacto. Emojis escritos directamente pelo teclado também funcionam.
+
+### Imagens
+
+- No arranque o cliente pergunta ao terminal o que sabe fazer (`src/term.ts`), em duas fases: primeiro a versão
+  (XTVERSION, uma sequência CSI que qualquer terminal ignora se não conhecer) e um pedido de identificação; só a quem
+  se identificar como Ghostty, Kitty, WezTerm ou Konsole manda depois a consulta do protocolo gráfico, e só usa o que
+  o terminal confirmar. Nada é assumido pelo `TERM`.
+- Em terminais que respondem ao protocolo gráfico do Kitty (Ghostty, Kitty, WezTerm, Konsole) as imagens, stickers
+  e miniaturas de vídeo aparecem a sério dentro do painel de mensagens.
+- Nos restantes são desenhadas com meios-blocos `▀` coloridos (256 cores).
+- As molduras usam caracteres de caixa Unicode quando a localização (`LANG`, `LC_ALL`) é UTF-8; senão fica o conjunto
+  de linhas do terminfo.
+- `WA_IMAGES=kitty|blocks|none` força o modo das imagens.
+
+## Dados
+
+Tudo em `~/.config/wa` (ou `WA_HOME`):
+
+| Caminho | Conteúdo |
+|---|---|
+| `auth/` | Credenciais da sessão (apagar para associar de novo) |
+| `wa.db` | SQLite com `chats`, `contacts`, `lids` e `messages` (texto, estado, caminho do anexo, mensagem crua em JSON) |
+| `media/<conversa>/` | Anexos descarregados e miniaturas |
+| `wa.log` | Log (nível com `WA_LOG=info|debug`) |
+
+O histórico começa no primeiro arranque com o que o WhatsApp envia aos dispositivos novos (as conversas recentes).
+`WA_FULL_HISTORY=1` pede o histórico completo na associação; demora e ocupa mais espaço.
+
+## Estrutura
+
+| Ficheiro | Papel |
+|---|---|
+| `src/wa.ts` | Ligação ao WhatsApp: QR, reconexão, tradução das mensagens do baileys para a base de dados, envio, anexos |
+| `src/db.ts` | Esquema e consultas SQLite (`node:sqlite`) |
+| `src/ui.ts` | Interface blessed: painéis, teclado, rato, desenho das mensagens, colocação das imagens Kitty |
+| `src/format.ts` | Marcação do WhatsApp para etiquetas do blessed, datas, cores por remetente |
+| `src/image.ts` | Descodificação com jimp, meios-blocos, protocolo gráfico do Kitty |
+| `src/term.ts` | Sondagem das capacidades do terminal antes de arrancar a interface |
+| `src/emoji.ts` | Tabela de códigos `:nome:` |

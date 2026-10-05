@@ -1,0 +1,3 @@
+#!/bin/sh
+# Lança o cliente a partir de qualquer directório.
+cd "$(dirname "$(readlink -f "$0")")" && exec node_modules/.bin/tsx src/main.ts "$@"
