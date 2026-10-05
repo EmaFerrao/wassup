@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import QRCode from 'qrcode'
 import { store, type ChatRow, type MessageRow, type ReactionRow } from './db.js'
 import { chatName, contactName, thumbPath, jidUser, type ConnState } from './wa.js'
-import { reportHerdr, releaseHerdr } from './herdr.js'
+import { reportHerdr, labelHerdr, releaseHerdr } from './herdr.js'
 import type { Backend } from './backend.js'
 import { waMarkup, esc, colorFor, setTheme, dim, italic, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, wrapWidth, fold, graphemes, wrapChars } from './format.js'
 import { decode, cached, cellSize, halfBlocks, detectImageMode, KittyImages, type Decoded, type ImageMode } from './image.js'
@@ -246,6 +246,8 @@ export class Ui {
     this.drawInput()
     this.drawStatus()
     this.renderNow()
+    // drawStatus já deixou a barra de tabs desenhada, por isso o renderNow acima não passa pelo título nem pelo Herdr.
+    this.updateTitle()
   }
 
   private get current(): string | null {
@@ -964,6 +966,7 @@ export class Ui {
     const title = `${unread.length ? '● ' : ''}${this.current ? chatName(this.current) : 'wa'}`
     if (title !== this.titleShown) { this.titleShown = title; this.screen.title = title }
     // No Herdr o mesmo sinal vai para o estado do agente: alguém a escrever é trabalho em curso, por ler pede atenção.
+    labelHerdr(this.current ? chatName(this.current) : null)
     const typing = [...this.typing].filter(([, stopped]) => stopped == null).map(([jid]) => chatName(jid))
     if (typing.length) reportHerdr('working', `${typing.join(', ')} a escrever`)
     else if (unread.length) reportHerdr('blocked', unread.map(c => `${chatName(c.jid)} (${c.unread})`).join(', '))
@@ -973,13 +976,13 @@ export class Ui {
   quit(reason?: string) {
     this.kitty?.dispose()
     this.disableKittyKeyboard?.()
-    releaseHerdr()
+    const released = releaseHerdr()
     this.screen.destroy()
     if (reason) process.stderr.write(`${reason}\n`)
     this.wa.stop().catch(() => {})
     store.deleteState(this.tabsKey())
     store.close()
-    process.exit(0)
+    void released.then(() => process.exit(0))
   }
 
   private innerHeight(): number {
