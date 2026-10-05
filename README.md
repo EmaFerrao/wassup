@@ -55,7 +55,7 @@ assume-se escuro e o cinzento da selecção é médio.
   citação; Enter envia, Esc desiste) e `:` reage: o `:` fica já escrito, completa-se o `:fixe:` ou escreve-se o emoji directo, e
   Enter envia; Enter com a linha vazia retira a reacção.
   As reacções de todos aparecem numa linha cinzenta por baixo da mensagem.
-  Delete sobre uma mensagem de texto tua seleccionada abre-a para a corrigir: o texto volta à escrita, Enter envia
+  Delete ou Backspace sobre uma mensagem de texto tua seleccionada abre-a para a corrigir: o texto volta à escrita, Enter envia
   a edição e Esc desiste. A mensagem fica marcada com "(editada)", como as edições dos outros.
 - **Escrita**: duas linhas, texto partido por palavras; Enter envia. Setas, Home e End movem o cursor, e um clique
   põe-no onde se clicou; Backspace e Delete apagam para trás e para a frente, Ctrl-U limpa a linha e Shift-Backspace

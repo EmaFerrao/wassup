@@ -479,8 +479,9 @@ export class Ui {
     }
     if (this.focus === 'messages') {
       if (k === 'up' || k === 'down') return this.moveSelection(k === 'up' ? -1 : 1)
-      // Delete sobre uma mensagem minha de texto abre-a na escrita para a corrigir; Enter envia a edição, Esc desiste.
-      if (k === 'delete' && this.selected) return this.editMessage(this.selected)
+      // Delete ou Backspace sobre uma mensagem minha de texto abre-a na escrita para a corrigir; Enter envia a edição,
+      // Esc desiste.
+      if ((k === 'delete' || k === 'backspace') && this.selected) return this.editMessage(this.selected)
       // Escrever sobre a seleccionada começa logo a resposta, com o que se escreveu; ":" começa uma reacção, e fica
       // já escrito para se continuar com o :código: do emoji. O cabeçalho da escrita diz a que mensagem.
       if (this.selected && ch && !key.ctrl && !key.meta && ch >= ' ' && ch !== '\x7f') {
