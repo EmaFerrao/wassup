@@ -820,8 +820,11 @@ export class Ui {
     // Estado encostado à direita: a mensagem passageira (amarela) ou a ligação; cortado se não couber.
     // Ligado não se anuncia: só avisos passageiros e os estados que pedem atenção (QR, ligação caída).
     const avail = width - x - 2
-    const text = this.transient ? dim(esc(truncate(this.transient, avail))) : this.connText
+    let text = this.transient ? dim(esc(truncate(this.transient, avail))) : this.connText
     if (this.fixed) {
+      // Sem tab por onde correr o arco-íris, "a escrever…" corre aqui enquanto a outra pessoa escreve.
+      const jid = this.current
+      if (!text && jid && this.typing.has(jid)) text = this.rainbow('a escrever…', this.typing.get(jid)!)
       if (!text) return this.toast.hide()
       const w = Math.min(width, visibleWidth(text) + 2)
       this.toast.left = width - w; this.toast.width = w
