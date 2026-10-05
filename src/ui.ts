@@ -13,6 +13,7 @@ import type { TermCaps } from './term.js'
 import { emojify, emoticonify, completeEmoji, codeMatches } from './emoji.js'
 import { enableKittyKeyboard } from './kittykeys.js'
 import { parseHex, rainbowRing, mix, nearest256, type Rgb } from './rainbow.js'
+import { suggest, locateWord, llmEnabled, type Suggestion } from './llm.js'
 
 type Focus = 'picker' | 'messages' | 'input'
 
@@ -128,6 +129,10 @@ export class Ui {
   private suggestions: { emoji: string; name: string }[] = []
   private suggestIndex = 0
   private suggestStart = 0
+  /** Sugestão do modelo local para o texto `text` (continuação ou correcção), pedida 300 ms depois da última tecla. */
+  private ghost: { text: string; s: Suggestion } | undefined
+  private ghostTimer: NodeJS.Timeout | undefined
+  private ghostAbort: AbortController | undefined
   private notice: { jid: string; text: string } | undefined
   private noticeTimer: NodeJS.Timeout | undefined
 
@@ -461,6 +466,8 @@ export class Ui {
       }
       // Apagar numa linha vazia abre a última mensagem minha para a corrigir; Enter envia a edição, Esc desiste.
       if ((k === 'backspace' || k === 'delete') && !this.inputValue && !this.editing && !this.replyTo && !this.reactTo) return this.editLast()
+      // → com o cursor no fim aceita a sugestão do modelo (a correcção, se houver; senão a continuação).
+      if (k === 'right' && this.ghostShown()) return this.acceptGhost()
       if (k === 'enter' || k === 'return') { const v = this.inputValue; this.inputValue = ''; this.cursor = 0; this.stopComposing(); this.updateSuggestions(); this.drawInput(); this.screen.render(); return void this.submit(v) }
       const e = edit(this.inputValue, this.cursor, k, ch, key)
       if (!e) { if (k === 'up') this.moveSelection(-1); return }
@@ -936,6 +943,63 @@ export class Ui {
     if (!same) this.suggestIndex = 0
     if (m) this.suggestStart = at - graphemes(`:${m[2]}`).length
     this.drawSuggestions()
+    this.scheduleGhost()
+  }
+
+  // ---------- sugestões do modelo local ----------
+
+  private cursorAtEnd(): boolean {
+    return this.cursor >= graphemes(this.inputValue).length
+  }
+
+  /** A sugestão guardada ainda vale para o que está escrito e o cursor está no fim: é a que se mostra e se aceita. */
+  private ghostShown(): Suggestion | null {
+    const g = this.ghost
+    return g && g.text === this.inputValue && !this.pickerOpen && this.cursorAtEnd() ? g.s : null
+  }
+
+  /**
+   * Pede ao modelo uma sugestão para o texto actual, 300 ms depois da última tecla e só com o cursor no fim, sem
+   * reacção em curso nem sugestões de emoji abertas. Um pedido novo cancela o anterior; a resposta só se usa se o
+   * texto ainda for o mesmo quando chega.
+   */
+  private scheduleGhost() {
+    if (this.ghost && this.ghost.text !== this.inputValue) this.ghost = undefined
+    if (this.ghostTimer) { clearTimeout(this.ghostTimer); this.ghostTimer = undefined }
+    this.ghostAbort?.abort()
+    this.ghostAbort = undefined
+    const jid = this.current
+    if (!llmEnabled || !jid || this.focus !== 'input' || this.pickerOpen || this.reactTo || this.suggestions.length) return
+    if (!this.cursorAtEnd() || this.inputValue.trim().length < 3 || this.ghost?.text === this.inputValue) return
+    const text = this.inputValue
+    this.ghostTimer = setTimeout(() => {
+      this.ghostTimer = undefined
+      if (text !== this.inputValue) return
+      const abort = new AbortController()
+      this.ghostAbort = abort
+      const context = store.listMessages(jid, 8).filter(r => r.text && r.type !== 'deleted').map(r => ({ who: this.who(r), text: r.text }))
+      suggest(context, text, abort.signal).then(s => {
+        if (abort.signal.aborted || text !== this.inputValue || !s) return
+        this.ghost = { text, s }
+        this.drawInput()
+        this.screen.render()
+      }, e => { if (!abort.signal.aborted) logger.debug({ e }, 'llm') })
+    }, 300)
+  }
+
+  private acceptGhost() {
+    const s = this.ghostShown()
+    if (!s) return
+    const loc = s.fix ? locateWord(this.inputValue, s.fix.from) : null
+    if (s.fix && loc) this.inputValue = this.inputValue.slice(0, loc.start) + s.fix.to + this.inputValue.slice(loc.end)
+    else if (s.next) this.inputValue += s.next
+    else return
+    this.cursor = graphemes(this.inputValue).length
+    this.ghost = undefined
+    this.promoteActive()
+    this.updateSuggestions()
+    this.drawInput()
+    this.screen.render()
   }
 
   private drawSuggestions() {
@@ -972,11 +1036,16 @@ export class Ui {
     // linha diz a que mensagem, e sobra uma para o texto.
     const w = num(this.input.width) - num(this.input.iwidth) - 1
     const target = this.pickerOpen ? null : this.replyTo ?? this.reactTo ?? this.editing
-    const header = !target ? null : this.editing
+    let header = !target ? null : this.editing
       ? `✎ editar: ${this.snippet(target)} · Enter envia, Esc desiste`
       : this.replyTo
         ? `↩ ${this.who(target)}: ${this.snippet(target)}`
         : `reagir a ${this.who(target)}: ${this.snippet(target)} · :código: ou emoji e Enter; Enter vazio retira`
+    // Sugestão do modelo: a correcção vai para o cabeçalho (ou para o fim do que lá estiver); a continuação fica a
+    // cinzento a seguir ao cursor. → aceita.
+    const ghost = this.ghostShown()
+    if (ghost?.fix) header = `${header ? header + ' · ' : ''}${ghost.fix.from} → ${ghost.fix.to} (→ corrige)`
+    const ghostNext = ghost && !ghost.fix ? ghost.next : ''
     this.inputHeader = header != null
     const rowsAvail = header ? 1 : 2
     const width = Math.max(4, w - 2)
@@ -995,7 +1064,9 @@ export class Ui {
     const showCursor = this.focus === 'input' || this.focus === 'picker'
     const render = (line: string[], r: number) => {
       if (!showCursor || r !== row) return esc(line.join(''))
-      return esc(line.slice(0, col).join('')) + '{inverse}' + esc(line[col] ?? ' ') + '{/inverse}' + esc(line.slice(col + 1).join(''))
+      const avail = width - visibleWidth(esc(line.join(''))) - 1
+      const tail = ghostNext && avail >= 2 ? dim(esc(truncate(ghostNext, avail))) : ''
+      return esc(line.slice(0, col).join('')) + '{inverse}' + esc(line[col] ?? ' ') + '{/inverse}' + esc(line.slice(col + 1).join('')) + tail
     }
     const visible = lines.slice(this.inputTop, this.inputTop + rowsAvail)
     // O prompt diz o que a linha faz: ">" escreve, "/" filtra as conversas.
