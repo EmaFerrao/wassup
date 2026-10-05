@@ -100,14 +100,37 @@ export function padEnd(s: string, width: number): string {
 
 const TAG_RE = /(\{[^}]*\})/
 
+/** Sem etiquetas do blessed nem códigos SGR; `{open}`/`{close}` ficam como um carácter. */
+const stripTags = (s: string) => s.replace(/\x1b\[[\d;]*m/g, '').replace(/\{[^}]*\}/g, m => (m === '{open}' || m === '{close}' ? 'x' : ''))
+
 /** Largura visível de uma linha com etiquetas do blessed: as etiquetas não ocupam células, `{open}`/`{close}` ocupam uma. */
 export function visibleWidth(s: string): number {
-  return strWidth(s.replace(/\x1b\[[\d;]*m/g, '').replace(/\{[^}]*\}/g, m => (m === '{open}' || m === '{close}' ? 'x' : '')))
+  return strWidth(stripTags(s))
 }
 
 /**
- * Parte uma linha com etiquetas em linhas de largura visível ≤ `width`, por palavras (ou por caracteres quando a
- * palavra não cabe). As etiquetas ficam onde estavam; o blessed mantém o estado delas entre linhas.
+ * Largura de texto sem etiquetas tal como o blessed a conta ao decidir se parte a linha: em unidades UTF-16, com a
+ * marca que ele mete na segunda célula de cada carácter largo. Um emoji fora do plano básico (par de substituição)
+ * ou um pictograma com o selector de variação U+FE0F conta assim uma a mais do que as células que ocupa. Partir e
+ * alinhar por esta medida é o que evita que o blessed volte a partir a linha e atire a última palavra para a
+ * linha seguinte.
+ */
+function wrapUnits(plain: string): number {
+  let extra = 0
+  for (const c of plain) if (c.codePointAt(0)! > 0xffff) extra++
+  extra += plain.match(/\p{Extended_Pictographic}\uFE0F/gu)?.length ?? 0
+  return strWidth(plain) + extra
+}
+
+/** `wrapUnits` de uma linha com etiquetas. */
+export function wrapWidth(s: string): number {
+  return wrapUnits(stripTags(s))
+}
+
+/**
+ * Parte uma linha com etiquetas em linhas de largura ≤ `width`, por palavras (ou por caracteres quando a palavra não
+ * cabe), medida como o blessed a mede (`wrapUnits`). As etiquetas ficam onde estavam; o blessed mantém o estado
+ * delas entre linhas.
  */
 export function wrapTagged(s: string, width: number): string[] {
   const lines: string[] = []
@@ -117,7 +140,7 @@ export function wrapTagged(s: string, width: number): string[] {
     if (curW + w <= width) { cur += piece; curW += w; return }
     if (w <= width) { newline(); cur = piece; curW = w; return }
     for (const ch of piece) {
-      const cw = strWidth(ch)
+      const cw = wrapUnits(ch)
       if (curW + cw > width) newline()
       cur += ch; curW += cw
     }
@@ -132,7 +155,7 @@ export function wrapTagged(s: string, width: number): string[] {
     for (const piece of tok.split(/(\s+)/)) {
       if (!piece) continue
       if (/^\s+$/.test(piece)) { if (curW + piece.length <= width) { cur += piece; curW += piece.length } else newline(); continue }
-      emit(piece, strWidth(piece))
+      emit(piece, wrapUnits(piece))
     }
   }
   if (cur || !lines.length) lines.push(cur.replace(/\s+$/, ''))
@@ -153,7 +176,7 @@ export function graphemes(s: string): string[] {
 export function wrapChars(chars: string[], width: number): string[][] {
   const lines: string[][] = [[]]
   let curW = 0
-  const cw = (c: string) => visibleWidth(esc(c))
+  const cw = (c: string) => wrapWidth(esc(c))
   const push = (ch: string, w: number) => {
     if (curW > 0 && curW + w > width) { lines.push([]); curW = 0 }
     lines[lines.length - 1]!.push(ch); curW += w
@@ -168,8 +191,9 @@ export function wrapChars(chars: string[], width: number): string[][] {
   return lines
 }
 
+/** Encosta à direita de `width` colunas, medido como o blessed mede (`wrapWidth`), para ele não partir a linha. */
 export function alignRight(s: string, width: number): string {
-  return ' '.repeat(Math.max(0, width - visibleWidth(s))) + s
+  return ' '.repeat(Math.max(0, width - wrapWidth(s))) + s
 }
 
 /** Para comparar sem acentos nem maiúsculas: "Ferrão" e "ferrao" casam. */
