@@ -29,7 +29,7 @@ escuros conforme o caso, o tab activo fica branco vivo ou preto, e a mensagem se
 afastado do fundo real. Se o terminal não responder, assume-se escuro e o cinzento é médio.
 
 - **Tabs**: um por conversa aberta, com o número de não lidas a vermelho e um `×` para fechar. Clique no nome activa,
-  clique no `×` fecha. Ctrl-W fecha o tab activo; Tab e Shift-Tab percorrem os tabs e, a seguir ao último, as "conversas", que Ctrl-T também abre; Ctrl-N e Ctrl-P também mudam de tab. Com as "conversas" abertas
+  clique no `×` fecha. Ctrl-W fecha o tab activo; Shift-Tab e Ctrl-Tab percorrem os tabs e, a seguir ao último, as "conversas", que Ctrl-T também abre; Ctrl-Shift-Tab vai no sentido contrário (Ctrl-Tab só em terminais com o protocolo de teclado do Kitty); Ctrl-N e Ctrl-P também mudam de tab. Com as "conversas" abertas
   nenhum tab fica realçado. Mensagens novas numa conversa sem tab abrem um tab no fim,
   sem o activar nem reordenar os outros. Os tabs abertos e o activo ficam guardados e voltam no arranque seguinte.
 - **Conversas**: a lista de conversas, com as mais recentes em baixo, mostrando o nome, as não lidas, um `·`
@@ -72,7 +72,8 @@ endereços a azul. Ao enviar, escreve-se a marcação tal como no telemóvel.
 Códigos `:nome:` na linha de escrita são trocados por emojis assim que se fecha o segundo `:`, com nomes em português de Portugal, sem
 acentos, e em inglês: `:fixe:` ou `:thumbsup:` 👍, `:gargalhada:` 😂, `:beijinho:` 😘, `:coracao:` ❤️, `:fogo:` 🔥,
 `:certo:` ✅, `:bica:` ☕, `:imperial:` 🍺, `:galo:` 🐓, `:autocarro:` 🚌, `:telemovel:` 📱, `:portugal:` 🇵🇹 … A lista
-completa está em `src/emoji.ts`. Os smileys clássicos também são convertidos quando isolados por espaços: `:)` 🙂,
+completa está em `src/emoji.ts`. Tab a seguir a um `:prefixo` põe logo o primeiro emoji cujo nome começa assim, e Tab
+outra vez passa ao seguinte. Os smileys clássicos também são convertidos quando isolados por espaços: `:)` 🙂,
 `:-D` 😃, `:(` 🙁, `;)` 😉, `:P` 😛, `:*` 😘, `:O` 😮, `:'(` 😢, `:/` 😕, `<3` ❤️, `xD` 😆, `B)` 😎 … Um `:/` dentro de
 `http://` fica intacto. Emojis escritos directamente pelo teclado também funcionam.
 

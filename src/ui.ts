@@ -11,7 +11,7 @@ import { decode, cached, cellSize, halfBlocks, detectImageMode, KittyImages, typ
 import { logger, uiLog } from './log.js'
 import { patchBlessedUnicode } from './unicode.js'
 import type { TermCaps } from './term.js'
-import { emojify } from './emoji.js'
+import { emojify, completeEmoji } from './emoji.js'
 import { enableKittyKeyboard } from './kittykeys.js'
 
 type Focus = 'picker' | 'messages' | 'input'
@@ -41,7 +41,7 @@ interface ClinesBox extends blessed.Widgets.BoxElement {
   childBase: number
 }
 
-const HELP = 'Tab/Shift-Tab muda de tab · Ctrl-T conversas · Ctrl-W fecha tab · Esc fecha · PgUp/PgDn histórico · ↑ ou clique selecciona mensagem, r responde, e reage · :up ficheiro · :down anexos · :fixe: emoji'
+const HELP = 'Shift-Tab/Ctrl-Tab muda de tab · Tab completa :emoji · Ctrl-T conversas · Ctrl-W fecha tab · Esc fecha · PgUp/PgDn histórico · ↑ ou clique selecciona mensagem, r responde, e reage · :up ficheiro · :down anexos · :fixe: emoji'
 
 // Cores do tema do terminal, nunca assumidas: texto e fundo por omissão e as 16 nomeadas, que o tema garante
 // legíveis sobre o seu fundo. Os avisos passageiros são discretos; só a espera do QR e as quebras de ligação se
@@ -110,6 +110,8 @@ export class Ui {
   private pickerFilterShown: string | undefined
   private focus: Focus = 'input'
   private inputValue = ''
+  /** Última conclusão de emoji pelo Tab: o texto e cursor que deixou, as opções e a escolhida, para o Tab seguinte rodar. */
+  private completion: { value: string; cursor: number; start: number; options: { emoji: string; name: string }[]; index: number } | undefined
   /** Posição do cursor na escrita e no filtro das conversas, em grafemas. */
   private cursor = 0
   private filterCursor = 0
@@ -347,11 +349,12 @@ export class Ui {
     }
     if (k === 'pageup') { this.msgBox.scroll(-(this.innerHeight() - 1)); return this.screen.render() }
     if (k === 'pagedown') { this.msgBox.scroll(this.innerHeight() - 1); return this.screen.render() }
-    // Tab e Shift-Tab percorrem a barra: cada tab por ordem e, no fim, o escolhedor de conversas.
-    if (k === 'tab' || k === 'S-tab') {
+    // Shift-Tab e Ctrl-Tab percorrem a barra: cada tab por ordem e, no fim, o escolhedor de conversas; Ctrl-Shift-Tab
+    // vai no sentido contrário. Ctrl-Tab só chega com o protocolo de teclado do Kitty. O Tab é da escrita (emojis).
+    if (k === 'S-tab' || k === 'C-tab' || k === 'C-S-tab') {
       const n = this.tabs.length
       const pos = this.pickerOpen ? n : this.active
-      const next = (pos + (k === 'tab' ? 1 : -1) + n + 1) % (n + 1)
+      const next = (pos + (k === 'C-S-tab' ? -1 : 1) + n + 1) % (n + 1)
       if (next === n) this.openPicker()
       else this.activateTab(next)
       return
@@ -369,6 +372,7 @@ export class Ui {
     if (this.focus === 'input') {
       // "/" com a escrita vazia abre logo as conversas; o que se escrever a seguir filtra a lista.
       if (ch === '/' && !this.inputValue) return this.openPicker()
+      if (k === 'tab') return this.completeEmoji()
       if (k === 'enter' || k === 'return') { const v = this.inputValue; this.inputValue = ''; this.cursor = 0; this.drawInput(); this.screen.render(); return void this.submit(v) }
       const e = edit(this.inputValue, this.cursor, k, ch, key)
       if (!e) { if (k === 'up') this.moveSelection(-1); return }
@@ -430,6 +434,35 @@ export class Ui {
 
   private snippet(row: MessageRow): string {
     return row.text.split('\n')[0] || `[${row.type}]`
+  }
+
+  /**
+   * Tab na escrita: o `:prefixo` imediatamente antes do cursor dá lugar ao primeiro emoji cujo nome começa assim; Tab
+   * outra vez, sem mexer no texto, passa ao seguinte. Sem prefixo, ou sem emoji que case, não faz nada.
+   */
+  private completeEmoji() {
+    const chars = graphemes(this.inputValue)
+    const at = Math.min(this.cursor, chars.length)
+    const c = this.completion
+    let start: number, options: { emoji: string; name: string }[], index: number
+    if (c && c.value === this.inputValue && c.cursor === at) {
+      ({ start, options } = c); index = (c.index + 1) % options.length
+    } else {
+      const m = /(^|[^\w:]):([a-z0-9_+-]+)$/i.exec(chars.slice(0, at).join(''))
+      if (!m) return
+      options = completeEmoji(m[2]!)
+      if (!options.length) return
+      start = at - graphemes(`:${m[2]}`).length
+      index = 0
+    }
+    const o = options[index]!
+    const before = chars.slice(0, start)
+    this.inputValue = before.join('') + o.emoji + chars.slice(at).join('')
+    this.cursor = before.length + 1
+    this.completion = { value: this.inputValue, cursor: this.cursor, start, options, index }
+    this.flash(`:${o.name}:${options.length > 1 ? ` ${index + 1}/${options.length}` : ''}`)
+    this.drawInput()
+    this.screen.render()
   }
 
   private async submit(v: string) {
