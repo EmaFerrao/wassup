@@ -209,7 +209,7 @@ export class Ui {
     this.toast = blessed.box({ parent: this.screen, top: '100%-2', left: 0, width: 1, height: 1, tags: true, hidden: true })
     // Sugestões de emoji, por cima da escrita e sobre as mensagens, com o fundo do realce para se destacar.
     this.suggest = blessed.box({
-      parent: this.screen, top: '100%-4', left: 0, width: 1, height: 1, tags: true, hidden: true, padding: { left: 1, right: 1 },
+      parent: this.screen, top: '100%-4', left: 0, width: 1, height: 1, tags: true, hidden: true, padding: { left: 1, right: 1 }, wrap: false,
       style: { bg: this.selectedBg } as unknown as blessed.Widgets.Types.TStyle,
     })
 
@@ -853,7 +853,8 @@ export class Ui {
     const lines = this.suggestions.map((o, i) => i === this.suggestIndex
       ? `{bold}› ${esc(o.emoji)}  :${esc(o.name)}:{/bold}`
       : `  ${esc(o.emoji)}  :${esc(o.name)}:`)
-    this.suggest.width = Math.max(...lines.map(visibleWidth)) + 2
+    // Uma coluna a mais além do padding: o blessed parte a linha se a etiqueta de fecho cair na última coluna.
+    this.suggest.width = Math.max(...lines.map(visibleWidth)) + 3
     this.suggest.height = lines.length
     this.suggest.top = `100%-${3 + lines.length}`
     this.suggest.setContent(lines.join('\n'))
