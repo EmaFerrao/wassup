@@ -29,8 +29,8 @@ um pouco mais claros que ela num tema escuro, ou um pouco mais escuros num tema 
 usam tons claros ou escuros conforme o caso. Se o terminal não responder, fica tudo no fundo por omissão.
 
 - **Tabs**: um por conversa aberta, com o número de não lidas a vermelho e um `×` para fechar. Clique no nome activa,
-  clique no `×` fecha. Ctrl-W fecha o tab activo; Tab e Shift-Tab percorrem os tabs e, a seguir ao último, as "conversas", que Ctrl-T também abre; Ctrl-N e Ctrl-P também mudam de tab. O tab "conversas", com a soma das
-  não lidas das conversas sem tab, só aparece enquanto essa lista está aberta. Mensagens novas numa conversa sem tab abrem um tab no fim,
+  clique no `×` fecha. Ctrl-W fecha o tab activo; Tab e Shift-Tab percorrem os tabs e, a seguir ao último, as "conversas", que Ctrl-T também abre; Ctrl-N e Ctrl-P também mudam de tab. Com as "conversas" abertas
+  nenhum tab fica realçado. Mensagens novas numa conversa sem tab abrem um tab no fim,
   sem o activar nem reordenar os outros. Os tabs abertos e o activo ficam guardados e voltam no arranque seguinte.
 - **Conversas**: a lista de conversas, com as mais recentes em baixo, mostrando o nome, as não lidas, um `·`
   nas que já têm tab e um excerto da última mensagem. O que se escreve vai para a linha do prompt e filtra a lista, sem
@@ -57,7 +57,7 @@ usam tons claros ou escuros conforme o caso. Se o terminal não responder, fica 
 |---|---|
 | `:up caminho [legenda]` | Envia ficheiro (imagens como imagem, mp4 como vídeo, o resto como documento) |
 | `:down` | Copia todos os anexos da conversa para `~/Downloads/wa/<conversa>/` |
-| `/texto` | Abre o escolhedor de conversas já filtrado |
+| `/` | Abre o escolhedor de conversas; o que se escreve a seguir filtra a lista |
 
 ### Formatação e emojis
 

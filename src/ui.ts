@@ -30,7 +30,7 @@ function pidAlive(pid: number): boolean {
 }
 
 /** Um troço da barra de tabs: a que tab corresponde e onde está o seu × (ou se é o +). */
-interface TabSegment { x0: number; x1: number; index: number; closeX0: number; closeX1: number; plus?: boolean }
+interface TabSegment { x0: number; x1: number; index: number; closeX0: number; closeX1: number }
 
 const num = (x: unknown): number => x as number
 
@@ -223,7 +223,6 @@ export class Ui {
       const seg = this.segments.find(s => x >= s.x0 && x < s.x1)
       uiLog.info({ x, seg }, 'clique na barra de tabs')
       if (!seg) return
-      if (seg.plus) return this.openPicker()
       if (x >= seg.closeX0 && x < seg.closeX1) return this.closeTab(seg.index)
       this.activateTab(seg.index)
     })
@@ -339,7 +338,7 @@ export class Ui {
     }
     if (k === 'pageup') { this.msgBox.scroll(-(this.innerHeight() - 1)); return this.screen.render() }
     if (k === 'pagedown') { this.msgBox.scroll(this.innerHeight() - 1); return this.screen.render() }
-    // Tab e Shift-Tab percorrem a barra: cada tab por ordem e, no fim, o + (o escolhedor de conversa nova).
+    // Tab e Shift-Tab percorrem a barra: cada tab por ordem e, no fim, o escolhedor de conversas.
     if (k === 'tab' || k === 'S-tab') {
       const n = this.tabs.length
       const pos = this.pickerOpen ? n : this.active
@@ -359,6 +358,8 @@ export class Ui {
       return this.screen.render()
     }
     if (this.focus === 'input') {
+      // "/" com a escrita vazia abre logo as conversas; o que se escrever a seguir filtra a lista.
+      if (ch === '/' && !this.inputValue) return this.openPicker()
       if (k === 'enter' || k === 'return') { const v = this.inputValue; this.inputValue = ''; this.cursor = 0; this.drawInput(); this.screen.render(); return void this.submit(v) }
       const e = edit(this.inputValue, this.cursor, k, ch, key)
       if (!e) return
@@ -490,11 +491,7 @@ export class Ui {
 
   private drawTabs() {
     const width = num(this.tabsBar.width)
-    // O último tab é "conversas", com a soma das não lidas das conversas sem tab aberto.
-    const others = store.listChats().filter(c => !c.archived && !this.tabs.includes(c.jid)).reduce((sum, c) => sum + c.unread, 0)
-    const othersBadge = others > 0 ? `(${others})` : ''
-    const plus = ` conversas${othersBadge ? ' ' + othersBadge : ''} `
-    const maxName = Math.max(0, width - (this.pickerOpen ? strWidth(plus) : 0))
+    const maxName = width
     const tabs = this.tabs.map((jid, i) => {
       const unread = store.getChat(jid)?.unread ?? 0
       return { jid, i, name: chatName(jid), badge: unread > 0 ? `(${unread})` : '' }
@@ -519,13 +516,6 @@ export class Ui {
         ? `{${activeBg}-bg}{bold} ${esc(name)}{/bold}${badge} {${FG.tabDim}-fg}×{/${FG.tabDim}-fg} {/${activeBg}-bg}`
         : `{${FG.tab}-fg} ${esc(name)}${badge} {${FG.tabDim}-fg}×{/${FG.tabDim}-fg}{/${FG.tab}-fg}{${FG.separator}-fg}│{/${FG.separator}-fg}`
       x += w
-    }
-    // O tab "conversas" só existe enquanto o escolhedor está aberto; volta-se a ele com Esc, Tab ou Ctrl-T.
-    if (this.pickerOpen) {
-      this.segments.push({ x0: x, x1: x + strWidth(plus), index: -1, closeX0: 0, closeX1: 0, plus: true })
-      const plusText = ` conversas${othersBadge ? ` {${FG.badge}-fg}{bold}${othersBadge}{/bold}{/${FG.badge}-fg}` : ''} `
-      out += `{${activeBg}-bg}{bold}${plusText}{/bold}{/${activeBg}-bg}`
-      x += strWidth(plus)
     }
     // Estado encostado à direita: a mensagem passageira (amarela) ou a ligação; cortado se não couber.
     // Ligado não se anuncia: só avisos passageiros e os estados que pedem atenção (QR, ligação caída).
