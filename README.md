@@ -22,11 +22,10 @@ Mensagens a toda a largura, duas linhas de escrita com o prompt `>`, e no fundo 
 ligação e os avisos encostados à direita. Painéis distinguidos pelo fundo, sem molduras; o painel activo fica um tom mais claro.
 
 - **Tabs**: um por conversa aberta, com o número de não lidas a vermelho e um `×` para fechar. Clique no nome activa,
-  clique no `×` fecha. Ctrl-W fecha o tab activo; Tab e Shift-Tab percorrem os tabs e, a seguir ao último, as "outras
-  conversas", que Ctrl-T também abre; Ctrl-N e Ctrl-P também mudam de tab. O tab "outras conversas", com a soma das
+  clique no `×` fecha. Ctrl-W fecha o tab activo; Tab e Shift-Tab percorrem os tabs e, a seguir ao último, as "conversas", que Ctrl-T também abre; Ctrl-N e Ctrl-P também mudam de tab. O tab "conversas", com a soma das
   não lidas das conversas sem tab, só aparece enquanto essa lista está aberta. Mensagens novas numa conversa sem tab abrem um tab no fim,
   sem o activar nem reordenar os outros. Os tabs abertos e o activo ficam guardados e voltam no arranque seguinte.
-- **Outras conversas**: a lista de conversas, com as mais recentes em baixo, mostrando o nome, as não lidas, um `·`
+- **Conversas**: a lista de conversas, com as mais recentes em baixo, mostrando o nome, as não lidas, um `·`
   nas que já têm tab e um excerto da última mensagem. O que se escreve vai para a linha do prompt e filtra a lista, sem
   acentos nem maiúsculas; setas, Enter ou clique abrem a conversa num tab e activam-no; Esc limpa o filtro e depois
   fecha a lista.
@@ -35,9 +34,8 @@ ligação e os avisos encostados à direita. Painéis distinguidos pelo fundo, s
 - **Escrita**: duas linhas, texto partido por palavras; Enter envia. Setas, Home e End movem o cursor, e um clique
   põe-no onde se clicou; Backspace e Delete apagam para trás e para a frente, Ctrl-U limpa a linha e Shift-Backspace
   apaga a palavra anterior (só em terminais com o protocolo de teclado do Kitty: Kitty, Ghostty, foot, WezTerm). O mesmo
-  vale para o filtro das "outras conversas". Clique num painel activa-o; `i` no painel de mensagens volta à escrita.
-- Esc fecha, por ordem: o filtro do escolhedor, o escolhedor, o tab activo. Fechar o último tab leva às "outras
-  conversas"; Esc aí, sem tabs abertos, sai do programa. Ctrl-C e `:q` saem logo.
+  vale para o filtro das "conversas". Clique num painel activa-o; `i` no painel de mensagens volta à escrita.
+- Esc fecha, por ordem: o filtro do escolhedor, o escolhedor, o tab activo. Fechar o último tab leva às "conversas"; Esc aí, sem tabs abertos, sai do programa. Ctrl-C sai logo.
 - Mensagens novas noutra conversa fazem soar a campainha do terminal e aparecem à direita na barra de tabs; abrir ou activar
   o tab marca-as como lidas.
 - **Vários terminais**: podes abrir o `wa` em quantos terminais quiseres. O primeiro processo é o servidor, com a
@@ -53,8 +51,6 @@ ligação e os avisos encostados à direita. Painéis distinguidos pelo fundo, s
 | `:up caminho [legenda]` | Envia ficheiro (imagens como imagem, mp4 como vídeo, o resto como documento) |
 | `:down` | Copia todos os anexos da conversa para `~/Downloads/wa/<conversa>/` |
 | `/texto` | Abre o escolhedor de conversas já filtrado |
-| `:help` | Mostra os atalhos na barra de estado |
-| `:q` | Sai |
 
 ### Formatação e emojis
 

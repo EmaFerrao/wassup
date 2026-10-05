@@ -41,10 +41,10 @@ interface ClinesBox extends blessed.Widgets.BoxElement {
   childBase: number
 }
 
-const HELP = 'Tab/Shift-Tab muda de tab · Ctrl-T outras conversas · Ctrl-W fecha tab · Esc fecha · PgUp/PgDn histórico · :up ficheiro · :down anexos · :fixe: emoji'
+const HELP = 'Tab/Shift-Tab muda de tab · Ctrl-T conversas · Ctrl-W fecha tab · Esc fecha · PgUp/PgDn histórico · :up ficheiro · :down anexos · :fixe: emoji'
 
 // Cores por índice da paleta de 256: o blessed aproxima qualquer cor hexadecimal às 16 básicas.
-// Esquema de cores, por índice da paleta de 256. Barra de tabs e "outras conversas" em preto; o tab activo tem o fundo
+// Esquema de cores, por índice da paleta de 256. Barra de tabs e "conversas" em preto; o tab activo tem o fundo
 // da escrita, ligeiramente mais claro, e fica ligado a ela; os inactivos ficam no preto com texto claro e separadores.
 const BG = { bar: 16, messages: 233, messagesFocus: 234, input: 234, inputFocus: 235, picker: 16, pickerFocus: 16 }
 // Os avisos passageiros são discretos; só a espera do QR e as quebras de ligação se destacam. Ligado não se mostra.
@@ -88,7 +88,7 @@ export class Ui {
   private pickerFilterShown: string | undefined
   private focus: Focus = 'input'
   private inputValue = ''
-  /** Posição do cursor na escrita e no filtro das outras conversas, em grafemas. */
+  /** Posição do cursor na escrita e no filtro das conversas, em grafemas. */
   private cursor = 0
   private filterCursor = 0
   /** Disposição da escrita no último desenho, para mapear cliques: linhas de grafemas e a primeira linha visível. */
@@ -347,10 +347,8 @@ export class Ui {
   private async submit(v: string) {
     const text = emojify(v.trim())
     if (!text) return
-    if (text === ':q' || text === ':quit') return this.quit()
-    if (text === ':help' || text === ':h') return this.flash(HELP, 15000)
     if (text.startsWith('/')) return this.openPicker(text.slice(1).trim())
-    if (!this.current) return this.flash('abre primeiro uma conversa (Ctrl-T ou "outras conversas")')
+    if (!this.current) return this.flash('abre primeiro uma conversa (Ctrl-T ou "conversas")')
     if (this.wa.state !== 'open') return this.flash('sem ligação ao WhatsApp; espera pelo ● verde')
     const jid = this.current
     // Ao enviar, o painel vai para o fundo para mostrar a mensagem nova, mesmo que estivesse a ver o histórico.
@@ -447,7 +445,7 @@ export class Ui {
     this.wa.markRead(jid).catch(e => logger.warn({ e }, 'markRead'))
   }
 
-  /** Fecha o tab; se era o activo passa para o da direita, ou o da esquerda, ou para as "outras conversas". */
+  /** Fecha o tab; se era o activo passa para o da direita, ou o da esquerda, ou para as "conversas". */
   private closeTab(i: number) {
     if (!this.tabs[i]) return
     uiLog.info({ jid: this.tabs[i], index: i }, 'fechar tab')
@@ -459,17 +457,17 @@ export class Ui {
     this.lineMap = []; this.images = []
     this.saveTabs()
     this.renderNow()
-    // Sem tabs, o renderNow abre as "outras conversas"; sair fica para o Esc aí.
+    // Sem tabs, o renderNow abre as "conversas"; sair fica para o Esc aí.
     const jid = this.current
     if (jid) this.wa.markRead(jid).catch(e => logger.warn({ e }, 'markRead'))
   }
 
   private drawTabs() {
     const width = num(this.tabsBar.width)
-    // O último tab é "outras conversas", com a soma das não lidas das conversas sem tab aberto.
+    // O último tab é "conversas", com a soma das não lidas das conversas sem tab aberto.
     const others = store.listChats().filter(c => !c.archived && !this.tabs.includes(c.jid)).reduce((sum, c) => sum + c.unread, 0)
     const othersBadge = others > 0 ? `(${others})` : ''
-    const plus = ` outras conversas${othersBadge ? ' ' + othersBadge : ''} `
+    const plus = ` conversas${othersBadge ? ' ' + othersBadge : ''} `
     const maxName = Math.max(0, width - (this.pickerOpen ? strWidth(plus) : 0))
     const tabs = this.tabs.map((jid, i) => {
       const unread = store.getChat(jid)?.unread ?? 0
@@ -496,10 +494,10 @@ export class Ui {
         : `{${FG.tab}-fg} ${esc(name)}${badge} {${FG.tabDim}-fg}×{/${FG.tabDim}-fg}{/${FG.tab}-fg}{${FG.separator}-fg}│{/${FG.separator}-fg}`
       x += w
     }
-    // O tab "outras conversas" só existe enquanto o escolhedor está aberto; volta-se a ele com Esc, Tab ou Ctrl-T.
+    // O tab "conversas" só existe enquanto o escolhedor está aberto; volta-se a ele com Esc, Tab ou Ctrl-T.
     if (this.pickerOpen) {
       this.segments.push({ x0: x, x1: x + strWidth(plus), index: -1, closeX0: 0, closeX1: 0, plus: true })
-      const plusText = ` outras conversas${othersBadge ? ` {${FG.badge}-fg}{bold}${othersBadge}{/bold}{/${FG.badge}-fg}` : ''} `
+      const plusText = ` conversas${othersBadge ? ` {${FG.badge}-fg}{bold}${othersBadge}{/bold}{/${FG.badge}-fg}` : ''} `
       out += `{${activeBg}-bg}{white-fg}{bold}${plusText}{/bold}{/white-fg}{/${activeBg}-bg}`
       x += strWidth(plus)
     }
@@ -642,7 +640,7 @@ export class Ui {
   private drawInput() {
     // Duas linhas, prompt ">" na primeira, texto partido por palavras (nunca a meio de uma) e continuação indentada.
     // Com mais de duas linhas mostram-se as duas à volta do cursor, que fica na de baixo sempre que possível. Com as
-    // "outras conversas" abertas, a mesma linha serve para escrever o filtro.
+    // "conversas" abertas, a mesma linha serve para escrever o filtro.
     const w = num(this.input.width) - num(this.input.iwidth) - 1
     const width = Math.max(4, w - 2)
     const chars = graphemes(this.pickerOpen ? this.filter : this.inputValue)
