@@ -10,7 +10,7 @@ import { decode, cached, cellSize, halfBlocks, detectImageMode, KittyImages, typ
 import { logger, uiLog } from './log.js'
 import { patchBlessedUnicode } from './unicode.js'
 import type { TermCaps } from './term.js'
-import { emojify } from './emoji.js'
+import { emojify, completeEmoji } from './emoji.js'
 import { enableKittyKeyboard } from './kittykeys.js'
 
 type Focus = 'picker' | 'messages' | 'input'
@@ -100,6 +100,11 @@ export class Ui {
   private picker: blessed.Widgets.ListElement
   /** Aviso de mensagem nova noutra conversa: uma linha com fundo, pousada sobre o tab dela na barra. */
   private toast: blessed.Widgets.BoxElement
+  /** Sugestões de emoji para o :prefixo antes do cursor: a caixa por cima da escrita, as opções, a escolhida e onde o prefixo começa. */
+  private suggest: blessed.Widgets.BoxElement
+  private suggestions: { emoji: string; name: string }[] = []
+  private suggestIndex = 0
+  private suggestStart = 0
   private notice: { jid: string; text: string } | undefined
   private noticeTimer: NodeJS.Timeout | undefined
 
@@ -181,6 +186,11 @@ export class Ui {
     })
     // Por cima da segunda linha da escrita, encostado ao tab da conversa; criado por último para ficar à frente.
     this.toast = blessed.box({ parent: this.screen, top: '100%-2', left: 0, width: 1, height: 1, tags: true, hidden: true })
+    // Sugestões de emoji, por cima da escrita e sobre as mensagens, com o fundo do realce para se destacar.
+    this.suggest = blessed.box({
+      parent: this.screen, top: '100%-4', left: 0, width: 1, height: 1, tags: true, hidden: true, padding: { left: 1, right: 1 },
+      style: { bg: this.selectedBg } as unknown as blessed.Widgets.Types.TStyle,
+    })
 
     // Rato só com cliques e roda (1000) em codificação SGR (1006), em vez do conjunto que o blessed activa para xterm
     // (1000/1002/1003/1005): o relato de movimento (1003) e a codificação UTF-8 (1005) baralham apps de SSH no
@@ -353,6 +363,7 @@ export class Ui {
     // ESC fecha, por ordem: a resposta ou reacção em curso, a selecção, o filtro do escolhedor, o escolhedor, o tab
     // activo, o programa.
     if (k === 'escape') {
+      if (this.suggestions.length) { this.suggestions = []; this.drawSuggestions(); return this.screen.render() }
       if (this.replyTo || this.reactTo) { this.replyTo = this.reactTo = null; this.drawInput(); return this.screen.render() }
       if (this.focus === 'messages') { this.setFocus('input'); return this.renderNow() }
       if (this.pickerOpen) {
@@ -384,12 +395,22 @@ export class Ui {
     if (this.focus === 'input') {
       // "/" com a escrita vazia abre logo as conversas; o que se escrever a seguir filtra a lista.
       if (ch === '/' && !this.inputValue) return this.openPicker()
-      if (k === 'enter' || k === 'return') { const v = this.inputValue; this.inputValue = ''; this.cursor = 0; this.drawInput(); this.screen.render(); return void this.submit(v) }
+      // Com sugestões de emoji abertas, ↑/↓ escolhem e Enter aceita; o resto continua a escrever e refina-as.
+      if (this.suggestions.length) {
+        if (k === 'up' || k === 'down') {
+          this.suggestIndex = (this.suggestIndex + (k === 'up' ? -1 : 1) + this.suggestions.length) % this.suggestions.length
+          this.drawSuggestions()
+          return this.screen.render()
+        }
+        if (k === 'enter' || k === 'return') return this.acceptSuggestion()
+      }
+      if (k === 'enter' || k === 'return') { const v = this.inputValue; this.inputValue = ''; this.cursor = 0; this.updateSuggestions(); this.drawInput(); this.screen.render(); return void this.submit(v) }
       const e = edit(this.inputValue, this.cursor, k, ch, key)
       if (!e) { if (k === 'up') this.moveSelection(-1); return }
       if (e.value !== this.inputValue) this.promoteActive()
       this.inputValue = e.value
       this.cursor = e.cursor
+      this.updateSuggestions()
       this.drawInput()
       return this.screen.render()
     }
@@ -733,6 +754,7 @@ export class Ui {
     uiLog.info({ de: this.focus, para: f }, 'foco')
     this.focus = f
     if (f !== 'messages' && this.selected) { this.selected = null; this.dirtyMessages = true }
+    if (f !== 'input' && this.suggestions.length) { this.suggestions = []; this.drawSuggestions() }
     const w = f === 'picker' ? this.picker : f === 'messages' ? this.msgBox : this.input
     w.focus()
     this.drawInput()
@@ -785,6 +807,47 @@ export class Ui {
     this.dirtyTabs = true
     this.drawTabs()
     this.dirtyTabs = false
+  }
+
+  // ---------- sugestões de emoji ----------
+
+  /** Um `:prefixo` com duas ou mais letras logo antes do cursor abre a lista dos emojis cujo nome começa assim. */
+  private updateSuggestions() {
+    const chars = graphemes(this.inputValue)
+    const at = Math.min(this.cursor, chars.length)
+    const m = /(^|[^\w:]):([a-z0-9_+-]{2,})$/i.exec(chars.slice(0, at).join(''))
+    const options = m ? completeEmoji(m[2]!).slice(0, 5) : []
+    const same = options.length === this.suggestions.length && options.every((o, i) => o.emoji === this.suggestions[i]!.emoji)
+    this.suggestions = options
+    if (!same) this.suggestIndex = 0
+    if (m) this.suggestStart = at - graphemes(`:${m[2]}`).length
+    this.drawSuggestions()
+  }
+
+  private drawSuggestions() {
+    if (!this.suggestions.length) { this.suggest.hide(); return }
+    const lines = this.suggestions.map((o, i) => i === this.suggestIndex
+      ? `{bold}› ${esc(o.emoji)}  :${esc(o.name)}:{/bold}`
+      : `  ${esc(o.emoji)}  :${esc(o.name)}:`)
+    this.suggest.width = Math.max(...lines.map(visibleWidth)) + 2
+    this.suggest.height = lines.length
+    this.suggest.top = `100%-${3 + lines.length}`
+    this.suggest.setContent(lines.join('\n'))
+    this.suggest.show()
+  }
+
+  /** O `:prefixo` dá lugar ao emoji escolhido, seguido de um espaço. */
+  private acceptSuggestion() {
+    const o = this.suggestions[this.suggestIndex]!
+    const chars = graphemes(this.inputValue)
+    const at = Math.min(this.cursor, chars.length)
+    const before = [...chars.slice(0, this.suggestStart), o.emoji, ' ']
+    this.inputValue = before.join('') + chars.slice(at).join('')
+    this.cursor = before.length
+    this.suggestions = []
+    this.drawSuggestions()
+    this.drawInput()
+    return this.screen.render()
   }
 
   private drawInput() {

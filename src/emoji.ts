@@ -257,3 +257,17 @@ export function emojify(text: string): string {
 
 export const emojiCodes = Object.keys(TABLE)
 
+/**
+ * Emojis cujo nome começa por `prefix`, sem repetir o emoji; cada um vem com o primeiro nome que casa, para se
+ * mostrar. Nomes mais curtos primeiro, para o exacto ("fixe") vir antes de um mais longo; empate pela ordem da tabela.
+ */
+export function completeEmoji(prefix: string): { emoji: string; name: string }[] {
+  const p = prefix.toLowerCase()
+  const out: { emoji: string; name: string }[] = []
+  for (const [emoji, pt, en] of EMOJI) {
+    const name = [...pt, ...en].find(n => n.startsWith(p))
+    if (name && !out.some(o => o.emoji === emoji)) out.push({ emoji, name })
+  }
+  return out.map((o, i) => ({ o, i })).sort((a, b) => a.o.name.length - b.o.name.length || a.i - b.i).map(x => x.o)
+}
+
