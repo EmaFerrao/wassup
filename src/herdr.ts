@@ -1,4 +1,5 @@
 import { connect } from 'node:net'
+import { fileURLToPath } from 'node:url'
 import { logger } from './log.js'
 
 /**
@@ -78,6 +79,27 @@ export function titleHerdr(title: string) {
   lastTitle = title
   target ??= findTarget()
   titleQueue = titleQueue.then(async () => { const t = await target; if (t) await rename(t, title) })
+}
+
+/** O lançador `wa` na raiz do projecto, para abrir outra conversa noutro tab do Herdr. */
+const waBin = fileURLToPath(new URL('../wa', import.meta.url))
+
+/**
+ * Abre a conversa num tab novo do Herdr, com foco: a shell do tab recebe `exec wa <jid>`, por isso quando a conversa
+ * se fecha o tab fecha com ela.
+ */
+export async function openChatHerdr(jid: string, name: string) {
+  if (!inHerdr) return
+  const created = await call('tab.create', { workspace_id: env.HERDR_WORKSPACE_ID ?? null, cwd: process.cwd(), focus: true, label: name }) as { root_pane?: { pane_id?: string } } | undefined
+  const paneId = created?.root_pane?.pane_id
+  if (!paneId) return logger.warn({ jid }, 'herdr: tab.create sem pane')
+  await call('pane.send_input', { pane_id: paneId, text: `exec '${waBin}' '${jid}'`, keys: ['enter'] })
+}
+
+/** Passa para o tab do Herdr onde a conversa já está aberta. */
+export function focusTabHerdr(tabId: string) {
+  if (!inHerdr) return
+  void call('tab.focus', { tab_id: tabId })
 }
 
 /** Ao sair tira-se da lista e repõe-se o título; devolve quando os pedidos saíram, para o processo não terminar antes. */

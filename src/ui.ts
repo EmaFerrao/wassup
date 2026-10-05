@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import QRCode from 'qrcode'
 import { store, type ChatRow, type MessageRow, type ReactionRow } from './db.js'
 import { chatName, contactName, thumbPath, jidUser, type ConnState } from './wa.js'
-import { inHerdr, reportHerdr, titleHerdr, releaseHerdr } from './herdr.js'
+import { inHerdr, reportHerdr, titleHerdr, releaseHerdr, openChatHerdr, focusTabHerdr } from './herdr.js'
 import type { Backend } from './backend.js'
 import { waMarkup, esc, colorFor, setTheme, dim, italic, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, wrapWidth, fold, graphemes, wrapChars } from './format.js'
 import { decode, cached, cellSize, halfBlocks, detectImageMode, KittyImages, type Decoded, type ImageMode } from './image.js'
@@ -23,7 +23,7 @@ type Focus = 'picker' | 'messages' | 'input'
 interface ImageSlot { row: MessageRow; origLine: number; cols: number; rows: number; pad: number; path?: string; d?: Decoded }
 
 /** O que cada terminal guarda em `state`: os seus tabs, o processo que os tem e a última interacção. */
-interface TerminalState { tabs: string[]; active: number; pid?: number; lastActive?: number }
+interface TerminalState { tabs: string[]; active: number; pid?: number; lastActive?: number; herdrTab?: string }
 
 function pidAlive(pid: number): boolean {
   try {
@@ -660,7 +660,7 @@ export class Ui {
 
   private saveTabs() {
     this.lastActiveSaved = this.lastActive
-    store.setState(this.tabsKey(), { tabs: this.tabs, active: this.active, pid: process.pid, lastActive: this.lastActive } satisfies TerminalState)
+    store.setState(this.tabsKey(), { tabs: this.tabs, active: this.active, pid: process.pid, lastActive: this.lastActive, herdrTab: process.env.HERDR_TAB_ID } satisfies TerminalState)
   }
 
   /**
@@ -909,6 +909,7 @@ export class Ui {
   }
 
   private findChat(text: string): string | null {
+    if (store.getChat(text)) return text
     const f = fold(text)
     return store.listChats().find(c => fold(chatName(c.jid)).includes(f) || jidUser(c.jid).includes(f))?.jid ?? null
   }
@@ -917,6 +918,14 @@ export class Ui {
     const jid = this.filtered[index]?.jid
     uiLog.info({ index, jid }, 'escolher conversa')
     if (!jid) return
+    // No Herdr cada conversa é um tab dele: a escolhida abre num tab novo, ou passa-se para o tab onde já está.
+    if (inHerdr && jid !== this.current) {
+      this.closePicker()
+      const other = this.otherTerminals().find(t => t.herdrTab && t.tabs.includes(jid))
+      if (other?.herdrTab) focusTabHerdr(other.herdrTab)
+      else openChatHerdr(jid, chatName(jid)).catch(e => logger.warn({ e }, 'herdr: abrir tab'))
+      return
+    }
     // Em conversa única o escolhedor troca a conversa em vez de juntar um tab; o rascunho da anterior fica guardado.
     const prev = this.fixed ? this.current : null
     this.openTab(jid)
