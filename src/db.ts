@@ -152,6 +152,7 @@ const q = {
   setStatus: db.prepare(`UPDATE messages SET status = ? WHERE chat_jid = ? AND id = ?`),
   setType: db.prepare(`UPDATE messages SET type = ?, text = ? WHERE chat_jid = ? AND id = ?`),
   lastMessage: db.prepare(`SELECT * FROM messages WHERE chat_jid = ? ORDER BY ts DESC LIMIT 1`),
+  lastTextFromMe: db.prepare(`SELECT * FROM messages WHERE chat_jid = ? AND from_me = 1 AND type = 'text' ORDER BY ts DESC LIMIT 1`),
   setReaction: db.prepare(`
     INSERT INTO reactions (chat_jid, msg_id, sender_jid, emoji, ts) VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(chat_jid, msg_id, sender_jid) DO UPDATE SET emoji = excluded.emoji, ts = excluded.ts WHERE excluded.ts >= reactions.ts`),
@@ -253,6 +254,10 @@ export const store = {
   },
   lastMessage(chat: string): MessageRow | undefined {
     return q.lastMessage.get(chat) as unknown as MessageRow | undefined
+  },
+  /** A última mensagem de texto minha na conversa: a que o Backspace numa linha vazia abre para editar. */
+  lastTextFromMe(chat: string): MessageRow | undefined {
+    return q.lastTextFromMe.get(chat) as unknown as MessageRow | undefined
   },
 
   /** Reacção de alguém a uma mensagem; emoji vazio retira-a. A mais recente ganha, venha por que ordem vier. */

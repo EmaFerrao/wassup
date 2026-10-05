@@ -149,6 +149,8 @@ export class Ui {
   private rows: MessageRow[] = []
   private selected: MessageRow | null = null
   private replyTo: MessageRow | null = null
+  /** Mensagem minha aberta na escrita para editar (Backspace ou Delete com a linha vazia). */
+  private editing: MessageRow | null = null
   private reactTo: MessageRow | null = null
   private inputHeader = false
   /** Posição no texto desenhado de cada grafema do texto escrito (mais uma, o fim): os emojis de pré-visualização desalinham-nos. */
@@ -389,6 +391,7 @@ export class Ui {
     if (k === 'escape') {
       if (this.suggestions.length) { this.suggestions = []; this.drawSuggestions(); return this.screen.render() }
       if (this.replyTo || this.reactTo) { this.replyTo = this.reactTo = null; this.drawInput(); return this.screen.render() }
+      if (this.editing) { this.editing = null; this.inputValue = ''; this.cursor = 0; this.updateSuggestions(); this.drawInput(); return this.screen.render() }
       if (this.focus === 'messages') { this.setFocus('input'); return this.renderNow() }
       if (this.pickerOpen) {
         if (this.filter) { this.filter = ''; this.filterCursor = 0; this.refreshPicker(); return this.screen.render() }
@@ -428,6 +431,8 @@ export class Ui {
         }
         if (k === 'enter' || k === 'return') return this.acceptSuggestion()
       }
+      // Apagar numa linha vazia abre a última mensagem minha para a corrigir; Enter envia a edição, Esc desiste.
+      if ((k === 'backspace' || k === 'delete') && !this.inputValue && !this.editing && !this.replyTo && !this.reactTo) return this.editLast()
       if (k === 'enter' || k === 'return') { const v = this.inputValue; this.inputValue = ''; this.cursor = 0; this.updateSuggestions(); this.drawInput(); this.screen.render(); return void this.submit(v) }
       const e = edit(this.inputValue, this.cursor, k, ch, key)
       if (!e) { if (k === 'up') this.moveSelection(-1); return }
@@ -488,6 +493,20 @@ export class Ui {
     else if (bottom >= base + h) this.msgBox.scrollTo(bottom - h + 1)
   }
 
+  /** Põe a última mensagem de texto minha na escrita, para a corrigir e reenviar como edição. */
+  private editLast() {
+    const jid = this.current
+    if (!jid) return
+    const row = store.lastTextFromMe(jid)
+    if (!row) return this.flash('não há mensagem tua para editar')
+    this.editing = row
+    this.inputValue = row.text.replace(/\n\(editada\)$/, '')
+    this.cursor = graphemes(this.inputValue).length
+    this.updateSuggestions()
+    this.drawInput()
+    this.screen.render()
+  }
+
   private who(row: MessageRow): string {
     return row.from_me ? 'eu' : row.chat_jid.endsWith('@g.us') ? contactName(row.sender_jid) : chatName(row.chat_jid)
   }
@@ -512,6 +531,22 @@ export class Ui {
         if (!emoji) this.flash('reacção retirada')
       } catch (e) {
         logger.error({ e }, 'react')
+        this.flash(`erro: ${(e as Error).message}`, 10000)
+      }
+      return
+    }
+    // Edição em curso: o texto substitui o da mensagem aberta; vazio não envia nada e a edição fica aberta.
+    const editing = this.editing
+    if (editing) {
+      if (!text) { this.drawInput(); return this.screen.render() }
+      this.editing = null
+      this.drawInput()
+      this.screen.render()
+      if (this.wa.state !== 'open') return this.flash('sem ligação ao WhatsApp; espera pelo ● verde')
+      try {
+        await this.wa.edit(editing.chat_jid, editing.id, text)
+      } catch (e) {
+        logger.error({ e }, 'edit')
         this.flash(`erro: ${(e as Error).message}`, 10000)
       }
       return
@@ -601,7 +636,7 @@ export class Ui {
   private activateTab(i: number) {
     const jid = this.tabs[i]
     if (!jid) return
-    if (i !== this.active) { this.active = i; this.atBottom = true; this.dirtyMessages = true; this.selected = this.replyTo = this.reactTo = null }
+    if (i !== this.active) { this.active = i; this.atBottom = true; this.dirtyMessages = true; this.selected = this.replyTo = this.reactTo = null; if (this.editing) { this.editing = null; this.inputValue = ''; this.cursor = 0; this.updateSuggestions() } }
     if (this.notice?.jid === jid) this.notice = undefined
     this.dirtyTabs = true
     this.saveTabs()
@@ -881,10 +916,12 @@ export class Ui {
     // "conversas" abertas, a mesma linha serve para escrever o filtro. A responder ou a reagir, a primeira
     // linha diz a que mensagem, e sobra uma para o texto.
     const w = num(this.input.width) - num(this.input.iwidth) - 1
-    const target = this.pickerOpen ? null : this.replyTo ?? this.reactTo
-    const header = !target ? null : this.replyTo
-      ? `↩ ${this.who(target)}: ${this.snippet(target)}`
-      : `reagir a ${this.who(target)}: ${this.snippet(target)} · :código: ou emoji e Enter; Enter vazio retira`
+    const target = this.pickerOpen ? null : this.replyTo ?? this.reactTo ?? this.editing
+    const header = !target ? null : this.editing
+      ? `✎ editar: ${this.snippet(target)} · Enter envia, Esc desiste`
+      : this.replyTo
+        ? `↩ ${this.who(target)}: ${this.snippet(target)}`
+        : `reagir a ${this.who(target)}: ${this.snippet(target)} · :código: ou emoji e Enter; Enter vazio retira`
     this.inputHeader = header != null
     const rowsAvail = header ? 1 : 2
     const width = Math.max(4, w - 2)

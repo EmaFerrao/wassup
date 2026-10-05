@@ -526,6 +526,16 @@ export class Wa extends EventEmitter<WaEvents> {
     if (sent && storeReaction(sent, this.me)) this.emit('messages', chatJid)
   }
 
+  /** Substitui o texto de uma mensagem minha; na base fica marcada como as edições que chegam dos outros. */
+  async edit(chatJid: string, msgId: string, text: string) {
+    const target = this.rawMessage(chatJid, msgId)
+    if (!target?.key.fromMe) throw new Error('só podes editar mensagens tuas')
+    await this.sock!.sendMessage(chatJid, { text, edit: target.key })
+    store.setType(chatJid, msgId, 'text', `${text}\n(editada)`)
+    this.emit('messages', chatJid)
+    this.emit('chats')
+  }
+
   private rawMessage(chatJid: string, id: string): WAMessage | undefined {
     const row = store.getMessage(chatJid, id)
     return row ? (JSON.parse(row.raw, BufferJSON.reviver) as WAMessage) : undefined

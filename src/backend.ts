@@ -12,6 +12,7 @@ export interface Backend extends EventEmitter<WaEvents> {
   readonly qr: string | undefined
   send(chatJid: string, text: string, replyTo?: string): Promise<void>
   react(chatJid: string, msgId: string, emoji: string): Promise<void>
+  edit(chatJid: string, msgId: string, text: string): Promise<void>
   sendFile(chatJid: string, filePath: string, caption?: string): Promise<void>
   markRead(chatJid: string): Promise<void>
   subscribePresence(chatJid: string): void
