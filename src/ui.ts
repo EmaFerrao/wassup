@@ -362,6 +362,7 @@ export class Ui {
       if (k === 'enter' || k === 'return') { const v = this.inputValue; this.inputValue = ''; this.cursor = 0; this.drawInput(); this.screen.render(); return void this.submit(v) }
       const e = edit(this.inputValue, this.cursor, k, ch, key)
       if (!e) { if (k === 'up') this.moveSelection(-1); return }
+      if (e.value !== this.inputValue) this.promoteActive()
       this.inputValue = e.value
       this.cursor = e.cursor
       this.drawInput()
@@ -375,6 +376,7 @@ export class Ui {
         if (ch === ':') { this.reactTo = this.selected; this.replyTo = null } else { this.replyTo = this.selected; this.reactTo = null }
         this.inputValue = ch
         this.cursor = 1
+        this.promoteActive()
         this.setFocus('input')
         return this.renderNow()
       }
@@ -522,19 +524,28 @@ export class Ui {
     else { this.saveTabs(); this.scheduleRender() }
   }
 
-  /** Activa o tab e roda a barra até ele ficar em primeiro, junto da escrita; os outros mantêm a ordem cíclica. */
+  /** Activa o tab sem mexer na ordem da barra; é a escrita que o traz para a frente (promoteActive). */
   private activateTab(i: number) {
     const jid = this.tabs[i]
     if (!jid) return
-    if (jid !== this.current) { this.atBottom = true; this.dirtyMessages = true; this.selected = this.replyTo = this.reactTo = null }
-    this.tabs = [...this.tabs.slice(i), ...this.tabs.slice(0, i)]
-    this.active = 0
+    if (i !== this.active) { this.active = i; this.atBottom = true; this.dirtyMessages = true; this.selected = this.replyTo = this.reactTo = null }
     this.dirtyTabs = true
     this.saveTabs()
     if (this.pickerOpen) this.closePicker(false)
     this.setFocus('input')
     this.renderNow()
     this.wa.markRead(jid).catch(e => logger.warn({ e }, 'markRead'))
+  }
+
+  /** Move o tab activo para a primeira posição, junto da escrita, quando se começa a escrever nele. */
+  private promoteActive() {
+    if (this.active <= 0 || !this.tabs[this.active]) return
+    const [jid] = this.tabs.splice(this.active, 1)
+    this.tabs.unshift(jid!)
+    this.active = 0
+    this.dirtyTabs = true
+    this.saveTabs()
+    this.drawTabs()
   }
 
   /** Fecha o tab; se era o activo passa para o da direita, ou o da esquerda, ou para as "conversas". */

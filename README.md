@@ -31,9 +31,9 @@ ou preto, e a mensagem seleccionada ganha um fundo cinzento afastado do fundo re
 assume-se escuro e o cinzento da selecção é médio.
 
 - **Tabs**: um por conversa aberta, com o número de não lidas a vermelho e um `×` para fechar. Clique no nome activa,
-  clique no `×` fecha. O tab activo fica sempre em primeiro, junto da escrita: activar outro roda a barra até ele lá
-  chegar, sem trocar a ordem cíclica dos restantes. Tab circula pelos tabs abertos; `/` ou Ctrl-T abrem as "conversas". Com as "conversas" abertas
-  nenhum tab fica realçado. Mensagens novas numa conversa sem tab abrem um tab no fim,
+  clique no `×` fecha. Tab circula pelos tabs abertos sem lhes mexer na ordem; é ao começar a escrever que o tab
+  activo passa para a primeira posição, junto da escrita, ficando os outros pela ordem em que estavam. `/` ou Ctrl-T
+  abrem as "conversas". Com as "conversas" abertas nenhum tab fica realçado. Mensagens novas numa conversa sem tab abrem um tab no fim,
   sem o activar nem reordenar os outros. Os tabs abertos e o activo ficam guardados e voltam no arranque seguinte.
 - **Conversas**: a lista de conversas, com as mais recentes em baixo, mostrando o nome, as não lidas, um `·`
   nas que já têm tab e um excerto da última mensagem. O que se escreve vai para a linha do prompt, que passa a `/`,
