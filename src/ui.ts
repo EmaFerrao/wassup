@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import QRCode from 'qrcode'
 import { store, type ChatRow, type MessageRow, type ReactionRow } from './db.js'
 import { chatName, contactName, thumbPath, jidUser, type ConnState } from './wa.js'
-import { reportHerdr, labelHerdr, releaseHerdr } from './herdr.js'
+import { reportHerdr, labelHerdr, titleHerdr, releaseHerdr } from './herdr.js'
 import type { Backend } from './backend.js'
 import { waMarkup, esc, colorFor, setTheme, dim, italic, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, wrapWidth, fold, graphemes, wrapChars } from './format.js'
 import { decode, cached, cellSize, halfBlocks, detectImageMode, KittyImages, type Decoded, type ImageMode } from './image.js'
@@ -1006,7 +1006,7 @@ export class Ui {
   private updateTitle() {
     const unread = store.listChats().filter(c => c.unread > 0 && (this.fixed ? c.jid === this.current : !c.archived))
     const title = `${unread.length ? '● ' : ''}${this.current ? chatName(this.current) : 'wa'}`
-    if (title !== this.titleShown) { this.titleShown = title; this.screen.title = title }
+    if (title !== this.titleShown) { this.titleShown = title; this.screen.title = title; titleHerdr(title) }
     // No Herdr o mesmo sinal vai para o estado do agente: alguém a escrever é trabalho em curso, por ler pede atenção.
     labelHerdr(this.current ? chatName(this.current) : null)
     const typing = [...this.typing].filter(([jid, stopped]) => stopped == null && (!this.fixed || jid === this.current)).map(([jid]) => chatName(jid))
