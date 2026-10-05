@@ -120,6 +120,8 @@ export class Ui {
   private ghost: { text: string; s: Suggestion } | undefined
   private ghostTimer: NodeJS.Timeout | undefined
   private ghostAbort: AbortController | undefined
+  /** Setas → premidas com a sugestão seguinte ainda a caminho: aceitam-se à chegada, uma por seta, para → → → corrigir em cadeia. */
+  private acceptOnArrival = 0
   private ghostHide: NodeJS.Timeout | undefined
   /** O texto tal como ficou ao aceitar uma sugestão que acabou numa palavra: a letra seguinte leva um espaço antes. */
   private accepted: string | undefined
@@ -475,6 +477,7 @@ export class Ui {
   private onKey(ch: string, key: blessed.Widgets.Events.IKeyEventArg) {
     this.touchActivity()
     const k = key.full
+    if (k !== 'right') this.acceptOnArrival = 0
     // O blessed emite cada Enter duas vezes: um "enter" sintético e logo o "return" verdadeiro. Só o segundo conta;
     // senão, com sugestões abertas, o primeiro aceitava o emoji e o segundo enviava a mensagem.
     if (key.name === 'enter' && key.sequence === '\r') return
@@ -503,6 +506,11 @@ export class Ui {
     if ((k === 'tab' || (k === 'right' && this.cursorAtEnd() && (this.suggestions.length || this.ghostShown()))) && this.focus === 'input' && !this.pickerOpen && this.inputValue) {
       if (this.suggestions.length) return this.acceptSuggestion()
       if (this.ghostShown()) this.acceptGhost()
+      return
+    }
+    // → no fim, sem sugestão à vista mas com uma pedida: fica a aceitação marcada para quando ela chegar.
+    if (k === 'right' && this.focus === 'input' && !this.pickerOpen && this.inputValue && this.cursorAtEnd() && (this.ghostTimer || this.ghostAbort)) {
+      this.acceptOnArrival++
       return
     }
     if (k === 'tab') {
@@ -540,10 +548,10 @@ export class Ui {
         this.inputValue += ' '
         this.cursor++
       }
-      this.accepted = undefined
       const e = edit(this.inputValue, this.cursor, k, ch, key)
       if (!e) { if (k === 'up') this.moveSelection(-1); return }
-      if (e.value !== this.inputValue) this.promoteActive()
+      // Só o texto a mudar gasta o espaço prometido; mover o cursor (→ no fim, sem sugestão) deixa-o por dar.
+      if (e.value !== this.inputValue) { this.accepted = undefined; this.promoteActive() }
       this.inputValue = e.value
       this.cursor = e.cursor
       this.noteComposing()
@@ -1156,13 +1164,16 @@ export class Ui {
       this.ghostAbort = abort
       const context = store.listMessages(jid, 6).filter(r => r.text && r.type !== 'deleted').map(r => ({ who: this.who(r), text: r.text }))
       suggest(context, text, abort.signal).then(s => {
-        if (abort.signal.aborted || text !== this.inputValue || !s) return
+        if (abort.signal.aborted || text !== this.inputValue) return
+        if (this.ghostAbort === abort) this.ghostAbort = undefined
+        if (!s) { this.acceptOnArrival = 0; return }
         this.ghost = { text, s }
+        if (this.acceptOnArrival > 0) { this.acceptOnArrival--; return void this.acceptGhost() }
         if (this.ghostHide) clearTimeout(this.ghostHide)
         this.ghostHide = setTimeout(() => { if (this.ghost?.text === text) { this.clearGhost(); this.drawInput(); this.screen.render() } }, 4000)
         this.drawInput()
         this.screen.render()
-      }, e => { if (!abort.signal.aborted) logger.debug({ e }, 'llm') })
+      }, e => { this.acceptOnArrival = 0; if (!abort.signal.aborted) logger.debug({ e }, 'llm') })
     }, delay)
   }
 
