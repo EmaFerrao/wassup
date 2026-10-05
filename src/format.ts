@@ -190,7 +190,11 @@ export function wrapChars(chars: string[], width: number): string[][] {
   for (let i = 0; i < chars.length;) {
     // Fim de linha explícito: fica na linha (largura zero) e a seguinte começa vazia.
     if (chars[i] === '\n') { lines[lines.length - 1]!.push('\n'); lines.push([]); curW = 0; i++; continue }
-    if (/^\s$/.test(chars[i]!)) { push(chars[i]!, 1); i++; continue }
+    // Um espaço que já não cabe fecha a linha e fica nela (invisível no fim), para a seguinte não começar por ele.
+    if (/^\s$/.test(chars[i]!)) {
+      if (curW + 1 > width) { lines[lines.length - 1]!.push(chars[i]!); lines.push([]); curW = 0 } else push(chars[i]!, 1)
+      i++; continue
+    }
     let j = i, w = 0
     while (j < chars.length && !/^\s$/.test(chars[j]!)) w += cw(chars[j++]!)
     if (curW > 0 && curW + w > width && w <= width) { lines.push([]); curW = 0 }

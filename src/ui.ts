@@ -1229,7 +1229,7 @@ export class Ui {
     const header = !target ? null : this.editing
       ? `✎ editar: ${this.snippet(target)} · Enter envia, Esc desiste`
       : this.replyTo
-        ? `↩ ${this.who(target)}: ${this.snippet(target)}`
+        ? `↩ ${target.chat_jid.endsWith('@g.us') && !target.from_me ? `${this.who(target)}: ` : ''}${this.snippet(target)}`
         : `reagir a ${this.who(target)}: ${this.snippet(target)} · :código: ou emoji e Enter; Enter vazio retira`
     // Sugestão do modelo, discreta, em itálico cinzento na sequência do texto: as letras que faltam à palavra a meio,
     // coladas ao cursor (que pousa sobre a primeira), ou, duas células à frente, a palavra certa a seguir a "⇢", seja a palavra a meio
@@ -1246,8 +1246,9 @@ export class Ui {
     while (row < lines.length - 1 && cursor >= start + lines[row]!.length) start += lines[row++]!.length
     let col = cursor - start
     if (col >= lines[row]!.length && wrapWidth(esc(lines[row]!.join(''))) >= width) { lines.push([]); row++; col = 0 }
-    // O "\n" que fecha uma linha fica nela, para o cursor contar, mas não se desenha.
-    const text = (l: string[]) => l.filter(c => c !== '\n').join('')
+    // O "\n" ou o espaço que fecham uma linha ficam nela, para o cursor contar, mas não se desenham: um espaço a mais
+    // que a largura faria o blessed partir a linha.
+    const text = (l: string[]) => l.filter(c => c !== '\n').join('').replace(/\s+$/, '')
     // A sugestão vai na linha do cursor se lá couber inteira: as letras que faltam coladas ao cursor, ou "⇢ palavra"
     // duas células à frente. Senão vai numa linha só dela, por baixo, em vez de cortada.
     const cursorLine = lines[row]!
@@ -1356,7 +1357,8 @@ export class Ui {
         : `{${color}-fg}${esc(name)}{/${color}-fg} ${dim(fmtTime(row.ts))}`, row)
       if (row.quoted) {
         const [who, text] = row.quoted.split('\t')
-        const author = who === this.wa.me ? '' : `${esc(contactName(who ?? ''))}: `
+        // Só em grupos interessa de quem era; a dois a outra pessoa é óbvia, e as minhas também não levam nome.
+        const author = who === this.wa.me || !row.chat_jid.endsWith('@g.us') ? '' : `${esc(contactName(who ?? ''))}: `
         out(dim(`│ ${author}${esc(truncate(text ?? '', width - 6))}`), row)
       }
 
