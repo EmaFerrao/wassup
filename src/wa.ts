@@ -257,6 +257,9 @@ export class Wa extends EventEmitter<WaEvents> {
   sock: WASocket | undefined
   /** Quem está a escrever em cada conversa, e o temporizador que o esquece se o "parou" nunca chegar. */
   private typing = new Map<string, { who: Set<string>; timer: NodeJS.Timeout }>()
+  /** Se este dispositivo se anunciou "disponível" ao WhatsApp, e o temporizador que o volta a pôr indisponível. */
+  private available = false
+  private presenceTimer: NodeJS.Timeout | undefined
   me = ''
   state: ConnState = 'connecting'
   qr: string | undefined
@@ -306,6 +309,7 @@ export class Wa extends EventEmitter<WaEvents> {
 
     sock.ev.on('creds.update', saveCreds)
     sock.ev.on('presence.update', ({ id, presences }) => {
+      logger.info({ id, presences }, 'presença')
       const chatJid = canonicalJid(id)
       for (const [participant, p] of Object.entries(presences)) {
         const who = canonicalJid(participant)
@@ -324,6 +328,8 @@ export class Wa extends EventEmitter<WaEvents> {
         this.qr = undefined
         this.me = jidNormalizedUser(sock.user?.id ?? '')
         if (sock.user?.lid) store.setLid(jidNormalizedUser(sock.user.lid), this.me)
+        // O Baileys anuncia "indisponível" ao ligar; é a actividade no terminal que volta a pôr disponível.
+        this.available = false
         this.setState('open', this.me)
         this.refreshGroups().catch(e => logger.warn({ e }, 'refreshGroups'))
         this.resolveLidContacts().catch(e => logger.warn({ e }, 'resolveLidContacts'))
@@ -556,6 +562,23 @@ export class Wa extends EventEmitter<WaEvents> {
       this.typing.set(chatJid, { who: set, timer: setTimeout(() => { this.typing.delete(chatJid); this.emit('typing', chatJid, []) }, 15000) })
     } else this.typing.delete(chatJid)
     if (active !== had) this.emit('typing', chatJid, [...set])
+  }
+
+  /**
+   * Há alguém a usar um terminal: anuncia este dispositivo como disponível, que é a condição para o WhatsApp mandar
+   * quem está a escrever, e volta a indisponível ao fim de 2 minutos sem actividade, para o telemóvel voltar a
+   * notificar. Qualquer terminal ligado prolonga o prazo.
+   */
+  touchPresence() {
+    if (this.presenceTimer) clearTimeout(this.presenceTimer)
+    this.presenceTimer = setTimeout(() => { this.presenceTimer = undefined; this.setAvailable(false) }, 120000)
+    this.setAvailable(true)
+  }
+
+  private setAvailable(on: boolean) {
+    if (on === this.available || !this.sock) return
+    this.available = on
+    this.sock.sendPresenceUpdate(on ? 'available' : 'unavailable').catch(e => logger.warn({ e }, 'sendPresenceUpdate'))
   }
 
   /** Pede ao WhatsApp a presença (a escrever, a gravar) de uma conversa; sem isso nada chega. */

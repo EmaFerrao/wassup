@@ -323,6 +323,7 @@ export class Ui {
       this.showingQr = false
       this.dirtyMessages = true
       for (const jid of this.tabs) this.wa.subscribePresence(jid)
+      if (Date.now() - this.lastActive < 120000) { this.lastPresenceTouch = Date.now(); this.wa.touchPresence() }
       this.scheduleRender()
     } else if (state === 'closed') {
       this.connText = `{${FG.error}-fg}● ${esc(detail ?? 'desligado')}{/${FG.error}-fg}`
@@ -503,6 +504,7 @@ export class Ui {
 
   private lastActive = Date.now()
   private lastActiveSaved = 0
+  private lastPresenceTouch = 0
 
   private loadTabs() {
     const saved = store.getState<TerminalState>(this.tabsKey())
@@ -522,6 +524,8 @@ export class Ui {
   private touchActivity() {
     this.lastActive = Date.now()
     if (this.lastActive - this.lastActiveSaved > 2000) this.saveTabs()
+    // Mantém o dispositivo "disponível" enquanto se usa o terminal; de 10 em 10 segundos chega.
+    if (this.lastActive - this.lastPresenceTouch > 10000) { this.lastPresenceTouch = this.lastActive; this.wa.touchPresence() }
   }
 
   /** Registos dos outros terminais cujo processo ainda está vivo. */

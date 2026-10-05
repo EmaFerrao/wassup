@@ -14,6 +14,10 @@ npm install
 Na primeira vez aparece um código QR: no telemóvel, WhatsApp › Definições › Dispositivos associados › Associar
 dispositivo. A sessão fica guardada e nas vezes seguintes liga directamente.
 
+Enquanto se usa o terminal o cliente anuncia-se "disponível" ao WhatsApp, que é o que faz chegar quem está a
+escrever; nesse estado o telemóvel não notifica mensagens novas, tal como com o WhatsApp Web aberto. Ao fim de 2
+minutos sem tecla nem rato volta a "indisponível" e o telemóvel retoma as notificações.
+
 Requisitos: Node 22.13 ou mais recente (usa o SQLite embutido no Node). Testado com Node 26.
 
 ## Interface
