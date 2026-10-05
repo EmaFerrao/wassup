@@ -20,6 +20,8 @@ export interface WaEvents {
   messages: [chatJid: string]
   notify: [chatJid: string, row: MessageRow]
   status: [text: string]
+  /** Só do cliente remoto: o processo servidor desapareceu. */
+  lost: []
 }
 
 /** Jid canónico: número em vez de lid sempre que o conhecemos, sem sufixo de dispositivo. */

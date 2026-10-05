@@ -38,8 +38,9 @@ ligação e os avisos encostados à direita. Painéis distinguidos pelo fundo, s
   conversas"; Esc aí, sem tabs abertos, sai do programa. Ctrl-C e `:q` saem logo.
 - Mensagens novas noutra conversa fazem soar a campainha do terminal e aparecem à direita na barra de tabs; abrir ou activar
   o tab marca-as como lidas.
-- Só corre uma instância por sessão: arrancar outra termina a anterior (o WhatsApp só aceita uma ligação por
-  dispositivo associado; duas instâncias expulsam-se uma à outra).
+- **Vários terminais**: podes abrir o `wa` em quantos terminais quiseres. O primeiro processo é o servidor, com a
+  ligação ao WhatsApp, e abre um socket em `$XDG_RUNTIME_DIR/wa-<id>.sock`; os seguintes ligam-se a ele e são só interface, cada um
+  com os seus tabs, guardados por terminal. Se o servidor terminar, um dos outros assume a ligação sozinho.
 
 ### Comandos na linha de escrita
 
@@ -96,6 +97,8 @@ O histórico começa no primeiro arranque com o que o WhatsApp envia aos disposi
 | Ficheiro | Papel |
 |---|---|
 | `src/wa.ts` | Ligação ao WhatsApp: QR, reconexão, tradução das mensagens do baileys para a base de dados, envio, anexos |
+| `src/ipc.ts` | Servidor e cliente por socket Unix, para vários processos partilharem uma ligação |
+| `src/backend.ts` | O que a interface pede a quem fala com o WhatsApp, local ou remoto |
 | `src/db.ts` | Esquema e consultas SQLite (`node:sqlite`) |
 | `src/ui.ts` | Interface blessed: painéis, teclado, rato, desenho das mensagens, colocação das imagens Kitty |
 | `src/format.ts` | Marcação do WhatsApp para etiquetas do blessed, datas, cores por remetente |

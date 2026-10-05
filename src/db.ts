@@ -36,7 +36,8 @@ export interface MessageRow {
   raw: string
 }
 
-const db = new DatabaseSync(dirs.db)
+// timeout: vários processos partilham a base (servidor escreve, clientes lêem e guardam os seus tabs); em vez de SQLITE_BUSY espera-se.
+const db = new DatabaseSync(dirs.db, { timeout: 3000 })
 db.exec(`
   PRAGMA journal_mode = WAL;
   PRAGMA synchronous = NORMAL;

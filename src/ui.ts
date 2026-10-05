@@ -4,7 +4,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import QRCode from 'qrcode'
 import { store, type ChatRow, type MessageRow } from './db.js'
-import { Wa, chatName, contactName, thumbPath, jidUser, type ConnState } from './wa.js'
+import { chatName, contactName, thumbPath, jidUser, type ConnState } from './wa.js'
+import type { Backend } from './backend.js'
 import { waMarkup, esc, colorFor, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, fold } from './format.js'
 import { decode, cached, cellSize, halfBlocks, detectImageMode, KittyImages, type Decoded, type ImageMode } from './image.js'
 import { logger, uiLog } from './log.js'
@@ -68,7 +69,7 @@ export class Ui {
   private dirtyMessages = true
   private showingQr = false
 
-  constructor(private wa: Wa, caps: TermCaps) {
+  constructor(private wa: Backend, caps: TermCaps) {
     this.mode = detectImageMode(caps.kittyGraphics)
     patchBlessedUnicode()
     this.screen = blessed.screen({ smartCSR: true, fullUnicode: caps.utf8, title: 'wa', warnings: false })
@@ -314,15 +315,20 @@ export class Ui {
 
   // ---------- tabs ----------
 
+  /** Cada terminal tem os seus tabs: a chave é o dispositivo do terminal (/dev/pts/N), que se mantém enquanto ele existir. */
+  private tabsKey(): string {
+    try { return `tabs:${fs.readlinkSync('/proc/self/fd/0')}` } catch { return 'tabs' }
+  }
+
   private loadTabs() {
-    const saved = store.getState<{ tabs: string[]; active: number }>('tabs')
+    const saved = store.getState<{ tabs: string[]; active: number }>(this.tabsKey())
     if (!saved) return
     this.tabs = saved.tabs.filter(jid => store.getChat(jid))
     this.active = this.tabs.length ? Math.min(Math.max(saved.active, 0), this.tabs.length - 1) : -1
   }
 
   private saveTabs() {
-    store.setState('tabs', { tabs: this.tabs, active: this.active })
+    store.setState(this.tabsKey(), { tabs: this.tabs, active: this.active })
   }
 
   /** Abre (ou encontra) o tab da conversa; com `activate` passa a ser o activo e a conversa marca-se como lida. */
