@@ -78,7 +78,8 @@ export async function suggest(context: { who: string; text: string }[], text: st
     'Conversa recente:',
     ...context.map(c => `${c.who}: ${c.text.replace(/\s+/g, ' ').slice(0, 200)}`),
     '',
-    `Texto em curso: «${text}»`,
+    'Texto em curso (termina no cursor, sem mais nada a seguir):',
+    text,
   ].join('\n')
   const body = {
     model: MODEL,
@@ -96,7 +97,8 @@ export async function suggest(context: { who: string; text: string }[], text: st
   if (!content) return null
   let parsed: { word?: unknown; wrong?: unknown; fix?: unknown }
   try { parsed = JSON.parse(content) } catch { logger.warn({ content }, 'llm: resposta não é JSON'); return null }
-  const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '')
+  // Só palavras feitas de letras: o modelo às vezes devolve aspas, pontuação ou o fim do texto colado.
+  const str = (v: unknown) => (typeof v === 'string' && /^[\p{L}\p{M}'-]+$/u.test(v.trim()) ? v.trim() : '')
   const partial = partialWord(text)
   const wordTo = str(parsed.word)
   const word = partial && wordTo && wordTo !== partial && !/\s/.test(wordTo) && plausibleWord(partial, wordTo) ? { from: partial, to: wordTo } : null
