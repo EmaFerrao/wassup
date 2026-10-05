@@ -5,13 +5,14 @@ import QRCode from 'qrcode'
 import { store, type ChatRow, type MessageRow, type ReactionRow } from './db.js'
 import { chatName, contactName, thumbPath, jidUser, type ConnState } from './wa.js'
 import type { Backend } from './backend.js'
-import { waMarkup, esc, colorFor, setTheme, dim, namePalette, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, fold, graphemes, wrapChars } from './format.js'
+import { waMarkup, esc, colorFor, setTheme, dim, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, fold, graphemes, wrapChars } from './format.js'
 import { decode, cached, cellSize, halfBlocks, detectImageMode, KittyImages, type Decoded, type ImageMode } from './image.js'
 import { logger, uiLog } from './log.js'
 import { patchBlessedUnicode } from './unicode.js'
 import type { TermCaps } from './term.js'
 import { emojify, emoticonify, completeEmoji, codeMatches } from './emoji.js'
 import { enableKittyKeyboard } from './kittykeys.js'
+import { parseHex, rainbowRing, mix, nearest256, type Rgb } from './rainbow.js'
 
 type Focus = 'picker' | 'messages' | 'input'
 
@@ -39,6 +40,9 @@ interface ClinesBox extends blessed.Widgets.BoxElement {
   _clines: string[] & { ftor: number[][]; rtof: number[] }
   childBase: number
 }
+
+/** Quanto dura o desvanecer do arco-íris depois de a pessoa parar de escrever. */
+const FADE_MS = 1500
 
 const HELP = 'Tab muda de tab · Ctrl-T conversas · Esc fecha · PgUp/PgDn histórico · ↑ ou clique selecciona mensagem, escrever responde, : reage · :fixe: emoji'
 
@@ -163,10 +167,14 @@ export class Ui {
   private transientTimer: NodeJS.Timeout | undefined
   private atBottom = true
   private renderTimer: NodeJS.Timeout | undefined
-  /** Conversas onde alguém está a escrever, e o relógio que faz o nome do tab mexer enquanto durar. */
-  private typing = new Set<string>()
+  /**
+   * Conversas onde alguém está a escrever (null) ou acabou de parar (o instante em que parou, para o arco-íris se
+   * desvanecer), e o relógio que redesenha a barra enquanto houver nomes a animar.
+   */
+  private typing = new Map<string, number | null>()
   private typingTimer: NodeJS.Timeout | undefined
-  private typingFrame = 0
+  private ring: Rgb[]
+  private fgRgb: Rgb
   private dirtyTabs = true
   private dirtyMessages = true
   private showingQr = false
@@ -178,6 +186,8 @@ export class Ui {
   constructor(private wa: Backend, caps: TermCaps) {
     this.mode = detectImageMode(caps.kittyGraphics)
     ;({ dark: this.dark, selected: this.selectedBg } = theme(caps.bg))
+    this.ring = rainbowRing(this.dark)
+    this.fgRgb = parseHex(caps.fg) ?? (this.dark ? [192, 192, 192] : [48, 48, 48])
     setTheme(this.dark)
     patchBlessedUnicode()
     this.screen = blessed.screen({ smartCSR: true, fullUnicode: caps.utf8, title: 'wa', warnings: false })
@@ -370,16 +380,34 @@ export class Ui {
     this.screen.render()
   }
 
-  /** Alguém começou ou parou de escrever: o nome do tab mexe enquanto houver conversas com gente a escrever. */
+  /** Alguém começou ou parou de escrever: o arco-íris corre pelo nome do tab e, ao parar, desvanece-se. */
   private onTyping(jid: string, active: boolean) {
-    if (active) this.typing.add(jid); else this.typing.delete(jid)
+    if (active) this.typing.set(jid, null)
+    else if (this.typing.has(jid)) this.typing.set(jid, Date.now())
     if (this.typing.size && !this.typingTimer) {
-      this.typingTimer = setInterval(() => { this.typingFrame++; this.drawTabs(); this.screen.render() }, 120)
-    } else if (!this.typing.size && this.typingTimer) {
-      clearInterval(this.typingTimer); this.typingTimer = undefined
+      this.typingTimer = setInterval(() => {
+        for (const [j, stopped] of this.typing) if (stopped != null && Date.now() - stopped > FADE_MS) this.typing.delete(j)
+        if (!this.typing.size && this.typingTimer) { clearInterval(this.typingTimer); this.typingTimer = undefined }
+        this.drawTabs(); this.screen.render()
+      }, 80)
     }
     this.drawTabs()
     this.screen.render()
+  }
+
+  /**
+   * O nome com o arco-íris: o anel de matizes corre devagar pelas letras (uma volta em ~8 s), e depois de a pessoa
+   * parar cada cor mistura-se com a do texto ao longo de FADE_MS, com uma curva suave, até ficar normal.
+   */
+  private rainbow(name: string, stopped: number | null): string {
+    const n = this.ring.length
+    const phase = (Date.now() / 1000) * (n / 8)
+    const raw = stopped == null ? 0 : Math.min(1, (Date.now() - stopped) / FADE_MS)
+    const t = raw * raw * (3 - 2 * raw)
+    return graphemes(name).map((g, i) => {
+      const c = nearest256(mix(this.ring[Math.floor(phase + i * 1.5) % n]!, this.fgRgb, t))
+      return `{${c}-fg}${esc(g)}{/${c}-fg}`
+    }).join('')
   }
 
   private onKey(ch: string, key: blessed.Widgets.Events.IKeyEventArg) {
@@ -719,14 +747,11 @@ export class Ui {
     while (nameW > 6 && !fits(nameW)) nameW--
     // O tab activo distingue-se só pelo texto: negrito e na cor mais forte do tema; os outros ficam na cor normal.
     const strong = this.dark ? 'bright-white' : 'black'
-    // Com alguém a escrever, as cores da paleta dos nomes correm pelo nome, um grafema de cada vez.
-    const colors = namePalette()
-    const wave = (name: string) => graphemes(name).map((g, i) => { const c = colors[(i + this.typingFrame) % colors.length]!; return `{${c}-fg}${esc(g)}{/${c}-fg}` }).join('')
     let out = '', x = 0
     this.segments = []
     for (const t of tabs) {
       const name = truncate(t.name, nameW)
-      const label = this.typing.has(t.jid) ? wave(name) : esc(name)
+      const label = this.typing.has(t.jid) ? this.rainbow(name, this.typing.get(t.jid)!) : esc(name)
       const text = ` ${name}${t.badge ? ' ' + t.badge : ''} × `
       const w = strWidth(text)
       const closeX0 = x + w - 2
