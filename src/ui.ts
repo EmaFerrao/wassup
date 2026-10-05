@@ -319,10 +319,22 @@ export class Ui {
       this.activateTab(seg.index)
     })
     // Clicar numa mensagem selecciona-a (e abre o anexo se o clique cair num); fora das mensagens volta à escrita.
+    // Arrastar uma mensagem para a direita (premir e largar na mesma linha, 4 ou mais colunas à frente) começa a
+    // resposta a ela, como no WhatsApp do telemóvel. O terminal só dá a pressão e a largada, não o movimento.
+    let pressed: { x: number; y: number } | undefined
+    this.msgBox.on('mousedown', (data: { x: number; y: number }) => { pressed = { x: data.x, y: data.y } })
     this.msgBox.on('click', (data: { x: number; y: number }) => {
       const line = this.msgBox.childBase + (data.y - num(this.msgBox.atop) - num(this.msgBox.itop))
       const orig = this.msgBox._clines?.rtof?.[line]
       const row = orig != null ? this.lineMap[orig] : null
+      const dragged = pressed && pressed.y === data.y && data.x - pressed.x >= 4
+      pressed = undefined
+      if (row && dragged) {
+        this.replyTo = row; this.reactTo = null
+        this.setFocus('input')
+        this.drawInput()
+        return this.screen.render()
+      }
       if (row) this.select(row)
       else this.setFocus('input')
       if (row?.media_mime) this.openMedia(row)
