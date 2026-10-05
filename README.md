@@ -36,7 +36,9 @@ assume-se escuro e o cinzento da selecção é médio.
 
 - **Tabs**: um por conversa aberta, com o número de não lidas a vermelho e um `×` para fechar. Clique no nome activa,
   clique no `×` fecha. Tab circula pelos tabs abertos sem lhes mexer na ordem; é ao começar a escrever que o tab
-  activo passa para a primeira posição, junto da escrita, ficando os outros pela ordem em que estavam. `/` ou Ctrl-T
+  activo passa para a primeira posição, junto da escrita, ficando os outros pela ordem em que estavam. A escrita é
+  de cada conversa: o que ficou por enviar fica guardado no tab de onde se sai e volta quando se regressa, e nunca
+  aparece na linha de outra conversa. `/` ou Ctrl-T
   abrem as "conversas". Com as "conversas" abertas nenhum tab fica realçado. Enquanto alguém está a escrever ou a
   gravar numa conversa com tab, um arco-íris suave corre pelas letras do nome dela, e desvanece-se quando a pessoa
   pára.

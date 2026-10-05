@@ -164,6 +164,8 @@ export class Ui {
   private replyTo: MessageRow | null = null
   /** Mensagem minha aberta na escrita para editar (Backspace ou Delete com a linha vazia). */
   private editing: MessageRow | null = null
+  /** O que ficou por enviar em cada conversa: mudar de tab troca a escrita, para nada ir para a pessoa errada. */
+  private drafts = new Map<string, { value: string; cursor: number }>()
   private reactTo: MessageRow | null = null
   private inputHeader = false
   /** Posição no texto desenhado de cada grafema do texto escrito (mais uma, o fim): os emojis de pré-visualização desalinham-nos. */
@@ -707,7 +709,14 @@ export class Ui {
   private activateTab(i: number) {
     const jid = this.tabs[i]
     if (!jid) return
-    if (i !== this.active) { this.stopComposing(); this.active = i; this.atBottom = true; this.dirtyMessages = true; this.selected = this.replyTo = this.reactTo = null; if (this.editing) { this.editing = null; this.inputValue = ''; this.cursor = 0; this.updateSuggestions() } }
+    if (i !== this.active) {
+      this.stopComposing()
+      const prev = this.current
+      this.active = i; this.atBottom = true; this.dirtyMessages = true; this.selected = this.replyTo = this.reactTo = null
+      // A correcção de uma mensagem não é rascunho: cai. O resto fica guardado na conversa de onde se sai.
+      if (this.editing) { this.editing = null; this.inputValue = ''; this.cursor = 0 }
+      this.switchDraft(prev, jid)
+    }
     if (this.notice?.jid === jid) this.notice = undefined
     this.dirtyTabs = true
     this.saveTabs()
@@ -729,13 +738,30 @@ export class Ui {
     this.drawTabs()
   }
 
+  /** Guarda a escrita como rascunho da conversa de onde se sai e põe na linha o rascunho da conversa para onde se vai. */
+  private switchDraft(from: string | null, to: string | null) {
+    if (from) {
+      if (this.inputValue) this.drafts.set(from, { value: this.inputValue, cursor: this.cursor })
+      else this.drafts.delete(from)
+    }
+    const d = to ? this.drafts.get(to) : undefined
+    this.inputValue = d?.value ?? ''
+    this.cursor = d?.cursor ?? 0
+    this.updateSuggestions()
+  }
+
   /** Fecha o tab; se era o activo passa para o da direita, ou o da esquerda, ou para as "conversas". */
   private closeTab(i: number) {
-    if (!this.tabs[i]) return
-    uiLog.info({ jid: this.tabs[i], index: i }, 'fechar tab')
+    const closing = this.tabs[i]
+    if (!closing) return
+    uiLog.info({ jid: closing, index: i }, 'fechar tab')
+    const wasActive = this.active === i
     this.tabs.splice(i, 1)
     if (this.active > i) this.active--
-    else if (this.active === i) { this.active = Math.min(i, this.tabs.length - 1); this.atBottom = true }
+    else if (wasActive) { this.active = Math.min(i, this.tabs.length - 1); this.atBottom = true }
+    // O rascunho vai com o tab; se era o activo, a escrita passa a ser a da conversa que fica.
+    this.drafts.delete(closing)
+    if (wasActive) { this.editing = null; this.switchDraft(null, this.current) }
     this.dirtyTabs = true
     this.dirtyMessages = true
     this.lineMap = []; this.images = []; this.rows = []; this.selected = null
