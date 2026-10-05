@@ -41,7 +41,7 @@ interface ClinesBox extends blessed.Widgets.BoxElement {
   childBase: number
 }
 
-const HELP = 'Tab muda de tab · Ctrl-T conversas · Esc fecha · PgUp/PgDn histórico · ↑ ou clique selecciona mensagem, r responde, e reage · :up ficheiro · :down anexos · :fixe: emoji'
+const HELP = 'Tab muda de tab · Ctrl-T conversas · Esc fecha · PgUp/PgDn histórico · ↑ ou clique selecciona mensagem, Enter responde, : reage · :up ficheiro · :down anexos · :fixe: emoji'
 
 // Cores do tema do terminal, nunca assumidas: texto e fundo por omissão e as 16 nomeadas, que o tema garante
 // legíveis sobre o seu fundo. Os avisos passageiros são discretos; só a espera do QR e as quebras de ligação se
@@ -371,9 +371,11 @@ export class Ui {
     if (this.focus === 'messages') {
       if (k === 'i') { this.setFocus('input'); return this.renderNow() }
       if (k === 'up' || k === 'down') return this.moveSelection(k === 'up' ? -1 : 1)
-      if ((k === 'r' || k === 'e') && this.selected) {
-        // A escrita passa a ser a resposta (ou o emoji da reacção) à mensagem seleccionada; o cabeçalho diz qual.
-        if (k === 'r') { this.replyTo = this.selected; this.reactTo = null } else { this.reactTo = this.selected; this.replyTo = null }
+      // Enter responde à seleccionada; ":" reage, e fica já escrito para se continuar com o :código: do emoji. O
+      // cabeçalho da escrita diz a que mensagem.
+      if ((k === 'enter' || k === 'return' || ch === ':') && this.selected) {
+        if (ch === ':') { this.reactTo = this.selected; this.replyTo = null; this.inputValue = ':'; this.cursor = 1 }
+        else { this.replyTo = this.selected; this.reactTo = null }
         this.setFocus('input')
         return this.renderNow()
       }
@@ -432,9 +434,11 @@ export class Ui {
       this.drawInput()
       this.screen.render()
       if (this.wa.state !== 'open') return this.flash('sem ligação ao WhatsApp; espera pelo ● verde')
+      // O ":" com que a reacção começa, sozinho, vale o mesmo que nada: retira a reacção.
+      const emoji = text === ':' ? '' : text
       try {
-        await this.wa.react(reactTo.chat_jid, reactTo.id, text)
-        if (!text) this.flash('reacção retirada')
+        await this.wa.react(reactTo.chat_jid, reactTo.id, emoji)
+        if (!emoji) this.flash('reacção retirada')
       } catch (e) {
         logger.error({ e }, 'react')
         this.flash(`erro: ${(e as Error).message}`, 10000)
@@ -735,7 +739,7 @@ export class Ui {
     const target = this.pickerOpen ? null : this.replyTo ?? this.reactTo
     const header = !target ? null : this.replyTo
       ? `↩ ${this.who(target)}: ${this.snippet(target)}`
-      : `reagir a ${this.who(target)}: ${this.snippet(target)} · emoji e Enter; Enter vazio retira`
+      : `reagir a ${this.who(target)}: ${this.snippet(target)} · :código: ou emoji e Enter; Enter vazio retira`
     this.inputHeader = header != null
     const rowsAvail = header ? 1 : 2
     const width = Math.max(4, w - 2)

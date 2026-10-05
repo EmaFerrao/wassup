@@ -39,8 +39,9 @@ afastado do fundo real. Se o terminal não responder, assume-se escuro e o cinze
 - **Mensagens**: as tuas à direita, as dos outros à esquerda. Roda do rato, PgUp/PgDn. Clique num anexo
   (imagem, vídeo, ficheiro, áudio) abre-o com `xdg-open`; se ainda não estiver descarregado, descarrega-o.
   Um clique numa mensagem, ou ↑ a partir da escrita, selecciona-a; ↑/↓ movem a selecção e ↓ da última volta à
-  escrita, tal como Esc ou `i`. Sobre a seleccionada, `r` responde (a escrita ganha uma linha com a citação; Enter
-  envia, Esc desiste) e `e` reage (escreve-se o emoji, directo ou `:fixe:`, e Enter; Enter vazio retira a reacção).
+  escrita, tal como Esc ou `i`. Sobre a seleccionada, Enter responde (a escrita ganha uma linha com a citação; Enter
+  envia, Esc desiste) e `:` reage: o `:` fica já escrito, completa-se o `:fixe:` ou escreve-se o emoji directo, e
+  Enter envia; Enter com a linha vazia retira a reacção.
   As reacções de todos aparecem numa linha cinzenta por baixo da mensagem.
 - **Escrita**: duas linhas, texto partido por palavras; Enter envia. Setas, Home e End movem o cursor, e um clique
   põe-no onde se clicou; Backspace e Delete apagam para trás e para a frente, Ctrl-U limpa a linha e Shift-Backspace
