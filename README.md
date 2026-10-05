@@ -36,9 +36,9 @@ assume-se escuro e o cinzento da selecção é médio.
   nenhum tab fica realçado. Mensagens novas numa conversa sem tab abrem um tab no fim,
   sem o activar nem reordenar os outros. Os tabs abertos e o activo ficam guardados e voltam no arranque seguinte.
 - **Conversas**: a lista de conversas, com as mais recentes em baixo, mostrando o nome, as não lidas, um `·`
-  nas que já têm tab e um excerto da última mensagem. O que se escreve vai para a linha do prompt e filtra a lista, sem
-  acentos nem maiúsculas; setas, Enter ou clique abrem a conversa num tab e activam-no; Esc limpa o filtro e depois
-  fecha a lista.
+  nas que já têm tab e um excerto da última mensagem. O que se escreve vai para a linha do prompt, que passa a `/`,
+  e filtra a lista, sem acentos nem maiúsculas; setas, Enter ou clique abrem a conversa num tab e activam-no; Esc
+  limpa o filtro e depois fecha a lista.
 - **Mensagens**: as tuas à direita, as dos outros à esquerda. Roda do rato, PgUp/PgDn. Clique num anexo
   (imagem, vídeo, ficheiro, áudio) abre-o com `xdg-open`; se ainda não estiver descarregado, descarrega-o.
   Um clique numa mensagem, ou ↑ a partir da escrita, selecciona-a; ↑/↓ movem a selecção e ↓ da última volta à

@@ -748,7 +748,9 @@ export class Ui {
       return esc(line.slice(0, col).join('')) + '{inverse}' + esc(line[col] ?? ' ') + '{/inverse}' + esc(line.slice(col + 1).join(''))
     }
     const visible = lines.slice(this.inputTop, this.inputTop + rowsAvail)
-    const out = visible.map((l, i) => (this.inputTop + i === 0 ? '> ' : '  ') + render(l, this.inputTop + i))
+    // O prompt diz o que a linha faz: ">" escreve, "/" filtra as conversas.
+    const prompt = this.pickerOpen ? '/ ' : '> '
+    const out = visible.map((l, i) => (this.inputTop + i === 0 ? prompt : '  ') + render(l, this.inputTop + i))
     if (header) out.unshift(dim(esc(truncate(header, w))))
     this.input.setContent(out.join('\n'))
   }
