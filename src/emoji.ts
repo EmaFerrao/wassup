@@ -218,7 +218,7 @@ const CODE_RE = /(^|[^\w:]):([a-z0-9_+-]+):(?=[^\w:]|$)/gi
 /** Smileys clássicos, só quando isolados por espaços (ou início/fim), para não tocar em "http://" e afins. */
 const EMOTICONS: [string[], string][] = [
   [[':)', ':-)', '=)'], '🙂'],
-  [[':D', ':-D', '=D'], '😃'],
+  [[':D', ':-D', '=D'], '😁'],
   [[':(', ':-(', '=('], '🙁'],
   [[";)", ';-)'], '😉'],
   [[':P', ':-P', ':p', ':-p'], '😛'],

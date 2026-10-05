@@ -83,7 +83,7 @@ Códigos `:nome:` na linha de escrita ficam como texto, com o emoji a seguir com
 segundo `:`, e são trocados pelo emoji ao enviar. Nomes em português de Portugal, sem acentos, e em inglês: `:fixe:` ou `:thumbsup:` 👍, `:gargalhada:` 😂, `:beijinho:` 😘, `:coracao:` ❤️, `:fogo:` 🔥,
 `:certo:` ✅, `:bica:` ☕, `:imperial:` 🍺, `:galo:` 🐓, `:autocarro:` 🚌, `:telemovel:` 📱, `:portugal:` 🇵🇹 … A lista
 completa está em `src/emoji.ts`. Os smileys clássicos também são convertidos quando isolados por espaços: `:)` 🙂,
-`:-D` 😃, `:(` 🙁, `;)` 😉, `:P` 😛, `:*` 😘, `:O` 😮, `:'(` 😢, `:/` 😕, `<3` ❤️, `xD` 😆, `B)` 😎 … Um `:/` dentro de
+`:-D` 😁, `:(` 🙁, `;)` 😉, `:P` 😛, `:*` 😘, `:O` 😮, `:'(` 😢, `:/` 😕, `<3` ❤️, `xD` 😆, `B)` 😎 … Um `:/` dentro de
 `http://` fica intacto. Emojis escritos directamente pelo teclado também funcionam.
 
 ### Imagens
