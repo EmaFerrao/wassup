@@ -4,8 +4,8 @@ import { logger } from './log.js'
 /**
  * Dentro do Herdr (o multiplexador de terminais para agentes) o wa apresenta-se como um agente chamado "wa" no pane em
  * que corre, para a barra lateral mostrar o estado: a escrever alguém → working, mensagens por ler → blocked (pede
- * atenção), nada → idle. O rótulo leva o nome da conversa activa, e o título do tab (ou do pane, se o tab estiver
- * dividido) acompanha o título da janela. A ligação é a mesma dos hooks oficiais: uma linha JSON pelo socket Unix.
+ * atenção), nada → idle. O título do tab (ou do pane, se o tab estiver dividido) acompanha o título da janela, com o
+ * nome da conversa activa. A ligação é a mesma dos hooks oficiais: uma linha JSON pelo socket Unix.
  */
 export type HerdrState = 'idle' | 'working' | 'blocked' | 'unknown'
 
@@ -15,7 +15,6 @@ export const inHerdr = env.HERDR_ENV === '1' && !!env.HERDR_SOCKET_PATH && !!env
 // O Herdr ordena os pedidos da mesma origem por seq; dois no mesmo milissegundo não podem empatar.
 let seq = Date.now()
 let lastState = ''
-let lastLabel = ''
 let lastTitle = ''
 
 /** Um pedido; devolve o `result` da resposta, ou undefined se falhar ou não responder em meio segundo. */
@@ -50,15 +49,6 @@ export function reportHerdr(state: HerdrState, message?: string) {
   if (key === lastState) return
   lastState = key
   void pane('pane.report_agent', { state, message: message ?? null })
-}
-
-/** O nome que aparece na lista de agentes: "wa · Fulano" com a conversa activa, ou só "wa". */
-export function labelHerdr(chat: string | null) {
-  if (!inHerdr) return
-  const label = chat ? `wa · ${chat}` : 'wa'
-  if (label === lastLabel) return
-  lastLabel = label
-  void pane('pane.report_metadata', { display_agent: label })
 }
 
 /**

@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import QRCode from 'qrcode'
 import { store, type ChatRow, type MessageRow, type ReactionRow } from './db.js'
 import { chatName, contactName, thumbPath, jidUser, type ConnState } from './wa.js'
-import { reportHerdr, labelHerdr, titleHerdr, releaseHerdr } from './herdr.js'
+import { inHerdr, reportHerdr, titleHerdr, releaseHerdr } from './herdr.js'
 import type { Backend } from './backend.js'
 import { waMarkup, esc, colorFor, setTheme, dim, italic, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, wrapWidth, fold, graphemes, wrapChars } from './format.js'
 import { decode, cached, cellSize, halfBlocks, detectImageMode, KittyImages, type Decoded, type ImageMode } from './image.js'
@@ -179,8 +179,11 @@ export class Ui {
   private dark: boolean
   private selectedBg: number
 
-  /** `wa ema`: só essa conversa de cada vez. Sem tabs e sem avisos nem estado das outras; o escolhedor troca-a. */
-  private get fixed(): boolean { return !!this.wanted }
+  /**
+   * `wa ema`, ou qualquer arranque dentro do Herdr: só uma conversa de cada vez. Sem tabs (no Herdr os tabs são os
+   * dele) e sem avisos nem estado das outras; o escolhedor troca-a.
+   */
+  private get fixed(): boolean { return !!this.wanted || inHerdr }
   /** Linhas ocupadas em baixo: a escrita (2) e a barra de tabs (1), que em conversa única não existe. */
   private get bottom(): number { return this.fixed ? 2 : 3 }
 
@@ -994,7 +997,7 @@ export class Ui {
     if (this.dirtyMessages && !this.showingQr) { this.dirtyMessages = false; if (this.current) this.renderMessages() }
     // Sem tabs (arranque sem nada guardado, ou as conversas a chegar pela primeira vez) abre-se a conversa mais
     // recente; o escolhedor só aparece com "/".
-    if (!this.fixed && !this.current && !this.pickerOpen && !this.showingQr) {
+    if (!this.current && !this.pickerOpen && !this.showingQr) {
       const recent = store.listChats().find(c => !c.archived)
       if (recent) return this.openTab(recent.jid)
     }
@@ -1008,7 +1011,6 @@ export class Ui {
     const title = `${unread.length ? '● ' : ''}${this.current ? chatName(this.current) : 'wa'}`
     if (title !== this.titleShown) { this.titleShown = title; this.screen.title = title; titleHerdr(title) }
     // No Herdr o mesmo sinal vai para o estado do agente: alguém a escrever é trabalho em curso, por ler pede atenção.
-    labelHerdr(this.current ? chatName(this.current) : null)
     const typing = [...this.typing].filter(([jid, stopped]) => stopped == null && (!this.fixed || jid === this.current)).map(([jid]) => chatName(jid))
     if (typing.length) reportHerdr('working', `${typing.join(', ')} a escrever`)
     else if (unread.length) reportHerdr('blocked', unread.map(c => `${chatName(c.jid)} (${c.unread})`).join(', '))
