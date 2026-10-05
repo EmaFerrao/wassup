@@ -228,7 +228,8 @@ export class Ui {
     this.picker = blessed.list({
       parent: this.screen, top: 0, left: 0, right: 0, height: '100%-4', padding: { left: 1, right: 1 }, hidden: true,
       tags: true, keys: true, mouse: true,
-      style: { selected: { inverse: true, bold: true } } as unknown as blessed.Widgets.ListElementStyle,
+      // A conversa seleccionada marca-se como o tab activo: negrito e a cor mais forte do tema, sem inverter.
+      style: { selected: { bold: true, fg: this.dark ? 'bright-white' : 'black' } } as unknown as blessed.Widgets.ListElementStyle,
     })
     // Por cima da segunda linha da escrita, encostado ao tab da conversa; criado por último para ficar à frente.
     this.toast = blessed.box({ parent: this.screen, top: '100%-2', left: 0, width: 1, height: 1, tags: true, hidden: true })
