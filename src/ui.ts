@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import QRCode from 'qrcode'
 import { store, type ChatRow, type MessageRow, type ReactionRow } from './db.js'
 import { chatName, contactName, thumbPath, jidUser, type ConnState } from './wa.js'
+import { reportHerdr, releaseHerdr } from './herdr.js'
 import type { Backend } from './backend.js'
 import { waMarkup, esc, colorFor, setTheme, dim, italic, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, wrapWidth, fold, graphemes, wrapChars } from './format.js'
 import { decode, cached, cellSize, halfBlocks, detectImageMode, KittyImages, type Decoded, type ImageMode } from './image.js'
@@ -388,6 +389,7 @@ export class Ui {
       }, 40)
     }
     this.drawTabs()
+    this.updateTitle()
     this.screen.render()
   }
 
@@ -958,16 +960,20 @@ export class Ui {
   // Título da janela: a conversa activa, com uma bola à frente enquanto houver mensagens por ler em qualquer conversa.
   private titleShown = ''
   private updateTitle() {
-    const unread = store.listChats().some(c => !c.archived && c.unread > 0)
-    const title = `${unread ? '● ' : ''}${this.current ? chatName(this.current) : 'wa'}`
-    if (title === this.titleShown) return
-    this.titleShown = title
-    this.screen.title = title
+    const unread = store.listChats().filter(c => !c.archived && c.unread > 0)
+    const title = `${unread.length ? '● ' : ''}${this.current ? chatName(this.current) : 'wa'}`
+    if (title !== this.titleShown) { this.titleShown = title; this.screen.title = title }
+    // No Herdr o mesmo sinal vai para o estado do agente: alguém a escrever é trabalho em curso, por ler pede atenção.
+    const typing = [...this.typing].filter(([, stopped]) => stopped == null).map(([jid]) => chatName(jid))
+    if (typing.length) reportHerdr('working', `${typing.join(', ')} a escrever`)
+    else if (unread.length) reportHerdr('blocked', unread.map(c => `${chatName(c.jid)} (${c.unread})`).join(', '))
+    else reportHerdr('idle')
   }
 
   quit(reason?: string) {
     this.kitty?.dispose()
     this.disableKittyKeyboard?.()
+    releaseHerdr()
     this.screen.destroy()
     if (reason) process.stderr.write(`${reason}\n`)
     this.wa.stop().catch(() => {})
