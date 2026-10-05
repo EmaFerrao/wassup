@@ -522,10 +522,13 @@ export class Ui {
     else { this.saveTabs(); this.scheduleRender() }
   }
 
+  /** Activa o tab e roda a barra até ele ficar em primeiro, junto da escrita; os outros mantêm a ordem cíclica. */
   private activateTab(i: number) {
     const jid = this.tabs[i]
     if (!jid) return
-    if (i !== this.active) { this.active = i; this.atBottom = true; this.dirtyMessages = true; this.selected = this.replyTo = this.reactTo = null }
+    if (jid !== this.current) { this.atBottom = true; this.dirtyMessages = true; this.selected = this.replyTo = this.reactTo = null }
+    this.tabs = [...this.tabs.slice(i), ...this.tabs.slice(0, i)]
+    this.active = 0
     this.dirtyTabs = true
     this.saveTabs()
     if (this.pickerOpen) this.closePicker(false)

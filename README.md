@@ -29,7 +29,8 @@ escuros conforme o caso, o tab activo fica branco vivo ou preto, e a mensagem se
 afastado do fundo real. Se o terminal não responder, assume-se escuro e o cinzento é médio.
 
 - **Tabs**: um por conversa aberta, com o número de não lidas a vermelho e um `×` para fechar. Clique no nome activa,
-  clique no `×` fecha. Tab circula pelos tabs abertos; `/` ou Ctrl-T abrem as "conversas". Com as "conversas" abertas
+  clique no `×` fecha. O tab activo fica sempre em primeiro, junto da escrita: activar outro roda a barra até ele lá
+  chegar, sem trocar a ordem cíclica dos restantes. Tab circula pelos tabs abertos; `/` ou Ctrl-T abrem as "conversas". Com as "conversas" abertas
   nenhum tab fica realçado. Mensagens novas numa conversa sem tab abrem um tab no fim,
   sem o activar nem reordenar os outros. Os tabs abertos e o activo ficam guardados e voltam no arranque seguinte.
 - **Conversas**: a lista de conversas, com as mais recentes em baixo, mostrando o nome, as não lidas, um `·`
