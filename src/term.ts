@@ -16,10 +16,13 @@ export interface TermCaps {
   answersQueries: boolean
   /** Nome e versão devolvidos pelo XTVERSION (`CSI > 0 q`), se o terminal o suportar. */
   version: string | null
+  /** Protocolo de teclado do Kitty: o terminal respondeu à consulta das bandeiras (`CSI ? u`). */
+  kittyKeyboard: boolean
 }
 
 const DA1_RE = /\x1b\[\?[\d;]*c/
 const XTVERSION_RE = /\x1bP>\|([^\x1b]*)\x1b\\/
+const KITTY_KBD_RE = /\x1b\[\?\d+u/
 const KITTY_OK_RE = /\x1b_Gi=31;OK\x1b\\/
 /** Terminais cuja identificação XTVERSION nos autoriza a enviar a consulta gráfica do Kitty. */
 const KITTY_TERMS = /ghostty|kitty|wezterm|konsole/i
@@ -58,11 +61,12 @@ function ask(query: string, timeoutMs: number): Promise<string> {
 }
 
 export async function probeTerminal(timeoutMs = 600): Promise<TermCaps> {
-  const caps: TermCaps = { kittyGraphics: false, utf8: localeIsUtf8(), answersQueries: false, version: null }
+  const caps: TermCaps = { kittyGraphics: false, utf8: localeIsUtf8(), answersQueries: false, version: null, kittyKeyboard: false }
   if (!process.stdin.isTTY || !process.stdout.isTTY) return caps
 
-  // 1. Identificação: XTVERSION (CSI, inofensiva) e DA1.
-  const first = await ask('\x1b[>0q', timeoutMs)
+  // 1. Identificação: XTVERSION e consulta do protocolo de teclado do Kitty (CSI, inofensivas) e DA1.
+  const first = await ask('\x1b[>0q\x1b[?u', timeoutMs)
+  caps.kittyKeyboard = KITTY_KBD_RE.test(first)
   caps.answersQueries = DA1_RE.test(first)
   caps.version = XTVERSION_RE.exec(first)?.[1]?.trim() ?? null
   if (!caps.answersQueries) return caps

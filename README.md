@@ -32,8 +32,10 @@ ligação e os avisos encostados à direita. Painéis distinguidos pelo fundo, s
   fecha a lista.
 - **Mensagens**: as tuas à direita, as dos outros à esquerda. Roda do rato, setas, PgUp/PgDn. Clique num anexo
   (imagem, vídeo, ficheiro, áudio) abre-o com `xdg-open`; se ainda não estiver descarregado, descarrega-o.
-- **Escrita**: duas linhas, texto partido por palavras; Enter envia. Ctrl-U limpa a linha. Clique num painel
-  activa-o; `i` no painel de mensagens volta à escrita.
+- **Escrita**: duas linhas, texto partido por palavras; Enter envia. Setas, Home e End movem o cursor, e um clique
+  põe-no onde se clicou; Backspace e Delete apagam para trás e para a frente, Ctrl-U limpa a linha e Shift-Backspace
+  apaga a palavra anterior (só em terminais com o protocolo de teclado do Kitty: Kitty, Ghostty, foot, WezTerm). O mesmo
+  vale para o filtro das "outras conversas". Clique num painel activa-o; `i` no painel de mensagens volta à escrita.
 - Esc fecha, por ordem: o filtro do escolhedor, o escolhedor, o tab activo. Fechar o último tab leva às "outras
   conversas"; Esc aí, sem tabs abertos, sai do programa. Ctrl-C e `:q` saem logo.
 - Mensagens novas noutra conversa fazem soar a campainha do terminal e aparecem à direita na barra de tabs; abrir ou activar

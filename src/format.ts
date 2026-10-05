@@ -123,6 +123,34 @@ export function wrapTagged(s: string, width: number): string[] {
 }
 
 /** Encosta uma linha com etiquetas ao bordo direito de `width` células. */
+/** Grafemas de um texto (o que o utilizador vê como um carácter: emoji com tom, bandeira, letra com acento). */
+export function graphemes(s: string): string[] {
+  return Array.from(new Intl.Segmenter().segment(s), g => g.segment)
+}
+
+/**
+ * Parte texto cru (já em grafemas, sem etiquetas) em linhas de largura ≤ `width`, por palavras (ou por caracteres
+ * quando a palavra não cabe). Ao contrário do wrapTagged, nada se apaga: cada grafema cai numa linha e coluna, para o
+ * cursor e o rato se poderem mapear. Os espaços ficam no fim da linha onde estavam, e passam à seguinte se não cabem.
+ */
+export function wrapChars(chars: string[], width: number): string[][] {
+  const lines: string[][] = [[]]
+  let curW = 0
+  const cw = (c: string) => visibleWidth(esc(c))
+  const push = (ch: string, w: number) => {
+    if (curW > 0 && curW + w > width) { lines.push([]); curW = 0 }
+    lines[lines.length - 1]!.push(ch); curW += w
+  }
+  for (let i = 0; i < chars.length;) {
+    if (/^\s$/.test(chars[i]!)) { push(chars[i]!, 1); i++; continue }
+    let j = i, w = 0
+    while (j < chars.length && !/^\s$/.test(chars[j]!)) w += cw(chars[j++]!)
+    if (curW > 0 && curW + w > width && w <= width) { lines.push([]); curW = 0 }
+    for (; i < j; i++) push(chars[i]!, cw(chars[i]!))
+  }
+  return lines
+}
+
 export function alignRight(s: string, width: number): string {
   return ' '.repeat(Math.max(0, width - visibleWidth(s))) + s
 }

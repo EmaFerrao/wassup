@@ -6,12 +6,13 @@ import QRCode from 'qrcode'
 import { store, type ChatRow, type MessageRow } from './db.js'
 import { chatName, contactName, thumbPath, jidUser, type ConnState } from './wa.js'
 import type { Backend } from './backend.js'
-import { waMarkup, esc, colorFor, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, fold } from './format.js'
+import { waMarkup, esc, colorFor, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, fold, graphemes, wrapChars } from './format.js'
 import { decode, cached, cellSize, halfBlocks, detectImageMode, KittyImages, type Decoded, type ImageMode } from './image.js'
 import { logger, uiLog } from './log.js'
 import { patchBlessedUnicode } from './unicode.js'
 import type { TermCaps } from './term.js'
 import { emojify } from './emoji.js'
+import { enableKittyKeyboard } from './kittykeys.js'
 
 type Focus = 'picker' | 'messages' | 'input'
 
@@ -49,6 +50,27 @@ const BG = { bar: 16, messages: 233, messagesFocus: 234, input: 234, inputFocus:
 // Os avisos passageiros são discretos; só a espera do QR e as quebras de ligação se destacam. Ligado não se mostra.
 const FG = { tab: 250, tabDim: 244, separator: 240, badge: 203, note: 245, warn: 221, error: 203 }
 
+/**
+ * Uma tecla aplicada a um texto com cursor (em grafemas): setas, Home/End, Backspace/Delete, Ctrl-U (tudo),
+ * Shift+Backspace (palavra anterior, só em terminais com o protocolo de teclado do Kitty) e caracteres escritos,
+ * inseridos no cursor. Devolve null se a tecla não é de edição.
+ */
+function edit(value: string, cursor: number, k: string, ch: string, key: blessed.Widgets.Events.IKeyEventArg): { value: string; cursor: number } | null {
+  const chars = graphemes(value)
+  const at = Math.min(cursor, chars.length)
+  const join = (before: string[], after: string[]) => ({ value: before.join('') + after.join(''), cursor: before.length })
+  if (k === 'left') return { value, cursor: Math.max(0, at - 1) }
+  if (k === 'right') return { value, cursor: Math.min(chars.length, at + 1) }
+  if (k === 'home') return { value, cursor: 0 }
+  if (k === 'end') return { value, cursor: chars.length }
+  if (k === 'backspace') return join(chars.slice(0, Math.max(0, at - 1)), chars.slice(at))
+  if (k === 'delete') return join(chars.slice(0, at), chars.slice(at + 1))
+  if (k === 'C-u') return join([], [])
+  if (k === 'S-backspace') return join(graphemes(chars.slice(0, at).join('').replace(/\S*\s*$/, '')), chars.slice(at))
+  if (ch && !key.ctrl && !key.meta && ch >= ' ' && ch !== '\x7f') return join([...chars.slice(0, at), ch], chars.slice(at))
+  return null
+}
+
 export class Ui {
   private screen: blessed.Widgets.Screen
   private tabsBar: blessed.Widgets.BoxElement
@@ -66,6 +88,13 @@ export class Ui {
   private pickerFilterShown: string | undefined
   private focus: Focus = 'input'
   private inputValue = ''
+  /** Posição do cursor na escrita e no filtro das outras conversas, em grafemas. */
+  private cursor = 0
+  private filterCursor = 0
+  /** Disposição da escrita no último desenho, para mapear cliques: linhas de grafemas e a primeira linha visível. */
+  private inputLines: string[][] = [[]]
+  private inputTop = 0
+  private disableKittyKeyboard?: () => void
   private lineMap: (MessageRow | null)[] = []
   private images: ImageSlot[] = []
   private mode: ImageMode
@@ -88,6 +117,8 @@ export class Ui {
     if (caps.utf8) (this.screen.program as unknown as { tput: { brokenACS: boolean } }).tput.brokenACS = true
     const program = this.screen.program as unknown as { _write: (s: string) => void }
     if (this.mode === 'kitty') this.kitty = new KittyImages(s => program._write(s))
+    // Só com o terminal a confirmar o protocolo: é o que permite distinguir Shift+Backspace para apagar palavras.
+    if (caps.kittyKeyboard) this.disableKittyKeyboard = enableKittyKeyboard((this.screen.program as unknown as { input: Parameters<typeof enableKittyKeyboard>[0] }).input, s => program._write(s))
     logger.info({ caps, images: this.mode, term: process.env.TERM }, 'terminal')
 
     // Disposição: mensagens a toda a largura, escrita em duas linhas, e no fundo a barra de tabs com o estado à direita.
@@ -180,7 +211,25 @@ export class Ui {
       this.screen.render()
     })
     this.msgBox.on('scroll', () => this.updateAtBottom())
-    this.input.on('click', () => { this.setFocus('input'); this.screen.render() })
+    // Clicar na escrita põe o cursor na posição clicada (ou no fim da linha, se o clique cair depois do texto).
+    this.input.on('click', (data: { x: number; y: number }) => {
+      if (!this.pickerOpen) this.setFocus('input')
+      {
+        const x = data.x - num(this.input.aleft) - num(this.input.ileft) - 2
+        const row = this.inputTop + data.y - num(this.input.atop) - num(this.input.itop)
+        let pos = 0
+        for (let r = 0; r < Math.min(row, this.inputLines.length); r++) pos += this.inputLines[r]!.length
+        const line = this.inputLines[row]
+        if (line) {
+          let col = 0
+          for (const ch of line) { const w = visibleWidth(esc(ch)); if (col + w / 2 > x) break; col += w; pos++ }
+        }
+        if (this.pickerOpen) this.filterCursor = pos
+        else this.cursor = pos
+        this.drawInput()
+      }
+      this.screen.render()
+    })
 
     this.wa.on('connection', (state, detail) => this.onConnection(state, detail))
     this.wa.on('chats', () => { this.dirtyTabs = true; if (this.pickerOpen) this.refreshPicker(); this.scheduleRender() })
@@ -249,7 +298,7 @@ export class Ui {
     // ESC fecha, por ordem: o filtro do escolhedor, o escolhedor, o tab activo, o programa.
     if (k === 'escape') {
       if (this.pickerOpen) {
-        if (this.filter) { this.filter = ''; this.refreshPicker(); return this.screen.render() }
+        if (this.filter) { this.filter = ''; this.filterCursor = 0; this.refreshPicker(); return this.screen.render() }
         // Sem tabs não há para onde voltar: o escolhedor é o único painel, e fechá-lo é sair.
         return this.tabs.length ? this.closePicker() : this.quit()
       }
@@ -276,17 +325,19 @@ export class Ui {
 
     if (this.focus === 'picker') {
       // Escrever com o escolhedor aberto filtra as conversas; setas e Enter são da lista.
-      if (k === 'backspace') { this.filter = Array.from(this.filter).slice(0, -1).join(''); this.refreshPicker(); return this.screen.render() }
-      if (ch && !key.ctrl && !key.meta && ch >= ' ' && ch !== '\x7f') { this.filter += ch; this.refreshPicker(); return this.screen.render() }
-      return
+      const e = edit(this.filter, this.filterCursor, k, ch, key)
+      if (!e) return
+      this.filterCursor = e.cursor
+      if (e.value !== this.filter) { this.filter = e.value; this.refreshPicker() }
+      else this.drawInput()
+      return this.screen.render()
     }
     if (this.focus === 'input') {
-      if (k === 'enter' || k === 'return') { const v = this.inputValue; this.inputValue = ''; this.drawInput(); this.screen.render(); return void this.submit(v) }
-      if (k === 'backspace') this.inputValue = Array.from(this.inputValue).slice(0, -1).join('')
-      else if (k === 'C-u') this.inputValue = ''
-      else if (k === 'C-w') this.inputValue = this.inputValue.replace(/\S*\s*$/, '')
-      else if (ch && !key.ctrl && !key.meta && ch >= ' ' && ch !== '\x7f') this.inputValue += ch
-      else return
+      if (k === 'enter' || k === 'return') { const v = this.inputValue; this.inputValue = ''; this.cursor = 0; this.drawInput(); this.screen.render(); return void this.submit(v) }
+      const e = edit(this.inputValue, this.cursor, k, ch, key)
+      if (!e) return
+      this.inputValue = e.value
+      this.cursor = e.cursor
       this.drawInput()
       return this.screen.render()
     }
@@ -464,6 +515,7 @@ export class Ui {
 
   private openPicker(filter = '') {
     this.filter = filter
+    this.filterCursor = graphemes(filter).length
     this.pickerOpen = true
     this.dirtyTabs = true
     this.picker.show()
@@ -562,6 +614,7 @@ export class Ui {
 
   quit(reason?: string) {
     this.kitty?.dispose()
+    this.disableKittyKeyboard?.()
     this.screen.destroy()
     if (reason) process.stderr.write(`${reason}\n`)
     this.wa.stop().catch(() => {})
@@ -588,18 +641,27 @@ export class Ui {
 
   private drawInput() {
     // Duas linhas, prompt ">" na primeira, texto partido por palavras (nunca a meio de uma) e continuação indentada.
-    // Com mais de duas linhas mostram-se as duas últimas, onde está o cursor. Com as "outras conversas" abertas, a
-    // mesma linha serve para escrever o filtro.
+    // Com mais de duas linhas mostram-se as duas à volta do cursor, que fica na de baixo sempre que possível. Com as
+    // "outras conversas" abertas, a mesma linha serve para escrever o filtro.
     const w = num(this.input.width) - num(this.input.iwidth) - 1
-    const value = this.pickerOpen ? this.filter : this.inputValue
-    const lines = wrapTagged(esc(value), Math.max(4, w - 2))
-    const cursor = this.focus === 'input' || this.focus === 'picker' ? '{inverse} {/inverse}' : ''
-    const last = lines.length - 1
-    if (visibleWidth(lines[last]!) >= w - 2) lines.push(cursor)
-    else lines[last] += cursor
-    const visible = lines.slice(-2)
-    const first = lines.length <= 2
-    this.input.setContent(visible.map((l, i) => (i === 0 && first ? '> ' : '  ') + l).join('\n'))
+    const width = Math.max(4, w - 2)
+    const chars = graphemes(this.pickerOpen ? this.filter : this.inputValue)
+    const cursor = Math.min(this.pickerOpen ? this.filterCursor : this.cursor, chars.length)
+    const lines = wrapChars(chars, width)
+    // Linha e coluna do cursor: no fim do texto fica depois do último grafema, e passa a uma linha nova se não cabe.
+    let row = 0, start = 0
+    while (row < lines.length - 1 && cursor >= start + lines[row]!.length) start += lines[row++]!.length
+    let col = cursor - start
+    if (col >= lines[row]!.length && visibleWidth(esc(lines[row]!.join(''))) >= width) { lines.push([]); row++; col = 0 }
+    this.inputLines = lines
+    this.inputTop = Math.max(0, Math.min(row - 1, lines.length - 2))
+    const showCursor = this.focus === 'input' || this.focus === 'picker'
+    const render = (line: string[], r: number) => {
+      if (!showCursor || r !== row) return esc(line.join(''))
+      return esc(line.slice(0, col).join('')) + '{inverse}' + esc(line[col] ?? ' ') + '{/inverse}' + esc(line.slice(col + 1).join(''))
+    }
+    const visible = lines.slice(this.inputTop, this.inputTop + 2)
+    this.input.setContent(visible.map((l, i) => (this.inputTop + i === 0 ? '> ' : '  ') + render(l, this.inputTop + i)).join('\n'))
   }
 
   private imagePathFor(row: MessageRow): string | null {
