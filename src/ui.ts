@@ -1101,7 +1101,7 @@ export class Ui {
   // ---------- sugestões de emoji ----------
 
   /** Um `:prefixo` com duas ou mais letras logo antes do cursor abre a lista dos emojis cujo nome começa assim. */
-  private updateSuggestions() {
+  private updateSuggestions(ghostDelay = 150) {
     const chars = graphemes(this.inputValue)
     const at = Math.min(this.cursor, chars.length)
     const m = /(^|[^\w:]):([a-z0-9_+-]{2,})$/i.exec(chars.slice(0, at).join(''))
@@ -1111,7 +1111,7 @@ export class Ui {
     if (!same) this.suggestIndex = 0
     if (m) this.suggestStart = at - graphemes(`:${m[2]}`).length
     this.drawSuggestions()
-    this.scheduleGhost()
+    this.scheduleGhost(ghostDelay)
   }
 
   // ---------- sugestões do modelo local ----------
@@ -1127,11 +1127,12 @@ export class Ui {
   }
 
   /**
-   * Pede ao modelo uma sugestão para o texto actual, 150 ms depois da última tecla e só com o cursor no fim, sem
-   * reacção em curso nem sugestões de emoji abertas. Um pedido novo cancela o anterior; a resposta só se usa se o
-   * texto ainda for o mesmo quando chega, e fica 4 s à vista.
+   * Pede ao modelo uma sugestão para o texto actual, `delay` ms depois da última tecla (150 a escrever; 0 logo depois
+   * de aceitar uma, que é quando se está parado à espera da seguinte) e só com o cursor no fim, sem reacção em curso
+   * nem sugestões de emoji abertas. Um pedido novo cancela o anterior; a resposta só se usa se o texto ainda for o
+   * mesmo quando chega, e fica 4 s à vista.
    */
-  private scheduleGhost() {
+  private scheduleGhost(delay = 150) {
     if (this.ghost && this.ghost.text !== this.inputValue) this.clearGhost()
     if (this.ghostTimer) { clearTimeout(this.ghostTimer); this.ghostTimer = undefined }
     this.ghostAbort?.abort()
@@ -1154,7 +1155,7 @@ export class Ui {
         this.drawInput()
         this.screen.render()
       }, e => { if (!abort.signal.aborted) logger.debug({ e }, 'llm') })
-    }, 150)
+    }, delay)
   }
 
   private clearGhost() {
@@ -1186,7 +1187,7 @@ export class Ui {
     this.accepted = /[\p{L}\p{M}\p{N}'-]$/u.test(this.inputValue) ? this.inputValue : undefined
     this.clearGhost()
     this.promoteActive()
-    this.updateSuggestions()
+    this.updateSuggestions(0)
     this.drawInput()
     this.screen.render()
   }
