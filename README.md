@@ -65,7 +65,7 @@ A marcação do WhatsApp é mostrada com atributos do terminal: `*negrito*` a ne
 blessed não sabe itálico), `~riscado~` a cinzento, `` `código` `` e blocos a amarelo, linhas `> citação` a cinzento,
 endereços a azul. Ao enviar, escreve-se a marcação tal como no telemóvel.
 
-Códigos `:nome:` na linha de escrita são trocados por emojis ao enviar, com nomes em português de Portugal, sem
+Códigos `:nome:` na linha de escrita são trocados por emojis assim que se fecha o segundo `:`, com nomes em português de Portugal, sem
 acentos, e em inglês: `:fixe:` ou `:thumbsup:` 👍, `:gargalhada:` 😂, `:beijinho:` 😘, `:coracao:` ❤️, `:fogo:` 🔥,
 `:certo:` ✅, `:bica:` ☕, `:imperial:` 🍺, `:galo:` 🐓, `:autocarro:` 🚌, `:telemovel:` 📱, `:portugal:` 🇵🇹 … A lista
 completa está em `src/emoji.ts`. Os smileys clássicos também são convertidos quando isolados por espaços: `:)` 🙂,

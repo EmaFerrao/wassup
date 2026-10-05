@@ -74,7 +74,8 @@ function palette(bg: string | null): { bar: Bg; messages: Bg; messagesFocus: Bg;
 /**
  * Uma tecla aplicada a um texto com cursor (em grafemas): setas, Home/End, Backspace/Delete, Ctrl-U (tudo),
  * Shift+Backspace (palavra anterior, só em terminais com o protocolo de teclado do Kitty) e caracteres escritos,
- * inseridos no cursor. Devolve null se a tecla não é de edição.
+ * inseridos no cursor, com :códigos: e smileys trocados pelo emoji assim que ficam completos. Devolve null se a tecla
+ * não é de edição.
  */
 function edit(value: string, cursor: number, k: string, ch: string, key: blessed.Widgets.Events.IKeyEventArg): { value: string; cursor: number } | null {
   const chars = graphemes(value)
@@ -88,7 +89,11 @@ function edit(value: string, cursor: number, k: string, ch: string, key: blessed
   if (k === 'delete') return join(chars.slice(0, at), chars.slice(at + 1))
   if (k === 'C-u') return join([], [])
   if (k === 'S-backspace') return join(graphemes(chars.slice(0, at).join('').replace(/\S*\s*$/, '')), chars.slice(at))
-  if (ch && !key.ctrl && !key.meta && ch >= ' ' && ch !== '\x7f') return join([...chars.slice(0, at), ch], chars.slice(at))
+  if (ch && !key.ctrl && !key.meta && ch >= ' ' && ch !== '\x7f') {
+    // Ao fechar um :código: ou isolar um smiley com espaço/pontuação, o emoji aparece logo na escrita.
+    const before = chars.slice(0, at).join('') + ch
+    return join(graphemes(/[:\s.,!?]/.test(ch) ? emojify(before) : before), chars.slice(at))
+  }
   return null
 }
 
