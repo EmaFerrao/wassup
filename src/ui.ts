@@ -1177,12 +1177,12 @@ export class Ui {
         ? `↩ ${this.who(target)}: ${this.snippet(target)}`
         : `reagir a ${this.who(target)}: ${this.snippet(target)} · :código: ou emoji e Enter; Enter vazio retira`
     // Sugestão do modelo, discreta, em itálico cinzento na sequência do texto: as letras que faltam à palavra a meio,
-    // coladas ao cursor (que pousa sobre a primeira), ou, três células à frente, a palavra certa a seguir a "⇢", seja a palavra a meio
+    // coladas ao cursor (que pousa sobre a primeira), ou, duas células à frente, a palavra certa a seguir a "⇢", seja a palavra a meio
     // corrigida ou uma palavra errada mais atrás. Tab aceita.
     const ghost = this.ghostShown()
     const view = ghost ? this.ghostView(ghost) : null
     const ghostNext = view?.kind === 'suffix' ? view.text : ''
-    const ghostWord = view && view.kind !== 'suffix' ? `   ⇢ ${view.text}` : ''
+    const ghostWord = view && view.kind !== 'suffix' ? `  ⇢ ${view.text}` : ''
     this.inputHeader = header != null
     const rowsAvail = header ? 1 : 2
     const width = Math.max(4, w - 2)
