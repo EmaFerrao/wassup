@@ -35,12 +35,20 @@ export function waMarkup(text: string): string {
 }
 
 // Índices da paleta de 256 cores: nas etiquetas o blessed só aceita os oito nomes básicos, e aproxima hexadecimais às 16 básicas.
-const PALETTE = [81, 213, 221, 120, 210, 111, 179, 151, 177, 216, 73]
+// Tons claros para fundos escuros e tons escuros para fundos claros, pela mesma ordem de matizes.
+const PALETTE_DARK_BG = [81, 213, 221, 120, 210, 111, 179, 151, 177, 216, 73]
+const PALETTE_LIGHT_BG = [31, 127, 130, 28, 160, 25, 94, 65, 91, 166, 30]
+let palette = PALETTE_DARK_BG
+
+/** Escolhe a paleta dos nomes conforme o fundo do terminal é escuro ou claro. */
+export function setNameColors(darkBg: boolean): void {
+  palette = darkBg ? PALETTE_DARK_BG : PALETTE_LIGHT_BG
+}
 
 export function colorFor(key: string): number {
   let h = 0
   for (const ch of key) h = (h * 31 + ch.codePointAt(0)!) >>> 0
-  return PALETTE[h % PALETTE.length]!
+  return palette[h % palette.length]!
 }
 
 export function fmtTime(ts: number): string {

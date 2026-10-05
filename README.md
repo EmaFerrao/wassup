@@ -19,7 +19,14 @@ Requisitos: Node 22.13 ou mais recente (usa o SQLite embutido no Node). Testado 
 ## Interface
 
 Mensagens a toda a largura, duas linhas de escrita com o prompt `>`, e no fundo a barra de tabs, com o estado da
-ligação e os avisos encostados à direita. Painéis distinguidos pelo fundo, sem molduras; o painel activo fica um tom mais claro.
+ligação e os avisos encostados à direita. Painéis distinguidos pelo fundo, sem molduras; o painel activo fica um tom
+mais afastado do fundo.
+
+As cores são as do tema do terminal: a barra de tabs e a lista de conversas usam o fundo e o texto por omissão, e os
+realces usam as 16 cores nomeadas (cinzento, vermelho, amarelo…), que o tema já garante legíveis. No arranque o
+cliente pergunta ao terminal a cor real do fundo (OSC 11); os painéis de mensagens e de escrita ficam em cinzentos
+um pouco mais claros que ela num tema escuro, ou um pouco mais escuros num tema claro, e os nomes nas mensagens
+usam tons claros ou escuros conforme o caso. Se o terminal não responder, fica tudo no fundo por omissão.
 
 - **Tabs**: um por conversa aberta, com o número de não lidas a vermelho e um `×` para fechar. Clique no nome activa,
   clique no `×` fecha. Ctrl-W fecha o tab activo; Tab e Shift-Tab percorrem os tabs e, a seguir ao último, as "conversas", que Ctrl-T também abre; Ctrl-N e Ctrl-P também mudam de tab. O tab "conversas", com a soma das
@@ -67,10 +74,11 @@ completa está em `src/emoji.ts`. Os smileys clássicos também são convertidos
 
 ### Imagens
 
-- No arranque o cliente pergunta ao terminal o que sabe fazer (`src/term.ts`), em duas fases: primeiro a versão
-  (XTVERSION, uma sequência CSI que qualquer terminal ignora se não conhecer) e um pedido de identificação; só a quem
-  se identificar como Ghostty, Kitty, WezTerm ou Konsole manda depois a consulta do protocolo gráfico, e só usa o que
-  o terminal confirmar. Nada é assumido pelo `TERM`.
+- No arranque o cliente pergunta ao terminal o que sabe fazer (`src/term.ts`), em três fases: primeiro a versão
+  (XTVERSION, uma sequência CSI que qualquer terminal ignora se não conhecer) e um pedido de identificação; a quem
+  responder pergunta as cores por omissão do texto e do fundo (OSC 10 e 11); e só a quem se identificar como Ghostty,
+  Kitty, WezTerm ou Konsole manda depois a consulta do protocolo gráfico, e só usa o que o terminal confirmar. Nada é
+  assumido pelo `TERM`.
 - Em terminais que respondem ao protocolo gráfico do Kitty (Ghostty, Kitty, WezTerm, Konsole) as imagens, stickers
   e miniaturas de vídeo aparecem a sério dentro do painel de mensagens.
 - Nos restantes são desenhadas com meios-blocos `▀` coloridos (256 cores).

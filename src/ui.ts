@@ -6,7 +6,7 @@ import QRCode from 'qrcode'
 import { store, type ChatRow, type MessageRow } from './db.js'
 import { chatName, contactName, thumbPath, jidUser, type ConnState } from './wa.js'
 import type { Backend } from './backend.js'
-import { waMarkup, esc, colorFor, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, fold, graphemes, wrapChars } from './format.js'
+import { waMarkup, esc, colorFor, setNameColors, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, fold, graphemes, wrapChars } from './format.js'
 import { decode, cached, cellSize, halfBlocks, detectImageMode, KittyImages, type Decoded, type ImageMode } from './image.js'
 import { logger, uiLog } from './log.js'
 import { patchBlessedUnicode } from './unicode.js'
@@ -43,12 +43,33 @@ interface ClinesBox extends blessed.Widgets.BoxElement {
 
 const HELP = 'Tab/Shift-Tab muda de tab · Ctrl-T conversas · Ctrl-W fecha tab · Esc fecha · PgUp/PgDn histórico · :up ficheiro · :down anexos · :fixe: emoji'
 
-// Cores por índice da paleta de 256: o blessed aproxima qualquer cor hexadecimal às 16 básicas.
-// Esquema de cores, por índice da paleta de 256. Barra de tabs e "conversas" em preto; o tab activo tem o fundo
-// da escrita, ligeiramente mais claro, e fica ligado a ela; os inactivos ficam no preto com texto claro e separadores.
-const BG = { bar: 16, messages: 233, messagesFocus: 234, input: 234, inputFocus: 235, picker: 16, pickerFocus: 16 }
-// Os avisos passageiros são discretos; só a espera do QR e as quebras de ligação se destacam. Ligado não se mostra.
-const FG = { tab: 250, tabDim: 244, separator: 240, badge: 203, note: 245, warn: 221, error: 203 }
+// Cores do tema do terminal, nunca assumidas: texto e fundo por omissão e as 16 nomeadas, que o tema garante
+// legíveis sobre o seu fundo. Os avisos passageiros são discretos; só a espera do QR e as quebras de ligação se
+// destacam. Ligado não se mostra.
+const FG = { tab: 'default', tabDim: 'gray', separator: 'gray', badge: 'red', note: 'gray', warn: 'yellow', error: 'red' }
+
+/** Cinzento da rampa de 256 cores (232..255, de #080808 a #eeeeee em passos de 10) mais próximo de uma luminosidade. */
+function gray256(luma: number): number {
+  return 232 + Math.max(0, Math.min(23, Math.round((luma - 8) / 10)))
+}
+
+type Bg = number | 'default'
+/**
+ * Fundos dos painéis a partir do fundo real do terminal (OSC 11): barra de tabs e escolhedor no fundo por omissão;
+ * mensagens e escrita em cinzentos um pouco afastados da luminosidade dele, para o lado claro num tema escuro e para
+ * o escuro num claro, e o painel activo um tom mais afastado. Cinzentos porque a paleta de 256 só é fina na rampa
+ * deles; o cubo de cores salta de 0 para 95 e não tem tons perto de um fundo escuro colorido. Sem o fundo conhecido
+ * fica tudo no fundo por omissão.
+ */
+function palette(bg: string | null): { bar: Bg; messages: Bg; messagesFocus: Bg; input: Bg; inputFocus: Bg; picker: Bg; pickerFocus: Bg; dark: boolean } {
+  const base = { bar: 'default' as Bg, picker: 'default' as Bg, pickerFocus: 'default' as Bg }
+  const m = bg && /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(bg)
+  if (!m) return { ...base, messages: 'default', messagesFocus: 'default', input: 'default', inputFocus: 'default', dark: true }
+  const luma = 0.299 * parseInt(m[1]!, 16) + 0.587 * parseInt(m[2]!, 16) + 0.114 * parseInt(m[3]!, 16)
+  const dark = luma < 128
+  const shade = (delta: number) => gray256(luma + (dark ? delta : -delta))
+  return { ...base, messages: shade(18), messagesFocus: shade(28), input: shade(28), inputFocus: shade(38), dark }
+}
 
 /**
  * Uma tecla aplicada a um texto com cursor (em grafemas): setas, Home/End, Backspace/Delete, Ctrl-U (tudo),
@@ -70,6 +91,7 @@ function edit(value: string, cursor: number, k: string, ch: string, key: blessed
   if (ch && !key.ctrl && !key.meta && ch >= ' ' && ch !== '\x7f') return join([...chars.slice(0, at), ch], chars.slice(at))
   return null
 }
+
 
 export class Ui {
   private screen: blessed.Widgets.Screen
@@ -108,8 +130,12 @@ export class Ui {
   private dirtyMessages = true
   private showingQr = false
 
+  private BG: ReturnType<typeof palette>
+
   constructor(private wa: Backend, caps: TermCaps) {
     this.mode = detectImageMode(caps.kittyGraphics)
+    this.BG = palette(caps.bg)
+    setNameColors(this.BG.dark)
     patchBlessedUnicode()
     this.screen = blessed.screen({ smartCSR: true, fullUnicode: caps.utf8, title: 'wa', warnings: false })
     // Com localização UTF-8 as molduras saem em caracteres de caixa Unicode (─│┌). Sem isto o blessed muda para o
@@ -119,27 +145,27 @@ export class Ui {
     if (this.mode === 'kitty') this.kitty = new KittyImages(s => program._write(s))
     // Só com o terminal a confirmar o protocolo: é o que permite distinguir Shift+Backspace para apagar palavras.
     if (caps.kittyKeyboard) this.disableKittyKeyboard = enableKittyKeyboard((this.screen.program as unknown as { input: Parameters<typeof enableKittyKeyboard>[0] }).input, s => program._write(s))
-    logger.info({ caps, images: this.mode, term: process.env.TERM }, 'terminal')
+    logger.info({ caps, images: this.mode, bg: this.BG, term: process.env.TERM }, 'terminal')
 
     // Disposição: mensagens a toda a largura, escrita em duas linhas, e no fundo a barra de tabs com o estado à direita.
     this.tabsBar = blessed.box({
       parent: this.screen, top: '100%-1', left: 0, width: '100%', height: 1, tags: true, mouse: true,
-      style: { bg: BG.bar } as unknown as blessed.Widgets.Types.TStyle,
+      style: { bg: this.BG.bar } as unknown as blessed.Widgets.Types.TStyle,
     })
     this.msgBox = blessed.box({
       parent: this.screen, top: 0, left: 0, right: 0, height: '100%-3', padding: { left: 1, right: 1 },
       tags: true, scrollable: true, alwaysScroll: true, keys: true, vi: true, mouse: true,
-      style: { bg: BG.messages, focus: { bg: BG.messagesFocus } } as unknown as blessed.Widgets.Types.TStyle,
+      style: { bg: this.BG.messages, focus: { bg: this.BG.messagesFocus } } as unknown as blessed.Widgets.Types.TStyle,
     }) as ClinesBox
     this.input = blessed.box({
       parent: this.screen, top: '100%-3', left: 0, right: 0, height: 2, padding: { left: 1, right: 1 },
       tags: true, mouse: true,
-      style: { bg: BG.input, focus: { bg: BG.inputFocus } } as unknown as blessed.Widgets.Types.TStyle,
+      style: { bg: this.BG.input, focus: { bg: this.BG.inputFocus } } as unknown as blessed.Widgets.Types.TStyle,
     })
     this.picker = blessed.list({
       parent: this.screen, top: 0, left: 0, right: 0, height: '100%-3', padding: { left: 1, right: 1 }, hidden: true,
       tags: true, keys: true, mouse: true,
-      style: { bg: BG.picker, focus: { bg: BG.pickerFocus }, item: { bg: BG.picker }, selected: { bg: 24, fg: 'white', bold: true } } as unknown as blessed.Widgets.ListElementStyle,
+      style: { bg: this.BG.picker, focus: { bg: this.BG.pickerFocus }, item: { bg: this.BG.picker }, selected: { inverse: true, bold: true } } as unknown as blessed.Widgets.ListElementStyle,
     })
 
     // Rato só com cliques e roda (1000) em codificação SGR (1006), em vez do conjunto que o blessed activa para xterm
@@ -479,7 +505,7 @@ export class Ui {
     const fits = (w: number) => tabs.reduce((sum, t) => sum + Math.min(strWidth(t.name), w) + overhead(t), 0) <= maxName
     while (nameW > 6 && !fits(nameW)) nameW--
     // A escrita muda de tom quando está activa; o tab activo acompanha-a para o fundo ser sempre o mesmo.
-    const activeBg = this.focus === 'input' ? BG.inputFocus : BG.input
+    const activeBg = this.focus === 'input' ? this.BG.inputFocus : this.BG.input
     let out = '', x = 0
     this.segments = []
     for (const t of tabs) {
@@ -490,7 +516,7 @@ export class Ui {
       this.segments.push({ x0: x, x1: x + w, index: t.i, closeX0, closeX1: closeX0 + 1 })
       const badge = t.badge ? ` {${FG.badge}-fg}{bold}${t.badge}{/bold}{/${FG.badge}-fg}` : ''
       out += t.i === this.active && !this.pickerOpen
-        ? `{${activeBg}-bg}{white-fg}{bold} ${esc(name)}{/bold}${badge} {${FG.tabDim}-fg}×{/${FG.tabDim}-fg} {/white-fg}{/${activeBg}-bg}`
+        ? `{${activeBg}-bg}{bold} ${esc(name)}{/bold}${badge} {${FG.tabDim}-fg}×{/${FG.tabDim}-fg} {/${activeBg}-bg}`
         : `{${FG.tab}-fg} ${esc(name)}${badge} {${FG.tabDim}-fg}×{/${FG.tabDim}-fg}{/${FG.tab}-fg}{${FG.separator}-fg}│{/${FG.separator}-fg}`
       x += w
     }
@@ -498,7 +524,7 @@ export class Ui {
     if (this.pickerOpen) {
       this.segments.push({ x0: x, x1: x + strWidth(plus), index: -1, closeX0: 0, closeX1: 0, plus: true })
       const plusText = ` conversas${othersBadge ? ` {${FG.badge}-fg}{bold}${othersBadge}{/bold}{/${FG.badge}-fg}` : ''} `
-      out += `{${activeBg}-bg}{white-fg}{bold}${plusText}{/bold}{/white-fg}{/${activeBg}-bg}`
+      out += `{${activeBg}-bg}{bold}${plusText}{/bold}{/${activeBg}-bg}`
       x += strWidth(plus)
     }
     // Estado encostado à direita: a mensagem passageira (amarela) ou a ligação; cortado se não couber.
@@ -565,7 +591,7 @@ export class Ui {
         const body = last.type === 'text' ? last.text.replace(/\s+/g, ' ') : last.type === 'deleted' ? 'mensagem apagada' : `[${kind[last.type] ?? last.type}]${last.text ? ' ' + last.text.replace(/\s+/g, ' ') : ''}`
         preview = truncate(`${fmtTime(last.ts)} ${who}${body}`, width - nameW - 2)
       }
-      return `${left}${' '.repeat(Math.max(1, nameW - visibleWidth(left)))}{245-fg}${esc(preview)}{/245-fg}`
+      return `${left}${' '.repeat(Math.max(1, nameW - visibleWidth(left)))}{gray-fg}${esc(preview)}{/gray-fg}`
     })
     this.picker.setItems(items as unknown as string[])
     // Lista encostada ao fundo, junto ao prompt, quando é mais curta que o painel.
