@@ -179,7 +179,10 @@ export class Ui {
   private dark: boolean
   private selectedBg: number
 
-  constructor(private wa: Backend, caps: TermCaps) {
+  /** `wa ema`: só essa conversa. Sem tabs, sem escolhedor e sem avisos nem estado das outras. */
+  private get fixed(): boolean { return !!this.wanted }
+
+  constructor(private wa: Backend, caps: TermCaps, private wanted?: string) {
     this.mode = detectImageMode(caps.kittyGraphics)
     ;({ dark: this.dark, selected: this.selectedBg } = theme(caps.bg))
     this.ring = rainbowRing(this.dark)
@@ -245,6 +248,12 @@ export class Ui {
     this.setFocus('input')
     this.drawInput()
     this.drawStatus()
+    // `wa paula` abre logo essa conversa: a primeira, da mais recente para trás, cujo nome ou número contém o texto.
+    if (this.wanted) {
+      const jid = this.findChat(this.wanted)
+      if (!jid) { this.quit(`nenhuma conversa com "${this.wanted}"`); return }
+      this.openTab(jid)
+    }
     this.renderNow()
     // drawStatus já deixou a barra de tabs desenhada, por isso o renderNow acima não passa pelo título nem pelo Herdr.
     this.updateTitle()
@@ -322,6 +331,7 @@ export class Ui {
     this.wa.on('messages', jid => { if (jid === '*' || jid === this.current) this.dirtyMessages = true; this.dirtyTabs = true; this.scheduleRender() })
     this.wa.on('notify', (jid, row) => {
       if (jid === this.current) { this.wa.markRead(jid).catch(e => logger.warn({ e }, 'markRead')); return }
+      if (this.fixed) return
       if (this.tabs.includes(jid)) { this.screen.program.bell(); this.notify(jid, row.text || `[${row.type}]`); return }
       // Conversa sem tab: com vários terminais, só o usado mais recentemente abre o tab, e nunca se a conversa já
       // tiver tab noutro terminal vivo.
@@ -779,7 +789,8 @@ export class Ui {
       return { jid, i, name: chatName(jid), badge: unread > 0 ? `(${unread})` : '' }
     })
     // Encurtar os nomes para caberem todos, até um mínimo de 6 caracteres; para lá disso a barra corta à direita.
-    const overhead = (t: { badge: string }) => 1 + (t.badge ? strWidth(t.badge) + 1 : 0) + 2 + 1
+    const close = this.fixed ? '' : ' ×'
+    const overhead = (t: { badge: string }) => 1 + (t.badge ? strWidth(t.badge) + 1 : 0) + strWidth(close) + 1
     let nameW = Math.max(...tabs.map(t => strWidth(t.name)), 0)
     const fits = (w: number) => tabs.reduce((sum, t) => sum + Math.min(strWidth(t.name), w) + overhead(t), 0) <= maxName
     while (nameW > 6 && !fits(nameW)) nameW--
@@ -790,14 +801,15 @@ export class Ui {
     for (const t of tabs) {
       const name = truncate(t.name, nameW)
       const label = this.typing.has(t.jid) ? this.rainbow(name, this.typing.get(t.jid)!) : esc(name)
-      const text = ` ${name}${t.badge ? ' ' + t.badge : ''} × `
+      const text = ` ${name}${t.badge ? ' ' + t.badge : ''}${close} `
       const w = strWidth(text)
-      const closeX0 = x + w - 2
-      this.segments.push({ x0: x, x1: x + w, index: t.i, closeX0, closeX1: closeX0 + 1 })
+      const closeX0 = close ? x + w - 2 : x + w
+      this.segments.push({ x0: x, x1: x + w, index: t.i, closeX0, closeX1: close ? closeX0 + 1 : closeX0 })
       const badge = t.badge ? ` {${FG.badge}-fg}{bold}${t.badge}{/bold}{/${FG.badge}-fg}` : ''
+      const closeMark = close ? ` ${dim('×')}` : ''
       out += t.i === this.active && !this.pickerOpen
-        ? `{${strong}-fg}{bold} ${label}{/bold}{/${strong}-fg}${badge} ${dim('×')} `
-        : `{${FG.tab}-fg} ${label}{/${FG.tab}-fg}${badge} ${dim('×')} `
+        ? `{${strong}-fg}{bold} ${label}{/bold}{/${strong}-fg}${badge}${closeMark} `
+        : `{${FG.tab}-fg} ${label}{/${FG.tab}-fg}${badge}${closeMark} `
       x += w
     }
     // Estado encostado à direita: a mensagem passageira (amarela) ou a ligação; cortado se não couber.
@@ -855,6 +867,7 @@ export class Ui {
   // ---------- escolhedor ----------
 
   private openPicker(filter = '') {
+    if (this.fixed) return this.flash(`só a conversa com ${chatName(this.current!)}`)
     this.filter = filter
     this.filterCursor = graphemes(filter).length
     this.pickerOpen = true
@@ -874,6 +887,11 @@ export class Ui {
     this.msgBox.show()
     this.setFocus('input')
     if (render) this.renderNow()
+  }
+
+  private findChat(text: string): string | null {
+    const f = fold(text)
+    return store.listChats().find(c => fold(chatName(c.jid)).includes(f) || jidUser(c.jid).includes(f))?.jid ?? null
   }
 
   private pickChat(index: number) {
@@ -952,7 +970,7 @@ export class Ui {
     if (this.dirtyMessages && !this.showingQr) { this.dirtyMessages = false; if (this.current) this.renderMessages() }
     // Sem tabs (arranque sem nada guardado, ou as conversas a chegar pela primeira vez) abre-se a conversa mais
     // recente; o escolhedor só aparece com "/".
-    if (!this.current && !this.pickerOpen && !this.showingQr) {
+    if (!this.fixed && !this.current && !this.pickerOpen && !this.showingQr) {
       const recent = store.listChats().find(c => !c.archived)
       if (recent) return this.openTab(recent.jid)
     }
@@ -962,12 +980,12 @@ export class Ui {
   // Título da janela: a conversa activa, com uma bola à frente enquanto houver mensagens por ler em qualquer conversa.
   private titleShown = ''
   private updateTitle() {
-    const unread = store.listChats().filter(c => !c.archived && c.unread > 0)
+    const unread = store.listChats().filter(c => c.unread > 0 && (this.fixed ? c.jid === this.current : !c.archived))
     const title = `${unread.length ? '● ' : ''}${this.current ? chatName(this.current) : 'wa'}`
     if (title !== this.titleShown) { this.titleShown = title; this.screen.title = title }
     // No Herdr o mesmo sinal vai para o estado do agente: alguém a escrever é trabalho em curso, por ler pede atenção.
     labelHerdr(this.current ? chatName(this.current) : null)
-    const typing = [...this.typing].filter(([, stopped]) => stopped == null).map(([jid]) => chatName(jid))
+    const typing = [...this.typing].filter(([jid, stopped]) => stopped == null && (!this.fixed || jid === this.current)).map(([jid]) => chatName(jid))
     if (typing.length) reportHerdr('working', `${typing.join(', ')} a escrever`)
     else if (unread.length) reportHerdr('blocked', unread.map(c => `${chatName(c.jid)} (${c.unread})`).join(', '))
     else reportHerdr('idle')

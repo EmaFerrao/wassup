@@ -77,5 +77,5 @@ class BackendProxy extends EventEmitter<WaEvents> implements Backend {
 
 const caps = await probeTerminal()
 const backend = new BackendProxy()
-new Ui(backend, caps)
+new Ui(backend, caps, process.argv.slice(2).join(' ').trim() || undefined)
 await backend.elect()
