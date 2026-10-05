@@ -824,10 +824,12 @@ export class Ui {
     if (this.fixed) {
       // Sem tab por onde correr o arco-íris, "a escrever…" corre aqui enquanto a outra pessoa escreve.
       const jid = this.current
-      if (!text && jid && this.typing.has(jid)) text = this.rainbow('a escrever…', this.typing.get(jid)!)
+      const typing = !text && !!jid && this.typing.has(jid)
+      if (typing) text = this.rainbow('a escrever…', this.typing.get(jid)!)
       if (!text) return this.toast.hide()
       const w = Math.min(width, visibleWidth(text) + 2)
-      this.toast.left = width - w; this.toast.width = w
+      // O estado encosta à direita; "a escrever…" fica à esquerda, debaixo do ">" da escrita.
+      this.toast.left = typing ? 0 : width - w; this.toast.width = w
       this.toast.setContent(` ${text} `)
       return this.toast.show()
     }
