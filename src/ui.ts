@@ -188,8 +188,10 @@ export class Ui {
    * dele) e sem avisos nem estado das outras; o escolhedor troca-a.
    */
   private get fixed(): boolean { return !!this.wanted || inHerdr }
-  /** Linhas ocupadas em baixo: a escrita (2) e a barra de tabs (1), que em conversa única não existe. */
-  private get bottom(): number { return this.fixed ? 2 : 3 }
+  /** Linhas da escrita: duas no mínimo, e cresce com o texto até metade do ecrã. */
+  private inputRows = 2
+  /** Linhas ocupadas em baixo: a escrita e a barra de tabs (1), que em conversa única não existe. */
+  private get bottom(): number { return this.inputRows + (this.fixed ? 0 : 1) }
 
   constructor(private wa: Backend, caps: TermCaps, private wanted?: string) {
     this.mode = detectImageMode(caps.kittyGraphics)
@@ -221,7 +223,7 @@ export class Ui {
       tags: true, scrollable: true, alwaysScroll: true, mouse: true,
     }) as ClinesBox
     this.input = blessed.box({
-      parent: this.screen, top: `100%-${this.bottom}`, left: 0, right: 0, height: 2, padding: { left: 1, right: 1 },
+      parent: this.screen, top: `100%-${this.bottom}`, left: 0, right: 0, height: this.inputRows, padding: { left: 1, right: 1 },
       tags: true, mouse: true,
     })
     this.picker = blessed.list({
@@ -1217,7 +1219,7 @@ export class Ui {
   }
 
   private drawInput() {
-    // Duas linhas, prompt ">" na primeira, texto partido por palavras (nunca a meio de uma) e continuação indentada.
+    // Duas linhas no mínimo (cresce com o texto), prompt ">" na primeira, texto partido por palavras (nunca a meio de uma) e continuação indentada.
     // Com mais de duas linhas mostram-se as duas à volta do cursor, que fica na de baixo sempre que possível. Com as
     // "conversas" abertas, a mesma linha serve para escrever o filtro. A responder ou a reagir, a primeira
     // linha diz a que mensagem, e sobra uma para o texto.
@@ -1236,11 +1238,14 @@ export class Ui {
     const ghostNext = view?.kind === 'suffix' ? view.text : ''
     const ghostWord = view && view.kind !== 'suffix' ? `  ⇢ ${view.text}` : ''
     this.inputHeader = header != null
-    const rowsAvail = header ? 1 : 2
     const width = Math.max(4, w - 2)
     const chars = graphemes(this.pickerOpen ? this.filter : this.inputValue)
     const cursor = Math.min(this.pickerOpen ? this.filterCursor : this.cursor, chars.length)
     const lines = wrapChars(chars, width)
+    // A escrita cresce com o texto, até metade do ecrã; o cabeçalho (responder, reagir, editar) ocupa uma das linhas.
+    const rows = Math.max(2, Math.min(lines.length + (header ? 1 : 0), Math.floor(num(this.screen.height) / 2)))
+    if (rows !== this.inputRows) this.resizeInput(rows)
+    const rowsAvail = header ? rows - 1 : rows
     // Linha e coluna do cursor: no fim do texto fica depois do último grafema, e passa a uma linha nova se não cabe.
     let row = 0, start = 0
     while (row < lines.length - 1 && cursor >= start + lines[row]!.length) start += lines[row++]!.length
@@ -1270,6 +1275,20 @@ export class Ui {
     const out = visible.map((l, i) => (this.inputTop + i === 0 ? prompt : '  ') + render(l, this.inputTop + i))
     if (header) out.unshift(dim(esc(truncate(header, w))))
     this.input.setContent(out.join('\n'))
+  }
+
+  /** Muda a altura da escrita e desloca o que depende dela: mensagens, barra flutuante, sugestões e escolhedor. */
+  private resizeInput(rows: number) {
+    this.inputRows = rows
+    this.input.height = rows
+    this.input.top = `100%-${this.bottom}`
+    this.msgBox.height = `100%-${this.bottom}`
+    this.picker.height = `100%-${this.bottom + 1}`
+    this.dirtyMessages = true
+    this.dirtyTabs = true
+    if (this.suggestions.length) this.drawSuggestions()
+    if (this.pickerOpen) this.refreshPicker()
+    this.scheduleRender()
   }
 
   private imagePathFor(row: MessageRow): string | null {
