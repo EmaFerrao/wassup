@@ -98,6 +98,10 @@ export class Ui {
   private msgBox: ClinesBox
   private input: blessed.Widgets.BoxElement
   private picker: blessed.Widgets.ListElement
+  /** Aviso de mensagem nova noutra conversa: uma linha com fundo, pousada sobre o tab dela na barra. */
+  private toast: blessed.Widgets.BoxElement
+  private notice: { jid: string; text: string } | undefined
+  private noticeTimer: NodeJS.Timeout | undefined
 
   private tabs: string[] = []
   private active = -1
@@ -175,6 +179,8 @@ export class Ui {
       tags: true, keys: true, mouse: true,
       style: { selected: { inverse: true, bold: true } } as unknown as blessed.Widgets.ListElementStyle,
     })
+    // Por cima da segunda linha da escrita, encostado ao tab da conversa; criado por último para ficar à frente.
+    this.toast = blessed.box({ parent: this.screen, top: '100%-2', left: 0, width: 1, height: 1, tags: true, hidden: true })
 
     // Rato só com cliques e roda (1000) em codificação SGR (1006), em vez do conjunto que o blessed activa para xterm
     // (1000/1002/1003/1005): o relato de movimento (1003) e a codificação UTF-8 (1005) baralham apps de SSH no
@@ -271,13 +277,13 @@ export class Ui {
     this.wa.on('messages', jid => { if (jid === '*' || jid === this.current) this.dirtyMessages = true; this.dirtyTabs = true; this.scheduleRender() })
     this.wa.on('notify', (jid, row) => {
       if (jid === this.current) { this.wa.markRead(jid).catch(e => logger.warn({ e }, 'markRead')); return }
-      if (this.tabs.includes(jid)) { this.screen.program.bell(); this.flash(`${chatName(jid)}: ${truncate(row.text || `[${row.type}]`, 60)}`); return }
+      if (this.tabs.includes(jid)) { this.screen.program.bell(); this.notify(jid, row.text || `[${row.type}]`); return }
       // Conversa sem tab: com vários terminais, só o usado mais recentemente abre o tab, e nunca se a conversa já
       // tiver tab noutro terminal vivo.
       if (this.openElsewhere(jid) || !this.isMostRecentTerminal()) return
       this.openTab(jid, false)
       this.screen.program.bell()
-      this.flash(`${chatName(jid)}: ${truncate(row.text || `[${row.type}]`, 60)}`)
+      this.notify(jid, row.text || `[${row.type}]`)
     })
     this.wa.on('status', text => this.flash(text))
   }
@@ -547,6 +553,7 @@ export class Ui {
     const jid = this.tabs[i]
     if (!jid) return
     if (i !== this.active) { this.active = i; this.atBottom = true; this.dirtyMessages = true; this.selected = this.replyTo = this.reactTo = null }
+    if (this.notice?.jid === jid) this.notice = undefined
     this.dirtyTabs = true
     this.saveTabs()
     this.wa.subscribePresence(jid)
@@ -622,6 +629,29 @@ export class Ui {
     const text = this.transient ? dim(esc(truncate(this.transient, avail))) : this.connText
     if (avail >= 6 && text) out += ' '.repeat(Math.max(1, width - x - visibleWidth(text) - 1)) + text
     this.tabsBar.setContent(out)
+    this.drawNotice(width)
+  }
+
+  /** Pousa o aviso sobre o tab da conversa (ou encostado à direita se o tab não estiver à vista), sem o nome dela. */
+  private drawNotice(width: number) {
+    const n = this.notice
+    if (!n) return this.toast.hide()
+    const text = truncate(n.text, Math.max(1, width - 2))
+    const w = strWidth(text) + 2
+    const seg = this.segments.find(s => this.tabs[s.index] === n.jid)
+    const left = Math.max(0, Math.min(seg && seg.x0 < width ? seg.x0 : width, width - w))
+    this.toast.left = left
+    this.toast.width = Math.min(w, width)
+    this.toast.setContent(`{inverse} ${esc(text)} {/inverse}`)
+    this.toast.show()
+  }
+
+  private notify(jid: string, text: string) {
+    this.notice = { jid, text }
+    if (this.noticeTimer) clearTimeout(this.noticeTimer)
+    this.noticeTimer = setTimeout(() => { this.notice = undefined; this.drawStatus(); this.screen.render() }, 6000)
+    this.drawStatus()
+    this.screen.render()
   }
 
   // ---------- escolhedor ----------

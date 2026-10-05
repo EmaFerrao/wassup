@@ -53,8 +53,8 @@ assume-se escuro e o cinzento da selecção é médio.
   apaga a palavra anterior (só em terminais com o protocolo de teclado do Kitty: Kitty, Ghostty, foot, WezTerm). O mesmo
   vale para o filtro das "conversas". Clique num painel activa-o; `i` no painel de mensagens volta à escrita.
 - Esc fecha, por ordem: o filtro do escolhedor, o escolhedor, o tab activo. Fechar o último tab leva às "conversas"; Esc aí, sem tabs abertos, sai do programa. Ctrl-C sai logo.
-- Mensagens novas noutra conversa fazem soar a campainha do terminal e aparecem à direita na barra de tabs; abrir ou activar
-  o tab marca-as como lidas.
+- Mensagens novas noutra conversa fazem soar a campainha do terminal e aparecem uns segundos, com fundo invertido, por
+  cima do tab dessa conversa; abrir ou activar o tab marca-as como lidas.
 - **Vários terminais**: podes abrir o `wa` em quantos terminais quiseres. O primeiro processo é o servidor, com a
   ligação ao WhatsApp, e abre um socket em `$XDG_RUNTIME_DIR/wa-<id>.sock`; os seguintes ligam-se a ele e são só
   interface, cada um com os seus tabs, guardados por terminal. Uma conversa com tab num terminal não abre tab noutro, e
