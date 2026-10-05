@@ -44,6 +44,8 @@ interface ClinesBox extends blessed.Widgets.BoxElement {
 
 /** Quanto dura o desvanecer do arco-íris depois de a pessoa parar de escrever. */
 const FADE_MS = 1500
+/** O aviso de mensagem noutra conversa: tempo a aparecer, a ficar e a desaparecer, em milissegundos. */
+const NOTICE = { fadeIn: 400, hold: 6000, fadeOut: 800 }
 
 const HELP = 'Tab muda de tab · Ctrl-T conversas · Esc fecha · PgUp/PgDn histórico · ↑ ou clique selecciona mensagem, escrever responde, : reage · :fixe: emoji'
 
@@ -133,7 +135,8 @@ export class Ui {
   private ghost: { text: string; s: Suggestion } | undefined
   private ghostTimer: NodeJS.Timeout | undefined
   private ghostAbort: AbortController | undefined
-  private notice: { jid: string; text: string } | undefined
+  /** O aviso de mensagem noutra conversa e o instante em que começou a aparecer; o relógio anima-o até sumir. */
+  private notice: { jid: string; text: string; since: number } | undefined
   private noticeTimer: NodeJS.Timeout | undefined
 
   private tabs: string[] = []
@@ -180,6 +183,7 @@ export class Ui {
   private typingTimer: NodeJS.Timeout | undefined
   private ring: Rgb[]
   private fgRgb: Rgb
+  private bgRgb: Rgb
   private dirtyTabs = true
   private dirtyMessages = true
   private showingQr = false
@@ -193,6 +197,7 @@ export class Ui {
     ;({ dark: this.dark, selected: this.selectedBg } = theme(caps.bg))
     this.ring = rainbowRing(this.dark)
     this.fgRgb = parseHex(caps.fg) ?? (this.dark ? [192, 192, 192] : [48, 48, 48])
+    this.bgRgb = parseHex(caps.bg) ?? (this.dark ? [0, 0, 0] : [255, 255, 255])
     setTheme(this.dark)
     patchBlessedUnicode()
     this.screen = blessed.screen({ smartCSR: true, fullUnicode: caps.utf8, title: 'wa', warnings: false })
@@ -778,7 +783,11 @@ export class Ui {
     this.drawNotice(width)
   }
 
-  /** Pousa o aviso sobre o tab da conversa (ou encostado à direita se o tab não estiver à vista), sem o nome dela. */
+  /**
+   * Pousa o aviso sobre o tab da conversa (ou encostado à direita se o tab não estiver à vista), sem o nome dela e
+   * sem fundo: o texto emerge do fundo até um tom um pouco abaixo do texto normal, fica, e volta a fundir-se com o
+   * fundo. A cor de cada instante é a mistura fundo→texto pela opacidade do momento, quantizada às 256 cores.
+   */
   private drawNotice(width: number) {
     const n = this.notice
     if (!n) return this.toast.hide()
@@ -788,14 +797,31 @@ export class Ui {
     const left = Math.max(0, Math.min(seg && seg.x0 < width ? seg.x0 : width, width - w))
     this.toast.left = left
     this.toast.width = Math.min(w, width)
-    this.toast.setContent(`{inverse} ${esc(text)} {/inverse}`)
+    const c = nearest256(mix(this.bgRgb, this.fgRgb, 0.85 * this.noticeOpacity(n.since)))
+    this.toast.setContent(`{${c}-fg} ${esc(text)} {/${c}-fg}`)
     this.toast.show()
   }
 
+  /** Opacidade do aviso (0..1) desde que começou: sobe, fica, desce; curva suave nas duas pontas. */
+  private noticeOpacity(since: number): number {
+    const t = Date.now() - since
+    const ease = (x: number) => x * x * (3 - 2 * x)
+    if (t < NOTICE.fadeIn) return ease(t / NOTICE.fadeIn)
+    if (t < NOTICE.fadeIn + NOTICE.hold) return 1
+    return ease(Math.max(0, 1 - (t - NOTICE.fadeIn - NOTICE.hold) / NOTICE.fadeOut))
+  }
+
   private notify(jid: string, text: string) {
-    this.notice = { jid, text }
-    if (this.noticeTimer) clearTimeout(this.noticeTimer)
-    this.noticeTimer = setTimeout(() => { this.notice = undefined; this.drawStatus(); this.screen.render() }, 6000)
+    // Um aviso por cima de outro já visível não volta a emergir: continua opaco com o texto novo.
+    const since = this.notice && this.noticeOpacity(this.notice.since) >= 1 ? Date.now() - NOTICE.fadeIn : Date.now()
+    this.notice = { jid, text, since }
+    if (!this.noticeTimer) {
+      this.noticeTimer = setInterval(() => {
+        if (this.notice && Date.now() - this.notice.since >= NOTICE.fadeIn + NOTICE.hold + NOTICE.fadeOut) this.notice = undefined
+        if (!this.notice && this.noticeTimer) { clearInterval(this.noticeTimer); this.noticeTimer = undefined }
+        this.drawStatus(); this.screen.render()
+      }, 40)
+    }
     this.drawStatus()
     this.screen.render()
   }

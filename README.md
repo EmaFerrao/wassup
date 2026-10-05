@@ -64,8 +64,8 @@ assume-se escuro e o cinzento da selecção é médio.
   cima da escrita, a lista dos emojis cujo nome começa assim; ↑/↓ escolhem, Enter mete o emoji no lugar do
   `:prefixo`, Esc fecha a lista e continuar a escrever refina-a.
 - Esc fecha, por ordem: o filtro do escolhedor, o escolhedor, o tab activo. Fechar o último tab leva às "conversas"; Esc aí, sem tabs abertos, sai do programa. Ctrl-C sai logo.
-- Mensagens novas noutra conversa fazem soar a campainha do terminal e aparecem uns segundos, com fundo invertido, por
-  cima do tab dessa conversa; abrir ou activar o tab marca-as como lidas.
+- Mensagens novas noutra conversa fazem soar a campainha do terminal e aparecem uns segundos por cima do tab dessa
+  conversa, sem fundo, a emergir do fundo e a fundir-se nele outra vez; abrir ou activar o tab marca-as como lidas.
 - **Vários terminais**: podes abrir o `wa` em quantos terminais quiseres. O primeiro processo é o servidor, com a
   ligação ao WhatsApp, e abre um socket em `$XDG_RUNTIME_DIR/wa-<id>.sock`; os seguintes ligam-se a ele e são só
   interface, cada um com os seus tabs, guardados por terminal. Uma conversa com tab num terminal não abre tab noutro, e
