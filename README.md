@@ -108,10 +108,10 @@ completa está em `src/emoji.ts`. Os smileys clássicos também são convertidos
 ## Sugestões de escrita
 
 Com um `llama-server` local a responder em `http://127.0.0.1:8080` (ou `WA_LLM`), com o modelo `gemma4-26b` (ou
-`WA_LLM_MODEL`), a escrita pede uma sugestão 300 ms depois da última tecla, com as últimas mensagens da conversa como
-contexto. Aparece uma de cada vez: a correcção de uma palavra já escrita (`prequiça → preguiça`) no cabeçalho da
-escrita, ou, não havendo nada a corrigir, a continuação a cinzento a seguir ao cursor. A seta → com o cursor no fim
-aceita; qualquer outra tecla ignora. `WA_LLM=off` desliga; sem servidor a responder nada aparece.
+`WA_LLM_MODEL`), a escrita pede uma sugestão 150 ms depois da última tecla, com as últimas mensagens da conversa como
+contexto. Aparece uma de cada vez, durante 4 segundos: a correcção de uma palavra já escrita (`prequiça → preguiça`)
+no cabeçalho da escrita, ou, não havendo nada a corrigir, a continuação a cinzento colada ao cursor. A seta → com o
+cursor no fim aceita; qualquer outra tecla ignora. `WA_LLM=off` desliga; sem servidor a responder nada aparece.
 
 ## Dados
 

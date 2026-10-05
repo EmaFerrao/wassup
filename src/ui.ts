@@ -131,10 +131,11 @@ export class Ui {
   private suggestions: { emoji: string; name: string }[] = []
   private suggestIndex = 0
   private suggestStart = 0
-  /** Sugestão do modelo local para o texto `text` (continuação ou correcção), pedida 300 ms depois da última tecla. */
+  /** Sugestão do modelo local para o texto `text` (continuação ou correcção), pedida 150 ms depois da última tecla e mostrada 4 s. */
   private ghost: { text: string; s: Suggestion } | undefined
   private ghostTimer: NodeJS.Timeout | undefined
   private ghostAbort: AbortController | undefined
+  private ghostHide: NodeJS.Timeout | undefined
   /** O aviso de mensagem noutra conversa e o instante em que começou a aparecer; o relógio anima-o até sumir. */
   private notice: { jid: string; text: string; since: number } | undefined
   private noticeTimer: NodeJS.Timeout | undefined
@@ -985,12 +986,12 @@ export class Ui {
   }
 
   /**
-   * Pede ao modelo uma sugestão para o texto actual, 300 ms depois da última tecla e só com o cursor no fim, sem
+   * Pede ao modelo uma sugestão para o texto actual, 150 ms depois da última tecla e só com o cursor no fim, sem
    * reacção em curso nem sugestões de emoji abertas. Um pedido novo cancela o anterior; a resposta só se usa se o
-   * texto ainda for o mesmo quando chega.
+   * texto ainda for o mesmo quando chega, e fica 4 s à vista.
    */
   private scheduleGhost() {
-    if (this.ghost && this.ghost.text !== this.inputValue) this.ghost = undefined
+    if (this.ghost && this.ghost.text !== this.inputValue) this.clearGhost()
     if (this.ghostTimer) { clearTimeout(this.ghostTimer); this.ghostTimer = undefined }
     this.ghostAbort?.abort()
     this.ghostAbort = undefined
@@ -1003,14 +1004,21 @@ export class Ui {
       if (text !== this.inputValue) return
       const abort = new AbortController()
       this.ghostAbort = abort
-      const context = store.listMessages(jid, 8).filter(r => r.text && r.type !== 'deleted').map(r => ({ who: this.who(r), text: r.text }))
+      const context = store.listMessages(jid, 6).filter(r => r.text && r.type !== 'deleted').map(r => ({ who: this.who(r), text: r.text }))
       suggest(context, text, abort.signal).then(s => {
         if (abort.signal.aborted || text !== this.inputValue || !s) return
         this.ghost = { text, s }
+        if (this.ghostHide) clearTimeout(this.ghostHide)
+        this.ghostHide = setTimeout(() => { if (this.ghost?.text === text) { this.clearGhost(); this.drawInput(); this.screen.render() } }, 4000)
         this.drawInput()
         this.screen.render()
       }, e => { if (!abort.signal.aborted) logger.debug({ e }, 'llm') })
-    }, 300)
+    }, 150)
+  }
+
+  private clearGhost() {
+    this.ghost = undefined
+    if (this.ghostHide) { clearTimeout(this.ghostHide); this.ghostHide = undefined }
   }
 
   private acceptGhost() {
@@ -1021,7 +1029,7 @@ export class Ui {
     else if (s.next) this.inputValue += s.next
     else return
     this.cursor = graphemes(this.inputValue).length
-    this.ghost = undefined
+    this.clearGhost()
     this.promoteActive()
     this.updateSuggestions()
     this.drawInput()
@@ -1067,10 +1075,10 @@ export class Ui {
       : this.replyTo
         ? `↩ ${this.who(target)}: ${this.snippet(target)}`
         : `reagir a ${this.who(target)}: ${this.snippet(target)} · :código: ou emoji e Enter; Enter vazio retira`
-    // Sugestão do modelo: a correcção vai para o cabeçalho (ou para o fim do que lá estiver); a continuação fica a
-    // cinzento a seguir ao cursor. → aceita.
+    // Sugestão do modelo, discreta: a correcção vai para o cabeçalho (ou para o fim do que lá estiver); a continuação
+    // fica a cinzento colada ao cursor, que pousa sobre a primeira letra dela. → aceita.
     const ghost = this.ghostShown()
-    if (ghost?.fix) header = `${header ? header + ' · ' : ''}${ghost.fix.from} → ${ghost.fix.to} (→ corrige)`
+    if (ghost?.fix) header = `${header ? header + ' · ' : ''}${ghost.fix.from} → ${ghost.fix.to}`
     const ghostNext = ghost && !ghost.fix ? ghost.next : ''
     this.inputHeader = header != null
     const rowsAvail = header ? 1 : 2
@@ -1090,9 +1098,14 @@ export class Ui {
     const showCursor = this.focus === 'input' || this.focus === 'picker'
     const render = (line: string[], r: number) => {
       if (!showCursor || r !== row) return esc(line.join(''))
+      const before = esc(line.slice(0, col).join(''))
       const avail = width - visibleWidth(esc(line.join(''))) - 1
-      const tail = ghostNext && avail >= 2 ? dim(esc(truncate(ghostNext, avail))) : ''
-      return esc(line.slice(0, col).join('')) + '{inverse}' + esc(line[col] ?? ' ') + '{/inverse}' + esc(line.slice(col + 1).join('')) + tail
+      if (ghostNext && col >= line.length && avail >= 1) {
+        // O cursor fica sobre a primeira letra da sugestão, sem célula vazia pelo meio; o resto segue a cinzento.
+        const g = graphemes(truncate(ghostNext, avail + 1))
+        return before + dim('{inverse}' + esc(g[0]!) + '{/inverse}' + esc(g.slice(1).join('')))
+      }
+      return before + '{inverse}' + esc(line[col] ?? ' ') + '{/inverse}' + esc(line.slice(col + 1).join(''))
     }
     const visible = lines.slice(this.inputTop, this.inputTop + rowsAvail)
     // O prompt diz o que a linha faz: ">" escreve, "/" filtra as conversas.
