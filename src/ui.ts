@@ -394,19 +394,19 @@ export class Ui {
         for (const [j, stopped] of this.typing) if (stopped != null && Date.now() - stopped > FADE_MS) this.typing.delete(j)
         if (!this.typing.size && this.typingTimer) { clearInterval(this.typingTimer); this.typingTimer = undefined }
         this.drawTabs(); this.screen.render()
-      }, 80)
+      }, 40)
     }
     this.drawTabs()
     this.screen.render()
   }
 
   /**
-   * O nome com o arco-íris: o anel de matizes corre devagar pelas letras (uma volta em ~8 s), e depois de a pessoa
+   * O nome com o arco-íris: o anel de matizes corre pelas letras (uma volta em ~3 s, a 25 imagens por segundo), e depois de a pessoa
    * parar cada cor mistura-se com a do texto ao longo de FADE_MS, com uma curva suave, até ficar normal.
    */
   private rainbow(name: string, stopped: number | null): string {
     const n = this.ring.length
-    const phase = (Date.now() / 1000) * (n / 8)
+    const phase = (Date.now() / 1000) * (n / 3)
     const raw = stopped == null ? 0 : Math.min(1, (Date.now() - stopped) / FADE_MS)
     const t = raw * raw * (3 - 2 * raw)
     return graphemes(name).map((g, i) => {
