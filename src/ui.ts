@@ -944,7 +944,7 @@ export class Ui {
   }
 
   private renderNow() {
-    if (this.dirtyTabs) { this.dirtyTabs = false; this.drawTabs() }
+    if (this.dirtyTabs) { this.dirtyTabs = false; this.drawTabs(); this.updateTitle() }
     if (this.dirtyMessages && !this.showingQr) { this.dirtyMessages = false; if (this.current) this.renderMessages() }
     // Sem tabs (arranque sem nada guardado, ou as conversas a chegar pela primeira vez) abre-se a conversa mais
     // recente; o escolhedor só aparece com "/".
@@ -953,6 +953,16 @@ export class Ui {
       if (recent) return this.openTab(recent.jid)
     }
     this.screen.render()
+  }
+
+  // Título da janela: a conversa activa, com uma bola à frente enquanto houver mensagens por ler em qualquer conversa.
+  private titleShown = ''
+  private updateTitle() {
+    const unread = store.listChats().some(c => !c.archived && c.unread > 0)
+    const title = `${unread ? '● ' : ''}${this.current ? chatName(this.current) : 'wa'}`
+    if (title === this.titleShown) return
+    this.titleShown = title
+    this.screen.title = title
   }
 
   quit(reason?: string) {
