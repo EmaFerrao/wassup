@@ -791,8 +791,11 @@ export class Ui {
     const map: (MessageRow | null)[] = []
     const images: ImageSlot[] = []
     const selectedId = this.selected?.id
+    // A seleccionada leva o fundo a toda a largura, seja de quem for: as linhas chegam aqui já partidas à largura do
+    // painel, e completam-se com espaços até ao bordo.
     const push = (line: string, row: MessageRow | null) => {
-      lines.push(row && row.id === selectedId ? `{${this.BG.selected}-bg}${line}{/${this.BG.selected}-bg}` : line)
+      if (row && row.id === selectedId) line = `{${this.BG.selected}-bg}${line}${' '.repeat(Math.max(0, width - 1 - visibleWidth(line)))}{/${this.BG.selected}-bg}`
+      lines.push(line)
       map.push(row)
     }
     const reactions = new Map<string, ReactionRow[]>()
@@ -810,12 +813,11 @@ export class Ui {
         push(`{gray-fg}${' '.repeat(Math.max(0, Math.floor((width - strWidth(label)) / 2)))}${label}{/gray-fg}`, null)
       }
       // As minhas mensagens ficam encostadas à direita: parto eu as linhas (o blessed só parte pela esquerda) e
-      // encosto cada uma ao bordo; as dos outros ficam à esquerda e o blessed parte-as.
+      // encosto cada uma ao bordo; as dos outros ficam à esquerda, partidas da mesma forma.
       const mine = row.from_me === 1
       // Uma coluna de margem à direita: o blessed parte a linha se uma etiqueta de fecho cair na última coluna.
       const out = (line: string, r: MessageRow | null) => {
-        if (!mine) { push(line, r); return }
-        for (const l of wrapTagged(line, width - 1)) push(alignRight(l, width - 1), r)
+        for (const l of wrapTagged(line, width - 1)) push(mine ? alignRight(l, width - 1) : l, r)
       }
       const name = mine ? 'eu' : isGroup ? contactName(row.sender_jid) : chatName(jid)
       const color = mine ? 'green' : colorFor(row.sender_jid)
