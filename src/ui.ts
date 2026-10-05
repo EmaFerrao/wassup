@@ -14,6 +14,7 @@ import { emojify, emoticonify, completeEmoji, codeMatches } from './emoji.js'
 import { enableKittyKeyboard } from './kittykeys.js'
 import { parseHex, rainbowRing, mix, nearest256, type Rgb } from './rainbow.js'
 import { suggest, locateWord, llmEnabled, type Suggestion } from './llm.js'
+import { patchBlessedItalic, italic } from './italic.js'
 
 type Focus = 'picker' | 'messages' | 'input'
 
@@ -47,7 +48,7 @@ const FADE_MS = 1500
 /** O aviso de mensagem noutra conversa: tempo a aparecer, a ficar e a desaparecer, em milissegundos. */
 const NOTICE = { fadeIn: 400, hold: 6000, fadeOut: 800 }
 
-const HELP = 'Tab muda de tab · Ctrl-T conversas · Esc fecha · PgUp/PgDn histórico · ↑ ou clique selecciona mensagem, escrever responde, : reage · :fixe: emoji'
+const HELP = 'Tab muda de tab (com texto, aceita a sugestão) · Ctrl-T conversas · Esc fecha · PgUp/PgDn histórico · ↑ ou clique selecciona mensagem, escrever responde, : reage · :fixe: emoji'
 
 // Cores do tema do terminal, nunca assumidas: texto e fundo por omissão e as 16 nomeadas, que o tema garante
 // legíveis sobre o seu fundo. Os avisos passageiros são discretos; só a espera do QR e as quebras de ligação se
@@ -204,6 +205,7 @@ export class Ui {
     setTheme(this.dark)
     patchBlessedUnicode()
     this.screen = blessed.screen({ smartCSR: true, fullUnicode: caps.utf8, title: 'wa', warnings: false })
+    patchBlessedItalic(this.screen)
     // Com localização UTF-8 as molduras saem em caracteres de caixa Unicode (─│┌). Sem isto o blessed muda para o
     // conjunto DEC de linhas, que apps de SSH no telemóvel não conhecem e mostram como q, x, l, k.
     if (caps.utf8) (this.screen.program as unknown as { tput: { brokenACS: boolean } }).tput.brokenACS = true
@@ -447,6 +449,8 @@ export class Ui {
     if (k === 'pageup') { this.msgBox.scroll(-(this.innerHeight() - 1)); return this.screen.render() }
     if (k === 'pagedown') { this.msgBox.scroll(this.innerHeight() - 1); return this.screen.render() }
     // Tab circula pelos tabs abertos; com o escolhedor aberto volta ao tab activo. Conversas novas abrem-se com "/".
+    // Com texto na escrita, Tab é da sugestão do modelo (aceita-a, se houver); sem texto, muda de tab.
+    if (k === 'tab' && this.focus === 'input' && !this.pickerOpen && this.inputValue) { if (this.ghostShown()) this.acceptGhost(); return }
     if (k === 'tab') {
       if (!this.tabs.length) return
       return this.activateTab(this.pickerOpen ? this.active : (this.active + 1) % this.tabs.length)
@@ -473,8 +477,6 @@ export class Ui {
         }
         if (k === 'enter' || k === 'return') return this.acceptSuggestion()
       }
-      // → com o cursor no fim aceita a sugestão do modelo (a correcção, se houver; senão a continuação).
-      if (k === 'right' && this.ghostShown()) return this.acceptGhost()
       if (k === 'enter' || k === 'return') { const v = this.inputValue; this.inputValue = ''; this.cursor = 0; this.stopComposing(); this.updateSuggestions(); this.drawInput(); this.screen.render(); return void this.submit(v) }
       const e = edit(this.inputValue, this.cursor, k, ch, key)
       if (!e) { if (k === 'up') this.moveSelection(-1); return }
@@ -1048,13 +1050,27 @@ export class Ui {
     if (this.ghostHide) { clearTimeout(this.ghostHide); this.ghostHide = undefined }
   }
 
+  /** O que se mostra: a palavra a meio (as letras que faltam, ou a palavra certa) tem prioridade sobre a correcção atrás. */
+  private ghostView(s: Suggestion): { kind: 'suffix' | 'word' | 'fix'; text: string } | null {
+    if (s.word) {
+      const { from, to } = s.word
+      if (to.toLowerCase().startsWith(from.toLowerCase()) && to.length > from.length) return { kind: 'suffix', text: to.slice(from.length) }
+      return { kind: 'word', text: to }
+    }
+    return s.fix ? { kind: 'fix', text: s.fix.to } : null
+  }
+
   private acceptGhost() {
     const s = this.ghostShown()
-    if (!s) return
-    const loc = s.fix ? locateWord(this.inputValue, s.fix.from) : null
-    if (s.fix && loc) this.inputValue = this.inputValue.slice(0, loc.start) + s.fix.to + this.inputValue.slice(loc.end)
-    else if (s.next) this.inputValue += s.next
-    else return
+    const v = s && this.ghostView(s)
+    if (!s || !v) return
+    if (v.kind === 'fix') {
+      const loc = locateWord(this.inputValue, s.fix!.from)
+      if (!loc) return
+      this.inputValue = this.inputValue.slice(0, loc.start) + s.fix!.to + this.inputValue.slice(loc.end)
+    } else {
+      this.inputValue = this.inputValue.slice(0, this.inputValue.length - s.word!.from.length) + s.word!.to
+    }
     this.cursor = graphemes(this.inputValue).length
     this.clearGhost()
     this.promoteActive()
@@ -1097,16 +1113,18 @@ export class Ui {
     // linha diz a que mensagem, e sobra uma para o texto.
     const w = num(this.input.width) - num(this.input.iwidth) - 1
     const target = this.pickerOpen ? null : this.replyTo ?? this.reactTo ?? this.editing
-    let header = !target ? null : this.editing
+    const header = !target ? null : this.editing
       ? `✎ editar: ${this.snippet(target)} · Enter envia, Esc desiste`
       : this.replyTo
         ? `↩ ${this.who(target)}: ${this.snippet(target)}`
         : `reagir a ${this.who(target)}: ${this.snippet(target)} · :código: ou emoji e Enter; Enter vazio retira`
-    // Sugestão do modelo, discreta: a correcção vai para o cabeçalho (ou para o fim do que lá estiver); a continuação
-    // fica a cinzento colada ao cursor, que pousa sobre a primeira letra dela. → aceita.
+    // Sugestão do modelo, discreta, em itálico cinzento na sequência do texto: as letras que faltam à palavra a meio,
+    // coladas ao cursor (que pousa sobre a primeira), ou a palavra certa a seguir a um "✎", seja a palavra a meio
+    // corrigida ou uma palavra errada mais atrás. Tab aceita.
     const ghost = this.ghostShown()
-    if (ghost?.fix) header = `${header ? header + ' · ' : ''}${ghost.fix.from} → ${ghost.fix.to}`
-    const ghostNext = ghost && !ghost.fix ? ghost.next : ''
+    const view = ghost ? this.ghostView(ghost) : null
+    const ghostNext = view?.kind === 'suffix' ? view.text : ''
+    const ghostWord = view && view.kind !== 'suffix' ? ` ✎ ${view.text}` : ''
     this.inputHeader = header != null
     const rowsAvail = header ? 1 : 2
     const width = Math.max(4, w - 2)
@@ -1128,11 +1146,12 @@ export class Ui {
       const before = esc(line.slice(0, col).join(''))
       const avail = width - visibleWidth(esc(line.join(''))) - 1
       if (ghostNext && col >= line.length && avail >= 1) {
-        // O cursor fica sobre a primeira letra da sugestão, sem célula vazia pelo meio; o resto segue a cinzento.
+        // O cursor fica sobre a primeira letra da sugestão, sem célula vazia pelo meio; o resto segue em itálico.
         const g = graphemes(truncate(ghostNext, avail + 1))
-        return before + dim('{inverse}' + esc(g[0]!) + '{/inverse}' + esc(g.slice(1).join('')))
+        return before + dim(italic('{inverse}' + esc(g[0]!) + '{/inverse}' + esc(g.slice(1).join(''))))
       }
-      return before + '{inverse}' + esc(line[col] ?? ' ') + '{/inverse}' + esc(line.slice(col + 1).join(''))
+      const tail = ghostWord && col >= line.length && avail >= 4 ? dim(italic(esc(truncate(ghostWord, avail)))) : ''
+      return before + '{inverse}' + esc(line[col] ?? ' ') + '{/inverse}' + esc(line.slice(col + 1).join('')) + tail
     }
     const visible = lines.slice(this.inputTop, this.inputTop + rowsAvail)
     // O prompt diz o que a linha faz: ">" escreve, "/" filtra as conversas.

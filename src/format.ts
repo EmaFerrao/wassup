@@ -102,7 +102,7 @@ const TAG_RE = /(\{[^}]*\})/
 
 /** Largura visível de uma linha com etiquetas do blessed: as etiquetas não ocupam células, `{open}`/`{close}` ocupam uma. */
 export function visibleWidth(s: string): number {
-  return strWidth(s.replace(/\{[^}]*\}/g, m => (m === '{open}' || m === '{close}' ? 'x' : '')))
+  return strWidth(s.replace(/\x1b\[[\d;]*m/g, '').replace(/\{[^}]*\}/g, m => (m === '{open}' || m === '{close}' ? 'x' : '')))
 }
 
 /**

@@ -35,10 +35,10 @@ ou preto, e a mensagem seleccionada ganha um fundo cinzento afastado do fundo re
 assume-se escuro e o cinzento da selecção é médio.
 
 - **Tabs**: um por conversa aberta, com o número de não lidas a vermelho e um `×` para fechar. Clique no nome activa,
-  clique no `×` fecha. Tab circula pelos tabs abertos sem lhes mexer na ordem; é ao começar a escrever que o tab
-  activo passa para a primeira posição, junto da escrita, ficando os outros pela ordem em que estavam. A escrita é
-  de cada conversa: o que ficou por enviar fica guardado no tab de onde se sai e volta quando se regressa, e nunca
-  aparece na linha de outra conversa. `/` ou Ctrl-T
+  clique no `×` fecha. Tab, com a escrita vazia, circula pelos tabs abertos sem lhes mexer na ordem; é ao começar a
+  escrever que o tab activo passa para a primeira posição, junto da escrita, ficando os outros pela ordem em que
+  estavam. A escrita é de cada conversa: o que ficou por enviar fica guardado no tab de onde se sai e volta quando se
+  regressa, e nunca aparece na linha de outra conversa. `/` ou Ctrl-T
   abrem as "conversas". Com as "conversas" abertas nenhum tab fica realçado. Enquanto alguém está a escrever ou a
   gravar numa conversa com tab, um arco-íris suave corre pelas letras do nome dela, e desvanece-se quando a pessoa
   pára.
@@ -111,9 +111,10 @@ completa está em `src/emoji.ts`. Os smileys clássicos também são convertidos
 
 Com um `llama-server` local a responder em `http://127.0.0.1:8080` (ou `WA_LLM`), com o modelo `gemma4-26b` (ou
 `WA_LLM_MODEL`), a escrita pede uma sugestão 150 ms depois da última tecla, com as últimas mensagens da conversa como
-contexto. Aparece uma de cada vez, durante 4 segundos: a correcção de uma palavra já escrita (`prequiça → preguiça`)
-no cabeçalho da escrita, ou, não havendo nada a corrigir, a continuação a cinzento colada ao cursor. A seta → com o
-cursor no fim aceita; qualquer outra tecla ignora. `WA_LLM=off` desliga; sem servidor a responder nada aparece.
+contexto. São só de duas espécies e aparecem em itálico cinzento na sequência do texto, durante 4 segundos: as letras
+que faltam à palavra a meio, coladas ao cursor, ou, a seguir a um `✎`, a palavra certa, quer seja a palavra a meio
+corrigida quer uma palavra errada mais atrás na frase. Tab aceita; qualquer outra tecla ignora. Com texto na escrita
+o Tab é da sugestão; só com a escrita vazia muda de tab. `WA_LLM=off` desliga; sem servidor a responder nada aparece.
 
 ## Dados
 
