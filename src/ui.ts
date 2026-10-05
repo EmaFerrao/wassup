@@ -167,7 +167,7 @@ export class Ui {
       tags: true, mouse: true,
     })
     this.picker = blessed.list({
-      parent: this.screen, top: 0, left: 0, right: 0, height: '100%-3', padding: { left: 1, right: 1 }, hidden: true,
+      parent: this.screen, top: 0, left: 0, right: 0, height: '100%-4', padding: { left: 1, right: 1 }, hidden: true,
       tags: true, keys: true, mouse: true,
       style: { selected: { inverse: true, bold: true } } as unknown as blessed.Widgets.ListElementStyle,
     })
@@ -649,8 +649,8 @@ export class Ui {
       return `${left}${' '.repeat(Math.max(1, nameW - visibleWidth(left)))}${dim(esc(preview))}`
     })
     this.picker.setItems(items as unknown as string[])
-    // Lista encostada ao fundo, junto ao prompt, quando é mais curta que o painel.
-    const panel = num(this.screen.height) - 3
+    // Lista encostada ao fundo quando é mais curta que o painel, com uma linha em branco a separá-la do prompt.
+    const panel = num(this.screen.height) - 4
     const top = Math.max(0, panel - this.filtered.length)
     this.picker.top = top
     this.picker.height = panel - top
