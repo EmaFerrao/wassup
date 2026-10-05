@@ -489,7 +489,7 @@ export class Ui {
       const closeX0 = x + w - 2
       this.segments.push({ x0: x, x1: x + w, index: t.i, closeX0, closeX1: closeX0 + 1 })
       const badge = t.badge ? ` {${FG.badge}-fg}{bold}${t.badge}{/bold}{/${FG.badge}-fg}` : ''
-      out += t.i === this.active
+      out += t.i === this.active && !this.pickerOpen
         ? `{${activeBg}-bg}{white-fg}{bold} ${esc(name)}{/bold}${badge} {${FG.tabDim}-fg}×{/${FG.tabDim}-fg} {/white-fg}{/${activeBg}-bg}`
         : `{${FG.tab}-fg} ${esc(name)}${badge} {${FG.tabDim}-fg}×{/${FG.tabDim}-fg}{/${FG.tab}-fg}{${FG.separator}-fg}│{/${FG.separator}-fg}`
       x += w
