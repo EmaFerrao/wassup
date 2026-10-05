@@ -1247,8 +1247,8 @@ export class Ui {
     let col = cursor - start
     if (col >= lines[row]!.length && wrapWidth(esc(lines[row]!.join(''))) >= width) { lines.push([]); row++; col = 0 }
     // O "\n" ou o espaço que fecham uma linha ficam nela, para o cursor contar, mas não se desenham: um espaço a mais
-    // que a largura faria o blessed partir a linha.
-    const text = (l: string[]) => l.filter(c => c !== '\n').join('').replace(/\s+$/, '')
+    // que a largura faria o blessed partir a linha. Um espaço final que cabe desenha-se, para o cursor avançar com ele.
+    const text = (l: string[]) => { const t = l.filter(c => c !== '\n').join(''); return strWidth(t) > width ? t.replace(/\s+$/, '') : t }
     // A sugestão vai na linha do cursor se lá couber inteira: as letras que faltam coladas ao cursor, ou "⇢ palavra"
     // duas células à frente. Senão vai numa linha só dela, por baixo, em vez de cortada.
     const cursorLine = lines[row]!
