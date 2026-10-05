@@ -1,7 +1,6 @@
 import blessed from 'blessed'
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
-import os from 'node:os'
 import QRCode from 'qrcode'
 import { store, type ChatRow, type MessageRow, type ReactionRow } from './db.js'
 import { chatName, contactName, thumbPath, jidUser, type ConnState } from './wa.js'
@@ -41,7 +40,7 @@ interface ClinesBox extends blessed.Widgets.BoxElement {
   childBase: number
 }
 
-const HELP = 'Tab muda de tab · Ctrl-T conversas · Esc fecha · PgUp/PgDn histórico · ↑ ou clique selecciona mensagem, Enter responde, : reage · :up ficheiro · :down anexos · :fixe: emoji'
+const HELP = 'Tab muda de tab · Ctrl-T conversas · Esc fecha · PgUp/PgDn histórico · ↑ ou clique selecciona mensagem, Enter responde, : reage · :fixe: emoji'
 
 // Cores do tema do terminal, nunca assumidas: texto e fundo por omissão e as 16 nomeadas, que o tema garante
 // legíveis sobre o seu fundo. Os avisos passageiros são discretos; só a espera do QR e as quebras de ligação se
@@ -453,19 +452,6 @@ export class Ui {
     // Ao enviar, o painel vai para o fundo para mostrar a mensagem nova, mesmo que estivesse a ver o histórico.
     this.atBottom = true
     try {
-      if (text.startsWith(':up ') || text.startsWith(':send ')) {
-        const rest = text.replace(/^:\w+\s+/, '')
-        const m = /^(?:"([^"]+)"|(\S+))\s*(.*)$/.exec(rest)
-        const file = (m?.[1] ?? m?.[2] ?? '').replace(/^~(?=$|\/)/, os.homedir())
-        if (!file || !fs.existsSync(file)) return this.flash(`ficheiro não encontrado: ${file}`)
-        this.flash(`a enviar ${file}…`)
-        await this.wa.sendFile(jid, file, m?.[3] || undefined)
-        return this.flash('enviado')
-      }
-      if (text === ':down') {
-        const r = await this.wa.downloadAll(jid)
-        return this.flash(`${r.copied} anexos copiados para ~/Downloads/wa${r.pending ? `, ${r.pending} ainda a descarregar (repete :down daqui a pouco)` : ''}`)
-      }
       if (text.startsWith(':')) return this.flash(`comando desconhecido: ${text.split(' ')[0]}. ${HELP}`, 10000)
       const replyTo = this.replyTo?.chat_jid === jid ? this.replyTo : null
       this.replyTo = null

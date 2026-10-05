@@ -60,8 +60,6 @@ afastado do fundo real. Se o terminal não responder, assume-se escuro e o cinze
 
 | Comando | Efeito |
 |---|---|
-| `:up caminho [legenda]` | Envia ficheiro (imagens como imagem, mp4 como vídeo, o resto como documento) |
-| `:down` | Copia todos os anexos da conversa para `~/Downloads/wa/<conversa>/` |
 | `/` | Abre o escolhedor de conversas; o que se escreve a seguir filtra a lista |
 
 ### Formatação e emojis
