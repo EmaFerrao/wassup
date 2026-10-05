@@ -55,7 +55,7 @@ export class IpcServer {
       const payload: Event = { event, args: event === 'notify' ? [args[0], slimRow(args[1] as MessageRow)] : event === 'connection' ? [args[0], args[1], wa.qr] : args }
       for (const c of this.clients) sendJson(c, payload)
     }
-    for (const ev of ['connection', 'chats', 'messages', 'notify', 'status'] as const) wa.on(ev, forward(ev) as never)
+    for (const ev of ['connection', 'chats', 'messages', 'notify', 'status', 'typing'] as const) wa.on(ev, forward(ev) as never)
   }
 
   /** Abre o socket. Falha com EADDRINUSE se outro processo acabou de o abrir: quem chama deve então ligar-se como cliente. */
@@ -84,6 +84,7 @@ export class IpcServer {
         case 'react': await this.wa.react(a[0]!, a[1]!, a[2] ?? ''); return reply({ ok: true })
         case 'sendFile': await this.wa.sendFile(a[0]!, a[1]!, a[2]); return reply({ ok: true })
         case 'markRead': await this.wa.markRead(a[0]!); return reply({ ok: true })
+        case 'subscribePresence': this.wa.subscribePresence(a[0]!); return reply({ ok: true })
         case 'ensureMedia': { const row = store.getMessage(a[0]!, a[1]!); if (row) this.wa.ensureMedia(row); return reply({ ok: true }) }
         case 'downloadAll': return reply({ ok: true, result: await this.wa.downloadAll(a[0]!) })
         default: return reply({ ok: false, error: `operação desconhecida: ${req.op}` })
@@ -168,6 +169,7 @@ export class RemoteWa extends EventEmitter<WaEvents> implements Backend {
   react(chatJid: string, msgId: string, emoji: string) { return this.call<void>('react', chatJid, msgId, emoji) }
   sendFile(chatJid: string, filePath: string, caption?: string) { return this.call<void>('sendFile', chatJid, filePath, caption) }
   markRead(chatJid: string) { return this.call<void>('markRead', chatJid) }
+  subscribePresence(chatJid: string) { this.call('subscribePresence', chatJid).catch(() => {}) }
   ensureMedia(row: MessageRow) { this.call('ensureMedia', row.chat_jid, row.id).catch(() => {}) }
   downloadAll(chatJid: string) { return this.call<{ copied: number; pending: number }>('downloadAll', chatJid) }
   async stop() { this.socket.destroy() }

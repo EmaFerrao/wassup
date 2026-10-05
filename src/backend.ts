@@ -14,6 +14,7 @@ export interface Backend extends EventEmitter<WaEvents> {
   react(chatJid: string, msgId: string, emoji: string): Promise<void>
   sendFile(chatJid: string, filePath: string, caption?: string): Promise<void>
   markRead(chatJid: string): Promise<void>
+  subscribePresence(chatJid: string): void
   ensureMedia(row: MessageRow): void
   downloadAll(chatJid: string): Promise<{ copied: number; pending: number }>
   stop(): Promise<void>

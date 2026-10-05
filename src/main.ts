@@ -27,6 +27,7 @@ class BackendProxy extends EventEmitter<WaEvents> implements Backend {
   react(jid: string, msgId: string, emoji: string) { return this.ready().react(jid, msgId, emoji) }
   sendFile(jid: string, file: string, caption?: string) { return this.ready().sendFile(jid, file, caption) }
   async markRead(jid: string) { await this.inner?.markRead(jid) }
+  subscribePresence(jid: string) { this.inner?.subscribePresence(jid) }
   ensureMedia(row: MessageRow) { this.inner?.ensureMedia(row) }
   downloadAll(jid: string) { return this.ready().downloadAll(jid) }
   async stop() { this.server?.close(); await this.inner?.stop() }
@@ -64,7 +65,7 @@ class BackendProxy extends EventEmitter<WaEvents> implements Backend {
 
   private use(b: Backend) {
     this.inner = b
-    for (const ev of ['connection', 'chats', 'messages', 'notify', 'status'] as const) {
+    for (const ev of ['connection', 'chats', 'messages', 'notify', 'status', 'typing'] as const) {
       b.on(ev, ((...args: unknown[]) => (this.emit as (ev: string, ...a: unknown[]) => boolean)(ev, ...args)) as never)
     }
     this.emit('connection', b.state)

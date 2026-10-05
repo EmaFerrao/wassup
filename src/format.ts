@@ -49,6 +49,11 @@ export function setTheme(darkBg: boolean): void {
   DIM = darkBg ? 247 : 242
 }
 
+/** A paleta dos nomes, pela ordem de matizes; serve para animar um nome. */
+export function namePalette(): readonly number[] {
+  return palette
+}
+
 /** Texto secundário, no cinzento do tema. */
 export function dim(s: string): string {
   return `{${DIM}-fg}${s}{/${DIM}-fg}`

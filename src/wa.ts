@@ -20,6 +20,8 @@ export interface WaEvents {
   messages: [chatJid: string]
   notify: [chatJid: string, row: MessageRow]
   status: [text: string]
+  /** Quem está a escrever ou a gravar numa conversa (jids canónicos); lista vazia quando ninguém. */
+  typing: [chatJid: string, who: string[]]
   /** Só do cliente remoto: o processo servidor desapareceu. */
   lost: []
 }
@@ -253,6 +255,8 @@ export function parseMessage(m: WAMessage, meJid: string): Parsed | null {
 
 export class Wa extends EventEmitter<WaEvents> {
   sock: WASocket | undefined
+  /** Quem está a escrever em cada conversa, e o temporizador que o esquece se o "parou" nunca chegar. */
+  private typing = new Map<string, { who: Set<string>; timer: NodeJS.Timeout }>()
   me = ''
   state: ConnState = 'connecting'
   qr: string | undefined
@@ -301,6 +305,14 @@ export class Wa extends EventEmitter<WaEvents> {
     this.setState('connecting')
 
     sock.ev.on('creds.update', saveCreds)
+    sock.ev.on('presence.update', ({ id, presences }) => {
+      const chatJid = canonicalJid(id)
+      for (const [participant, p] of Object.entries(presences)) {
+        const who = canonicalJid(participant)
+        const active = p.lastKnownPresence === 'composing' || p.lastKnownPresence === 'recording'
+        this.setTyping(chatJid, who, active && who !== this.me)
+      }
+    })
 
     sock.ev.on('connection.update', async update => {
       const { connection, lastDisconnect, qr } = update
@@ -529,6 +541,26 @@ export class Wa extends EventEmitter<WaEvents> {
       })
       this.emit('messages', chatJid); this.emit('chats')
     }
+  }
+
+  /** Regista (ou apaga) quem está a escrever numa conversa e avisa se a lista mudou. */
+  private setTyping(chatJid: string, who: string, active: boolean) {
+    const cur = this.typing.get(chatJid)
+    const had = cur?.who.has(who) ?? false
+    if (active === had && !active) return
+    if (cur) clearTimeout(cur.timer)
+    const set = cur?.who ?? new Set<string>()
+    if (active) set.add(who); else set.delete(who)
+    if (set.size) {
+      // Se o "parou" se perder, esquece-se ao fim de 15 segundos sem novidades.
+      this.typing.set(chatJid, { who: set, timer: setTimeout(() => { this.typing.delete(chatJid); this.emit('typing', chatJid, []) }, 15000) })
+    } else this.typing.delete(chatJid)
+    if (active !== had) this.emit('typing', chatJid, [...set])
+  }
+
+  /** Pede ao WhatsApp a presença (a escrever, a gravar) de uma conversa; sem isso nada chega. */
+  subscribePresence(chatJid: string) {
+    this.sock?.presenceSubscribe(chatJid).catch(e => logger.warn({ e, chatJid }, 'presenceSubscribe'))
   }
 
   async markRead(chatJid: string) {

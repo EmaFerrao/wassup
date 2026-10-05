@@ -5,7 +5,7 @@ import QRCode from 'qrcode'
 import { store, type ChatRow, type MessageRow, type ReactionRow } from './db.js'
 import { chatName, contactName, thumbPath, jidUser, type ConnState } from './wa.js'
 import type { Backend } from './backend.js'
-import { waMarkup, esc, colorFor, setTheme, dim, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, fold, graphemes, wrapChars } from './format.js'
+import { waMarkup, esc, colorFor, setTheme, dim, namePalette, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, fold, graphemes, wrapChars } from './format.js'
 import { decode, cached, cellSize, halfBlocks, detectImageMode, KittyImages, type Decoded, type ImageMode } from './image.js'
 import { logger, uiLog } from './log.js'
 import { patchBlessedUnicode } from './unicode.js'
@@ -131,6 +131,10 @@ export class Ui {
   private transientTimer: NodeJS.Timeout | undefined
   private atBottom = true
   private renderTimer: NodeJS.Timeout | undefined
+  /** Conversas onde alguém está a escrever, e o relógio que faz o nome do tab mexer enquanto durar. */
+  private typing = new Set<string>()
+  private typingTimer: NodeJS.Timeout | undefined
+  private typingFrame = 0
   private dirtyTabs = true
   private dirtyMessages = true
   private showingQr = false
@@ -263,6 +267,7 @@ export class Ui {
 
     this.wa.on('connection', (state, detail) => this.onConnection(state, detail))
     this.wa.on('chats', () => { this.dirtyTabs = true; if (this.pickerOpen) this.refreshPicker(); this.scheduleRender() })
+    this.wa.on('typing', (jid, who) => this.onTyping(jid, who.length > 0))
     this.wa.on('messages', jid => { if (jid === '*' || jid === this.current) this.dirtyMessages = true; this.dirtyTabs = true; this.scheduleRender() })
     this.wa.on('notify', (jid, row) => {
       if (jid === this.current) { this.wa.markRead(jid).catch(e => logger.warn({ e }, 'markRead')); return }
@@ -311,6 +316,7 @@ export class Ui {
       this.connText = ''
       this.showingQr = false
       this.dirtyMessages = true
+      for (const jid of this.tabs) this.wa.subscribePresence(jid)
       this.scheduleRender()
     } else if (state === 'closed') {
       this.connText = `{${FG.error}-fg}● ${esc(detail ?? 'desligado')}{/${FG.error}-fg}`
@@ -318,6 +324,18 @@ export class Ui {
       this.connText = `{${FG.warn}-fg}● a ligar…{/${FG.warn}-fg}`
     }
     this.drawStatus()
+    this.screen.render()
+  }
+
+  /** Alguém começou ou parou de escrever: o nome do tab mexe enquanto houver conversas com gente a escrever. */
+  private onTyping(jid: string, active: boolean) {
+    if (active) this.typing.add(jid); else this.typing.delete(jid)
+    if (this.typing.size && !this.typingTimer) {
+      this.typingTimer = setInterval(() => { this.typingFrame++; this.drawTabs(); this.screen.render() }, 120)
+    } else if (!this.typing.size && this.typingTimer) {
+      clearInterval(this.typingTimer); this.typingTimer = undefined
+    }
+    this.drawTabs()
     this.screen.render()
   }
 
@@ -531,6 +549,7 @@ export class Ui {
     if (i !== this.active) { this.active = i; this.atBottom = true; this.dirtyMessages = true; this.selected = this.replyTo = this.reactTo = null }
     this.dirtyTabs = true
     this.saveTabs()
+    this.wa.subscribePresence(jid)
     if (this.pickerOpen) this.closePicker(false)
     this.setFocus('input')
     this.renderNow()
@@ -579,18 +598,22 @@ export class Ui {
     while (nameW > 6 && !fits(nameW)) nameW--
     // O tab activo distingue-se só pelo texto: negrito e na cor mais forte do tema; os outros ficam na cor normal.
     const strong = this.dark ? 'bright-white' : 'black'
+    // Com alguém a escrever, as cores da paleta dos nomes correm pelo nome, um grafema de cada vez.
+    const colors = namePalette()
+    const wave = (name: string) => graphemes(name).map((g, i) => { const c = colors[(i + this.typingFrame) % colors.length]!; return `{${c}-fg}${esc(g)}{/${c}-fg}` }).join('')
     let out = '', x = 0
     this.segments = []
     for (const t of tabs) {
       const name = truncate(t.name, nameW)
+      const label = this.typing.has(t.jid) ? wave(name) : esc(name)
       const text = ` ${name}${t.badge ? ' ' + t.badge : ''} × `
       const w = strWidth(text)
       const closeX0 = x + w - 2
       this.segments.push({ x0: x, x1: x + w, index: t.i, closeX0, closeX1: closeX0 + 1 })
       const badge = t.badge ? ` {${FG.badge}-fg}{bold}${t.badge}{/bold}{/${FG.badge}-fg}` : ''
       out += t.i === this.active && !this.pickerOpen
-        ? `{${strong}-fg}{bold} ${esc(name)}{/bold}{/${strong}-fg}${badge} ${dim('×')} `
-        : `{${FG.tab}-fg} ${esc(name)}{/${FG.tab}-fg}${badge} ${dim('×')} `
+        ? `{${strong}-fg}{bold} ${label}{/bold}{/${strong}-fg}${badge} ${dim('×')} `
+        : `{${FG.tab}-fg} ${label}{/${FG.tab}-fg}${badge} ${dim('×')} `
       x += w
     }
     // Estado encostado à direita: a mensagem passageira (amarela) ou a ligação; cortado se não couber.
