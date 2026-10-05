@@ -85,12 +85,12 @@ export function titleHerdr(title: string) {
 const waBin = fileURLToPath(new URL('../wa', import.meta.url))
 
 /**
- * Abre a conversa num tab novo do Herdr, com foco: a shell do tab recebe `exec wa <jid>`, por isso quando a conversa
- * se fecha o tab fecha com ela.
+ * Abre a conversa num tab novo do Herdr (com foco quando foi escolhida, sem ele quando é uma mensagem a chegar): a
+ * shell do tab recebe `exec wa <jid>`, por isso quando a conversa se fecha o tab fecha com ela.
  */
-export async function openChatHerdr(jid: string, name: string) {
+export async function openChatHerdr(jid: string, name: string, focus = true) {
   if (!inHerdr) return
-  const created = await call('tab.create', { workspace_id: env.HERDR_WORKSPACE_ID ?? null, cwd: process.cwd(), focus: true, label: name }) as { root_pane?: { pane_id?: string } } | undefined
+  const created = await call('tab.create', { workspace_id: env.HERDR_WORKSPACE_ID ?? null, cwd: process.cwd(), focus, label: name }) as { root_pane?: { pane_id?: string } } | undefined
   const paneId = created?.root_pane?.pane_id
   if (!paneId) return logger.warn({ jid }, 'herdr: tab.create sem pane')
   await call('pane.send_input', { pane_id: paneId, text: `exec '${waBin}' '${jid}'`, keys: ['enter'] })

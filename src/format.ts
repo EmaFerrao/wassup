@@ -188,6 +188,8 @@ export function wrapChars(chars: string[], width: number): string[][] {
     lines[lines.length - 1]!.push(ch); curW += w
   }
   for (let i = 0; i < chars.length;) {
+    // Fim de linha explícito: fica na linha (largura zero) e a seguinte começa vazia.
+    if (chars[i] === '\n') { lines[lines.length - 1]!.push('\n'); lines.push([]); curW = 0; i++; continue }
     if (/^\s$/.test(chars[i]!)) { push(chars[i]!, 1); i++; continue }
     let j = i, w = 0
     while (j < chars.length && !/^\s$/.test(chars[j]!)) w += cw(chars[j++]!)

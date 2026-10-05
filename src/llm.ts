@@ -85,7 +85,24 @@ export function locateWord(text: string, phrase: string): { start: number; end: 
  */
 export function narrowFix(text: string, wrong: string, fix: string): Suggestion['fix'] {
   const loc = locateWord(text, wrong)
-  if (!loc) return null
+  return loc && narrowAt(loc, wrong, fix)
+}
+
+/**
+ * O modelo muitas vezes põe a correcção da palavra ainda a meio no cursor em "wrong"/"fix" em vez de em "word" ("nao" →
+ * "não", "esta bem" → "está bem"). Aceita-se quando o trecho errado acaba mesmo no fim do texto, palavra a palavra, e
+ * cada palavra corrigida é igual à escrita ou plausível como correcção dela.
+ */
+export function fixAtEnd(text: string, wrong: string, fix: string): Suggestion['fix'] {
+  if (!text.endsWith(wrong)) return null
+  const start = text.length - wrong.length
+  if (start > 0 && /[\p{L}\p{M}\p{N}'-]/u.test(text[start - 1]!)) return null
+  const a = wrong.split(' '), b = fix.split(' ')
+  if (a.length !== b.length || !a.every((w, i) => w === b[i] || plausibleWord(w, b[i]!))) return null
+  return narrowAt({ start, end: text.length }, wrong, fix)
+}
+
+function narrowAt(loc: { start: number; end: number }, wrong: string, fix: string): Suggestion['fix'] {
   const a = wrong.split(' '), b = fix.split(' ')
   let head = 0
   while (head < a.length && head < b.length && a[head] === b[head]) head++
@@ -129,6 +146,6 @@ export async function suggest(context: { who: string; text: string }[], text: st
   const wordTo = str(parsed.word)
   const word = partial && wordTo && wordTo !== partial && plausibleWord(partial, wordTo) ? { from: partial, to: wordTo } : null
   const wrong = str(parsed.wrong), fixTo = str(parsed.fix)
-  const fix = wrong && fixTo && fixTo !== wrong ? narrowFix(text, wrong, fixTo) : null
+  const fix = wrong && fixTo && fixTo !== wrong ? narrowFix(text, wrong, fixTo) ?? (word ? null : fixAtEnd(text, wrong, fixTo)) : null
   return word || fix ? { word, fix } : null
 }

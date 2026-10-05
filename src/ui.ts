@@ -13,6 +13,7 @@ import { patchBlessedUnicode } from './unicode.js'
 import type { TermCaps } from './term.js'
 import { emojify, completeEmoji } from './emoji.js'
 import { enableKittyKeyboard } from './kittykeys.js'
+import { enableBracketedPaste } from './paste.js'
 import { parseHex, rainbowRing, mix, nearest256, type Rgb } from './rainbow.js'
 import { suggest, llmEnabled, type Suggestion } from './llm.js'
 import { patchBlessedItalic } from './italic.js'
@@ -143,6 +144,9 @@ export class Ui {
   private inputLines: string[][] = [[]]
   private inputTop = 0
   private disableKittyKeyboard?: () => void
+  private disablePaste: () => void
+  /** Conversas cujo tab do Herdr foi pedido há pouco e ainda pode não estar registado. */
+  private spawning = new Set<string>()
   private lineMap: (MessageRow | null)[] = []
   /** Mensagens desenhadas, por ordem; a seleccionada (clique ou setas no painel) e a que está a ser respondida ou reagida. */
   private rows: MessageRow[] = []
@@ -204,6 +208,8 @@ export class Ui {
     if (this.mode === 'kitty') this.kitty = new KittyImages(s => program._write(s))
     // Só com o terminal a confirmar o protocolo: é o que permite distinguir Shift+Backspace para apagar palavras.
     if (caps.kittyKeyboard) this.disableKittyKeyboard = enableKittyKeyboard((this.screen.program as unknown as { input: Parameters<typeof enableKittyKeyboard>[0] }).input, s => program._write(s))
+    // Por fora do tradutor do Kitty: o texto colado não passa por ele.
+    this.disablePaste = enableBracketedPaste((this.screen.program as unknown as { input: Parameters<typeof enableBracketedPaste>[0] }).input, s => program._write(s))
     logger.info({ caps, images: this.mode, dark: this.dark, term: process.env.TERM }, 'terminal')
 
     // Disposição: mensagens a toda a largura, escrita em duas linhas, e no fundo a barra de tabs com o estado à direita.
@@ -338,7 +344,16 @@ export class Ui {
     this.wa.on('messages', jid => { if (jid === '*' || jid === this.current) this.dirtyMessages = true; this.dirtyTabs = true; this.scheduleRender() })
     this.wa.on('notify', (jid, row) => {
       if (jid === this.current) { this.wa.markRead(jid).catch(e => logger.warn({ e }, 'markRead')); return }
-      if (this.fixed) return
+      // No Herdr a conversa nova abre num tab dele, em segundo plano, pela mesma regra do tab novo: só o terminal
+      // usado mais recentemente, e nunca se já estiver aberta noutro. Até o tab novo se registar, lembra-se o pedido.
+      if (this.fixed) {
+        if (inHerdr && !this.openElsewhere(jid) && this.isMostRecentTerminal() && !this.spawning.has(jid)) {
+          this.spawning.add(jid)
+          setTimeout(() => this.spawning.delete(jid), 15000)
+          openChatHerdr(jid, chatName(jid), false).catch(e => logger.warn({ e }, 'herdr: abrir tab'))
+        }
+        return
+      }
       if (this.tabs.includes(jid)) { this.screen.program.bell(); this.notify(jid, row.text || `[${row.type}]`); return }
       // Conversa sem tab: com vários terminais, só o usado mais recentemente abre o tab, e nunca se a conversa já
       // tiver tab noutro terminal vivo.
@@ -427,13 +442,35 @@ export class Ui {
     }).join('')
   }
 
+  /** Texto colado entra inteiro onde está o cursor; na escrita guarda as linhas, no filtro do escolhedor fica numa só. */
+  private paste(text: string) {
+    if (this.focus === 'picker') {
+      const chars = graphemes(this.filter), at = Math.min(this.filterCursor, chars.length)
+      const ins = graphemes(text.replace(/\n/g, ' '))
+      this.filter = [...chars.slice(0, at), ...ins, ...chars.slice(at)].join(''); this.filterCursor = at + ins.length
+      this.refreshPicker()
+      return this.screen.render()
+    }
+    if (this.focus !== 'input' || !text) return
+    const chars = graphemes(this.inputValue), at = Math.min(this.cursor, chars.length)
+    const ins = graphemes(text)
+    this.inputValue = [...chars.slice(0, at), ...ins, ...chars.slice(at)].join(''); this.cursor = at + ins.length
+    this.accepted = undefined
+    this.promoteActive()
+    this.noteComposing()
+    this.updateSuggestions()
+    this.drawInput()
+    this.screen.render()
+  }
+
   private onKey(ch: string, key: blessed.Widgets.Events.IKeyEventArg) {
     this.touchActivity()
     const k = key.full
     // O blessed emite cada Enter duas vezes: um "enter" sintético e logo o "return" verdadeiro. Só o segundo conta;
     // senão, com sugestões abertas, o primeiro aceitava o emoji e o segundo enviava a mensagem.
-    if (k === 'enter' && key.sequence === '\r') return
+    if (key.name === 'enter' && key.sequence === '\r') return
     if (k === 'C-c') return this.quit()
+    if (k === 'paste') return this.paste(ch)
     // ESC fecha, por ordem: a resposta ou reacção em curso, a selecção, o filtro do escolhedor, o escolhedor, o tab
     // activo, o programa.
     if (k === 'escape') {
@@ -475,6 +512,8 @@ export class Ui {
     if (this.focus === 'input') {
       // "/" com a escrita vazia abre logo as conversas; o que se escrever a seguir filtra a lista.
       if (ch === '/' && !this.inputValue) return this.openPicker()
+      // Shift+Enter (só com o protocolo do Kitty, que o distingue) ou Ctrl+J começam uma linha nova na mensagem.
+      if (k === 'S-return' || k === 'linefeed') return this.paste('\n')
       // Com sugestões de emoji abertas, ↑/↓ escolhem e Enter ou Tab aceitam; o resto continua a escrever e refina-as.
       if (this.suggestions.length) {
         if (k === 'up' || k === 'down') {
@@ -831,8 +870,9 @@ export class Ui {
       if (typing) text = this.rainbow('a escrever…', this.typing.get(jid)!)
       if (!text) return this.toast.hide()
       const w = Math.min(width, visibleWidth(text) + 2)
-      // O estado encosta à direita; "a escrever…" fica à esquerda, debaixo do ">" da escrita.
+      // O estado encosta à direita, na última linha; "a escrever…" fica à esquerda, na linha acima da escrita.
       this.toast.left = typing ? 0 : width - w; this.toast.width = w
+      this.toast.top = typing ? `100%-${this.bottom + 1}` : `100%-${this.bottom - 1}`
       this.toast.setContent(` ${text} `)
       return this.toast.show()
     }
@@ -1029,6 +1069,7 @@ export class Ui {
   quit(reason?: string) {
     this.kitty?.dispose()
     this.disableKittyKeyboard?.()
+    this.disablePaste()
     const released = releaseHerdr()
     this.screen.destroy()
     if (reason) process.stderr.write(`${reason}\n`)
@@ -1205,20 +1246,23 @@ export class Ui {
     while (row < lines.length - 1 && cursor >= start + lines[row]!.length) start += lines[row++]!.length
     let col = cursor - start
     if (col >= lines[row]!.length && wrapWidth(esc(lines[row]!.join(''))) >= width) { lines.push([]); row++; col = 0 }
+    // O "\n" que fecha uma linha fica nela, para o cursor contar, mas não se desenha.
+    const text = (l: string[]) => l.filter(c => c !== '\n').join('')
     this.inputLines = lines
     this.inputTop = Math.max(0, Math.min(row - (rowsAvail - 1), lines.length - rowsAvail))
     const showCursor = this.focus === 'input' || this.focus === 'picker'
     const render = (line: string[], r: number) => {
-      if (!showCursor || r !== row) return esc(line.join(''))
-      const before = esc(line.slice(0, col).join(''))
-      const avail = width - visibleWidth(esc(line.join(''))) - 1
+      if (!showCursor || r !== row) return esc(text(line))
+      const before = esc(text(line.slice(0, col)))
+      const avail = width - visibleWidth(esc(text(line))) - 1
       if (ghostNext && col >= line.length && avail >= 1) {
         // O cursor fica sobre a primeira letra da sugestão, sem célula vazia pelo meio; o resto segue em itálico.
         const g = graphemes(truncate(ghostNext, avail + 1))
         return before + dim(italic('{inverse}' + esc(g[0]!) + '{/inverse}' + esc(g.slice(1).join(''))))
       }
       const tail = ghostWord && col >= line.length && avail >= 7 ? dim(italic(esc(truncate(ghostWord, avail)))) : ''
-      return before + '{inverse}' + esc(line[col] ?? ' ') + '{/inverse}' + esc(line.slice(col + 1).join('')) + tail
+      const under = line[col] == null || line[col] === '\n' ? ' ' : line[col]!
+      return before + '{inverse}' + esc(under) + '{/inverse}' + esc(text(line.slice(col + 1))) + tail
     }
     const visible = lines.slice(this.inputTop, this.inputTop + rowsAvail)
     // O prompt diz o que a linha faz: ">" escreve, "/" filtra as conversas.
