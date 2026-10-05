@@ -112,8 +112,8 @@ completa está em `src/emoji.ts`. Os smileys clássicos também são convertidos
 Com um `llama-server` local a responder em `http://127.0.0.1:8080` (ou `WA_LLM`), com o modelo `gemma4-26b` (ou
 `WA_LLM_MODEL`), a escrita pede uma sugestão 150 ms depois da última tecla, com as últimas mensagens da conversa como
 contexto. São só de duas espécies e aparecem em itálico cinzento na sequência do texto, durante 4 segundos: as letras
-que faltam à palavra a meio, coladas ao cursor, ou, a seguir a um `✎`, a palavra certa, quer seja a palavra a meio
-corrigida quer uma palavra errada mais atrás na frase. Tab aceita; qualquer outra tecla ignora. Com texto na escrita
+que faltam à palavra a meio, coladas ao cursor, ou, um pouco à frente e a seguir a `⇢`, a palavra certa, quer seja a palavra a meio
+corrigida quer uma palavra errada mais atrás na frase, incluindo duas palavras coladas que a correcção separa. Tab aceita; qualquer outra tecla ignora. Com texto na escrita
 o Tab é da sugestão; só com a escrita vazia muda de tab. `WA_LLM=off` desliga; sem servidor a responder nada aparece.
 
 ## Dados
