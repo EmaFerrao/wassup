@@ -499,7 +499,8 @@ export class Ui {
     if (k === 'pagedown') { this.msgBox.scroll(this.innerHeight() - 1); return this.screen.render() }
     // Tab circula pelos tabs abertos; com o escolhedor aberto volta ao tab activo. Conversas novas abrem-se com "/".
     // Com texto na escrita, Tab aceita a sugestão à vista: a lista de emojis, ou a do modelo; sem texto, muda de tab.
-    if (k === 'tab' && this.focus === 'input' && !this.pickerOpen && this.inputValue) {
+    // A seta para a direita, com o cursor já no fim, faz o mesmo que o Tab; a meio do texto continua a mover o cursor.
+    if ((k === 'tab' || (k === 'right' && this.cursorAtEnd() && (this.suggestions.length || this.ghostShown()))) && this.focus === 'input' && !this.pickerOpen && this.inputValue) {
       if (this.suggestions.length) return this.acceptSuggestion()
       if (this.ghostShown()) this.acceptGhost()
       return
