@@ -1236,17 +1236,11 @@ export class Ui {
     // corrigida ou uma palavra errada mais atrás. Tab aceita.
     const ghost = this.ghostShown()
     const view = ghost ? this.ghostView(ghost) : null
-    const ghostNext = view?.kind === 'suffix' ? view.text : ''
-    const ghostWord = view && view.kind !== 'suffix' ? `  ⇢ ${view.text}` : ''
     this.inputHeader = header != null
     const width = Math.max(4, w - 2)
     const chars = graphemes(this.pickerOpen ? this.filter : this.inputValue)
     const cursor = Math.min(this.pickerOpen ? this.filterCursor : this.cursor, chars.length)
     const lines = wrapChars(chars, width)
-    // A escrita cresce com o texto, até metade do ecrã; o cabeçalho (responder, reagir, editar) ocupa uma das linhas.
-    const rows = Math.max(2, Math.min(lines.length + (header ? 1 : 0), Math.floor(num(this.screen.height) / 2)))
-    if (rows !== this.inputRows) this.resizeInput(rows)
-    const rowsAvail = header ? rows - 1 : rows
     // Linha e coluna do cursor: no fim do texto fica depois do último grafema, e passa a uma linha nova se não cabe.
     let row = 0, start = 0
     while (row < lines.length - 1 && cursor >= start + lines[row]!.length) start += lines[row++]!.length
@@ -1254,26 +1248,44 @@ export class Ui {
     if (col >= lines[row]!.length && wrapWidth(esc(lines[row]!.join(''))) >= width) { lines.push([]); row++; col = 0 }
     // O "\n" que fecha uma linha fica nela, para o cursor contar, mas não se desenha.
     const text = (l: string[]) => l.filter(c => c !== '\n').join('')
+    // A sugestão vai na linha do cursor se lá couber inteira: as letras que faltam coladas ao cursor, ou "⇢ palavra"
+    // duas células à frente. Senão vai numa linha só dela, por baixo, em vez de cortada.
+    const cursorLine = lines[row]!
+    const avail = width - visibleWidth(esc(text(cursorLine))) - 1
+    let ghostNext = '', ghostTail = '', ghostBelow = ''
+    if (view && col >= cursorLine.length) {
+      if (view.kind === 'suffix' && strWidth(view.text) <= avail + 1) ghostNext = view.text
+      else {
+        const word = `⇢ ${view.kind === 'suffix' ? ghost!.word!.to : view.text}`
+        if (strWidth(word) + 2 <= avail) ghostTail = `  ${word}`
+        else ghostBelow = truncate(word, width)
+      }
+    }
+    // A escrita cresce com o texto, até metade do ecrã; o cabeçalho (responder, reagir, editar) e a sugestão em linha
+    // própria ocupam cada um uma das linhas.
+    const extra = (header ? 1 : 0) + (ghostBelow ? 1 : 0)
+    const rows = Math.max(2, Math.min(lines.length + extra, Math.floor(num(this.screen.height) / 2)))
+    if (rows !== this.inputRows) this.resizeInput(rows)
+    const rowsAvail = Math.max(1, rows - extra)
     this.inputLines = lines
     this.inputTop = Math.max(0, Math.min(row - (rowsAvail - 1), lines.length - rowsAvail))
     const showCursor = this.focus === 'input' || this.focus === 'picker'
     const render = (line: string[], r: number) => {
       if (!showCursor || r !== row) return esc(text(line))
       const before = esc(text(line.slice(0, col)))
-      const avail = width - visibleWidth(esc(text(line))) - 1
-      if (ghostNext && col >= line.length && avail >= 1) {
+      if (ghostNext) {
         // O cursor fica sobre a primeira letra da sugestão, sem célula vazia pelo meio; o resto segue em itálico.
-        const g = graphemes(truncate(ghostNext, avail + 1))
+        const g = graphemes(ghostNext)
         return before + dim(italic('{inverse}' + esc(g[0]!) + '{/inverse}' + esc(g.slice(1).join(''))))
       }
-      const tail = ghostWord && col >= line.length && avail >= 7 ? dim(italic(esc(truncate(ghostWord, avail)))) : ''
       const under = line[col] == null || line[col] === '\n' ? ' ' : line[col]!
-      return before + '{inverse}' + esc(under) + '{/inverse}' + esc(text(line.slice(col + 1))) + tail
+      return before + '{inverse}' + esc(under) + '{/inverse}' + esc(text(line.slice(col + 1))) + (ghostTail ? dim(italic(esc(ghostTail))) : '')
     }
     const visible = lines.slice(this.inputTop, this.inputTop + rowsAvail)
     // O prompt diz o que a linha faz: ">" escreve, "/" filtra as conversas.
     const prompt = this.pickerOpen ? '/ ' : '> '
     const out = visible.map((l, i) => (this.inputTop + i === 0 ? prompt : '  ') + render(l, this.inputTop + i))
+    if (ghostBelow) out.push('  ' + dim(italic(esc(ghostBelow))))
     if (header) out.unshift(dim(esc(truncate(header, w))))
     this.input.setContent(out.join('\n'))
   }
