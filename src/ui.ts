@@ -238,8 +238,15 @@ export class Ui {
     if (this.fixed) this.tabsBar.hide()
     // Sugestões de emoji, por cima da escrita e sobre as mensagens, com o fundo do realce para se destacar.
     this.suggest = blessed.box({
-      parent: this.screen, top: '100%-4', left: 0, width: 1, height: 1, tags: true, hidden: true, padding: { left: 1, right: 1 }, wrap: false,
+      parent: this.screen, top: '100%-4', left: 0, width: 1, height: 1, tags: true, hidden: true, padding: { left: 1, right: 1 }, wrap: false, mouse: true,
       style: { bg: this.selectedBg } as unknown as blessed.Widgets.Types.TStyle,
+    })
+    // Um clique numa linha da lista de emojis escolhe esse.
+    this.suggest.on('click', (data: { x: number; y: number }) => {
+      const i = data.y - num(this.suggest.atop)
+      if (i < 0 || i >= this.suggestions.length) return
+      this.suggestIndex = i
+      this.acceptSuggestion()
     })
 
     // Rato só com cliques e roda (1000) em codificação SGR (1006), em vez do conjunto que o blessed activa para xterm
