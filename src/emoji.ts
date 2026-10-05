@@ -10,7 +10,7 @@ const EMOJI: [string, string[], string[]][] = [
   ['🤣', ['chorar_a_rir'], ['rofl']],
   ['😉', ['piscadela'], ['wink']],
   ['😛', ['lingua'], ['tongue', 'stuck_out_tongue']],
-  ['😘', ['beijinho', 'beijo'], ['kiss', 'kissing_heart']],
+  ['😘', ['beijinho'], ['kissing_heart']],
   ['😍', ['apaixonado', 'olhos_de_coracao'], ['heart_eyes']],
   ['🤔', ['pensativo', 'a_pensar'], ['thinking']],
   ['😐', ['neutro', 'sem_expressao'], ['neutral', 'neutral_face']],
@@ -55,6 +55,7 @@ const EMOJI: [string, string[], string[]][] = [
   ['🧠', ['cerebro'], ['brain']],
   // corações e símbolos
   ['❤️', ['coracao', 'amor'], ['heart', 'love']],
+  ['💋', ['beijo'], ['kiss', 'lips']],
   ['💔', ['coracao_partido', 'desgosto'], ['broken_heart']],
   ['🧡', ['coracao_laranja'], ['orange_heart']],
   ['💛', ['coracao_amarelo'], ['yellow_heart']],
@@ -245,14 +246,27 @@ for (const [faces, emoji] of EMOTICONS) for (const f of faces) EMOTICON_MAP.set(
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const EMOTICON_RE = new RegExp(`(^|\\s)(${[...EMOTICON_MAP.keys()].sort((a, b) => b.length - a.length).map(escapeRe).join('|')})(?=\\s|$|[.,!?])`, 'g')
 
-/** Troca :nome: e os smileys clássicos (":)", ":-P", ":*") pelo emoji correspondente; o resto fica como está. */
+/** Troca os smileys clássicos (":)", ":-P", ":*") pelo emoji correspondente; o resto fica como está. */
+export function emoticonify(text: string): string {
+  return text.replace(EMOTICON_RE, (_m, pre: string, face: string) => `${pre}${EMOTICON_MAP.get(face)}`)
+}
+
+/** Troca :nome: e os smileys clássicos pelo emoji correspondente; o resto fica como está. */
 export function emojify(text: string): string {
-  return text
-    .replace(CODE_RE, (m, pre: string, code: string) => {
-      const e = TABLE[code.toLowerCase()]
-      return e ? `${pre}${e}` : m
-    })
-    .replace(EMOTICON_RE, (_m, pre: string, face: string) => `${pre}${EMOTICON_MAP.get(face)}`)
+  return emoticonify(text.replace(CODE_RE, (m, pre: string, code: string) => {
+    const e = TABLE[code.toLowerCase()]
+    return e ? `${pre}${e}` : m
+  }))
+}
+
+/** Os :códigos: fechados que correspondem a um emoji, com a posição (em unidades da string) logo a seguir ao fecho. */
+export function codeMatches(text: string): { end: number; emoji: string }[] {
+  const out: { end: number; emoji: string }[] = []
+  for (const m of text.matchAll(CODE_RE)) {
+    const e = TABLE[m[2]!.toLowerCase()]
+    if (e) out.push({ end: m.index! + m[0].length, emoji: e })
+  }
+  return out
 }
 
 export const emojiCodes = Object.keys(TABLE)
