@@ -36,8 +36,12 @@ usam tons claros ou escuros conforme o caso. Se o terminal não responder, fica 
   nas que já têm tab e um excerto da última mensagem. O que se escreve vai para a linha do prompt e filtra a lista, sem
   acentos nem maiúsculas; setas, Enter ou clique abrem a conversa num tab e activam-no; Esc limpa o filtro e depois
   fecha a lista.
-- **Mensagens**: as tuas à direita, as dos outros à esquerda. Roda do rato, setas, PgUp/PgDn. Clique num anexo
+- **Mensagens**: as tuas à direita, as dos outros à esquerda. Roda do rato, PgUp/PgDn. Clique num anexo
   (imagem, vídeo, ficheiro, áudio) abre-o com `xdg-open`; se ainda não estiver descarregado, descarrega-o.
+  Um clique numa mensagem, ou ↑ a partir da escrita, selecciona-a; ↑/↓ movem a selecção e ↓ da última volta à
+  escrita, tal como Esc ou `i`. Sobre a seleccionada, `r` responde (a escrita ganha uma linha com a citação; Enter
+  envia, Esc desiste) e `e` reage (escreve-se o emoji, directo ou `:fixe:`, e Enter; Enter vazio retira a reacção).
+  As reacções de todos aparecem numa linha cinzenta por baixo da mensagem.
 - **Escrita**: duas linhas, texto partido por palavras; Enter envia. Setas, Home e End movem o cursor, e um clique
   põe-no onde se clicou; Backspace e Delete apagam para trás e para a frente, Ctrl-U limpa a linha e Shift-Backspace
   apaga a palavra anterior (só em terminais com o protocolo de teclado do Kitty: Kitty, Ghostty, foot, WezTerm). O mesmo

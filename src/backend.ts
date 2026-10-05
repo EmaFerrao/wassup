@@ -10,7 +10,8 @@ export interface Backend extends EventEmitter<WaEvents> {
   readonly me: string
   readonly state: ConnState
   readonly qr: string | undefined
-  send(chatJid: string, text: string): Promise<void>
+  send(chatJid: string, text: string, replyTo?: string): Promise<void>
+  react(chatJid: string, msgId: string, emoji: string): Promise<void>
   sendFile(chatJid: string, filePath: string, caption?: string): Promise<void>
   markRead(chatJid: string): Promise<void>
   ensureMedia(row: MessageRow): void

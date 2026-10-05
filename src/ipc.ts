@@ -80,7 +80,8 @@ export class IpcServer {
     try {
       const a = req.args as string[]
       switch (req.op) {
-        case 'send': await this.wa.send(a[0]!, a[1]!); return reply({ ok: true })
+        case 'send': await this.wa.send(a[0]!, a[1]!, a[2]); return reply({ ok: true })
+        case 'react': await this.wa.react(a[0]!, a[1]!, a[2] ?? ''); return reply({ ok: true })
         case 'sendFile': await this.wa.sendFile(a[0]!, a[1]!, a[2]); return reply({ ok: true })
         case 'markRead': await this.wa.markRead(a[0]!); return reply({ ok: true })
         case 'ensureMedia': { const row = store.getMessage(a[0]!, a[1]!); if (row) this.wa.ensureMedia(row); return reply({ ok: true }) }
@@ -163,7 +164,8 @@ export class RemoteWa extends EventEmitter<WaEvents> implements Backend {
     })
   }
 
-  send(chatJid: string, text: string) { return this.call<void>('send', chatJid, text) }
+  send(chatJid: string, text: string, replyTo?: string) { return this.call<void>('send', chatJid, text, replyTo) }
+  react(chatJid: string, msgId: string, emoji: string) { return this.call<void>('react', chatJid, msgId, emoji) }
   sendFile(chatJid: string, filePath: string, caption?: string) { return this.call<void>('sendFile', chatJid, filePath, caption) }
   markRead(chatJid: string) { return this.call<void>('markRead', chatJid) }
   ensureMedia(row: MessageRow) { this.call('ensureMedia', row.chat_jid, row.id).catch(() => {}) }

@@ -16,6 +16,13 @@ export interface ContactRow {
   notify: string | null
 }
 
+export interface ReactionRow {
+  chat_jid: string
+  msg_id: string
+  sender_jid: string
+  emoji: string
+}
+
 export interface MessageRow {
   id: string
   chat_jid: string
@@ -79,6 +86,14 @@ db.exec(`
     PRIMARY KEY (chat_jid, id)
   );
   CREATE INDEX IF NOT EXISTS messages_chat_ts ON messages (chat_jid, ts);
+  CREATE TABLE IF NOT EXISTS reactions (
+    chat_jid TEXT NOT NULL,
+    msg_id TEXT NOT NULL,
+    sender_jid TEXT NOT NULL,
+    emoji TEXT NOT NULL,
+    ts INTEGER NOT NULL,
+    PRIMARY KEY (chat_jid, msg_id, sender_jid)
+  );
   CREATE TABLE IF NOT EXISTS state (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -137,6 +152,11 @@ const q = {
   setStatus: db.prepare(`UPDATE messages SET status = ? WHERE chat_jid = ? AND id = ?`),
   setType: db.prepare(`UPDATE messages SET type = ?, text = ? WHERE chat_jid = ? AND id = ?`),
   lastMessage: db.prepare(`SELECT * FROM messages WHERE chat_jid = ? ORDER BY ts DESC LIMIT 1`),
+  setReaction: db.prepare(`
+    INSERT INTO reactions (chat_jid, msg_id, sender_jid, emoji, ts) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(chat_jid, msg_id, sender_jid) DO UPDATE SET emoji = excluded.emoji, ts = excluded.ts WHERE excluded.ts >= reactions.ts`),
+  clearReaction: db.prepare(`DELETE FROM reactions WHERE chat_jid = ? AND msg_id = ? AND sender_jid = ? AND ts <= ?`),
+  listReactions: db.prepare(`SELECT chat_jid, msg_id, sender_jid, emoji FROM reactions WHERE chat_jid = ? ORDER BY ts ASC`),
   lidContactsUnmapped: db.prepare(`SELECT * FROM contacts k WHERE k.jid LIKE '%@lid' AND (k.name IS NOT NULL OR k.notify IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM lids l WHERE l.lid = k.jid)`),
   getState: db.prepare(`SELECT value FROM state WHERE key = ?`),
   listState: db.prepare(`SELECT key, value FROM state WHERE key LIKE ? ESCAPE '\\'`),
@@ -233,6 +253,15 @@ export const store = {
   },
   lastMessage(chat: string): MessageRow | undefined {
     return q.lastMessage.get(chat) as unknown as MessageRow | undefined
+  },
+
+  /** Reacção de alguém a uma mensagem; emoji vazio retira-a. A mais recente ganha, venha por que ordem vier. */
+  setReaction(chat: string, msgId: string, sender: string, emoji: string, ts: number) {
+    if (emoji) q.setReaction.run(chat, msgId, sender, emoji, ts)
+    else q.clearReaction.run(chat, msgId, sender, ts)
+  },
+  listReactions(chat: string): ReactionRow[] {
+    return q.listReactions.all(chat) as unknown as ReactionRow[]
   },
 
   /** Estado da interface (tabs abertos, etc.), em JSON por chave. */

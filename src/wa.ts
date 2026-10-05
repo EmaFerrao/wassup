@@ -127,6 +127,22 @@ function quotedSnippet(msg: proto.IMessage | null | undefined): string {
   }
 }
 
+/**
+ * Uma reacção (emoji sobre uma mensagem anterior) não é uma mensagem: guarda-se na tabela própria. Devolve a conversa
+ * tocada, para a interface a redesenhar, ou null se a WAMessage não é uma reacção.
+ */
+export function storeReaction(m: WAMessage, meJid: string): string | null {
+  const r = normalizeMessageContent(m.message ?? undefined)?.reactionMessage
+  if (!r?.key?.id || !m.key?.remoteJid) return null
+  const chatJid = canonicalJid(m.key.remoteJid, m.key.remoteJidAlt)
+  if (!chatJid) return null
+  const fromMe = !!m.key.fromMe
+  const senderJid = fromMe ? meJid : isJidGroup(chatJid) ? canonicalJid(m.key.participant, m.key.participantAlt) : chatJid
+  const ts = r.senderTimestampMs ? toNumber(r.senderTimestampMs) : toNumber(m.messageTimestamp) * 1000
+  store.setReaction(chatJid, r.key.id, senderJid, r.text ?? '', ts)
+  return chatJid
+}
+
 /** Traduz uma WAMessage do baileys para a linha que guardamos. Devolve null para o que não é uma mensagem visível. */
 export function parseMessage(m: WAMessage, meJid: string): Parsed | null {
   const key = m.key
@@ -325,7 +341,7 @@ export class Wa extends EventEmitter<WaEvents> {
         for (const m of lidPnMappings ?? []) store.setLid(jidNormalizedUser(m.lid), jidNormalizedUser(m.pn))
         for (const c of contacts) this.upsertContact(c)
         for (const c of chats) this.upsertChat(c)
-        for (const m of messages) this.storeMessage(m, false)
+        for (const m of messages) if (!storeReaction(m, this.me)) this.storeMessage(m, false)
       })
       this.emit('chats')
       this.emit('messages', '*')
@@ -361,6 +377,8 @@ export class Wa extends EventEmitter<WaEvents> {
       const touched = new Set<string>()
       store.transaction(() => {
         for (const m of messages) {
+          const reacted = storeReaction(m, this.me)
+          if (reacted) { touched.add(reacted); continue }
           const row = this.storeMessage(m, type === 'notify')
           if (!row) continue
           touched.add(row.chat_jid)
@@ -475,9 +493,24 @@ export class Wa extends EventEmitter<WaEvents> {
     return store.getMessage(p.chatJid, p.id)!
   }
 
-  async send(chatJid: string, text: string) {
-    const sent = await this.sock!.sendMessage(chatJid, { text })
+  /** Envia texto; com `replyTo` (id de uma mensagem desta conversa) vai como resposta, com a citação. */
+  async send(chatJid: string, text: string, replyTo?: string) {
+    const quoted = replyTo ? this.rawMessage(chatJid, replyTo) : undefined
+    const sent = await this.sock!.sendMessage(chatJid, { text }, quoted ? { quoted } : undefined)
     if (sent) { store.transaction(() => this.storeMessage(sent, false)); this.emit('messages', chatJid); this.emit('chats') }
+  }
+
+  /** Reage a uma mensagem com um emoji; vazio retira a reacção anterior. */
+  async react(chatJid: string, msgId: string, emoji: string) {
+    const target = this.rawMessage(chatJid, msgId)
+    if (!target) throw new Error('mensagem desconhecida')
+    const sent = await this.sock!.sendMessage(chatJid, { react: { text: emoji, key: target.key } })
+    if (sent && storeReaction(sent, this.me)) this.emit('messages', chatJid)
+  }
+
+  private rawMessage(chatJid: string, id: string): WAMessage | undefined {
+    const row = store.getMessage(chatJid, id)
+    return row ? (JSON.parse(row.raw, BufferJSON.reviver) as WAMessage) : undefined
   }
 
   async sendFile(chatJid: string, filePath: string, caption?: string) {

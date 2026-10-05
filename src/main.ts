@@ -23,7 +23,8 @@ class BackendProxy extends EventEmitter<WaEvents> implements Backend {
   get qr() { return this.inner?.qr }
   // Antes da eleição acabar não há backend: as acções que não são possíveis falham com mensagem, as outras ignoram-se.
   private ready(): Backend { if (!this.inner) throw new Error('ainda sem ligação'); return this.inner }
-  send(jid: string, text: string) { return this.ready().send(jid, text) }
+  send(jid: string, text: string, replyTo?: string) { return this.ready().send(jid, text, replyTo) }
+  react(jid: string, msgId: string, emoji: string) { return this.ready().react(jid, msgId, emoji) }
   sendFile(jid: string, file: string, caption?: string) { return this.ready().sendFile(jid, file, caption) }
   async markRead(jid: string) { await this.inner?.markRead(jid) }
   ensureMedia(row: MessageRow) { this.inner?.ensureMedia(row) }

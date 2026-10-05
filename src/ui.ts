@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import QRCode from 'qrcode'
-import { store, type ChatRow, type MessageRow } from './db.js'
+import { store, type ChatRow, type MessageRow, type ReactionRow } from './db.js'
 import { chatName, contactName, thumbPath, jidUser, type ConnState } from './wa.js'
 import type { Backend } from './backend.js'
 import { waMarkup, esc, colorFor, setNameColors, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, fold, graphemes, wrapChars } from './format.js'
@@ -41,7 +41,7 @@ interface ClinesBox extends blessed.Widgets.BoxElement {
   childBase: number
 }
 
-const HELP = 'Tab/Shift-Tab muda de tab · Ctrl-T conversas · Ctrl-W fecha tab · Esc fecha · PgUp/PgDn histórico · :up ficheiro · :down anexos · :fixe: emoji'
+const HELP = 'Tab/Shift-Tab muda de tab · Ctrl-T conversas · Ctrl-W fecha tab · Esc fecha · PgUp/PgDn histórico · ↑ ou clique selecciona mensagem, r responde, e reage · :up ficheiro · :down anexos · :fixe: emoji'
 
 // Cores do tema do terminal, nunca assumidas: texto e fundo por omissão e as 16 nomeadas, que o tema garante
 // legíveis sobre o seu fundo. Os avisos passageiros são discretos; só a espera do QR e as quebras de ligação se
@@ -57,18 +57,19 @@ type Bg = number | 'default'
 /**
  * Fundos dos painéis a partir do fundo real do terminal (OSC 11): barra de tabs e escolhedor no fundo por omissão;
  * mensagens e escrita em cinzentos um pouco afastados da luminosidade dele, para o lado claro num tema escuro e para
- * o escuro num claro, e o painel activo um tom mais afastado. Cinzentos porque a paleta de 256 só é fina na rampa
+ * o escuro num claro, o painel activo um tom mais afastado e a mensagem seleccionada mais um. Cinzentos porque a paleta de 256 só é fina na rampa
  * deles; o cubo de cores salta de 0 para 95 e não tem tons perto de um fundo escuro colorido. Sem o fundo conhecido
  * fica tudo no fundo por omissão.
  */
-function palette(bg: string | null): { bar: Bg; messages: Bg; messagesFocus: Bg; input: Bg; inputFocus: Bg; picker: Bg; pickerFocus: Bg; dark: boolean } {
+function palette(bg: string | null): { bar: Bg; messages: Bg; messagesFocus: Bg; input: Bg; inputFocus: Bg; picker: Bg; pickerFocus: Bg; selected: number; dark: boolean } {
   const base = { bar: 'default' as Bg, picker: 'default' as Bg, pickerFocus: 'default' as Bg }
   const m = bg && /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(bg)
-  if (!m) return { ...base, messages: 'default', messagesFocus: 'default', input: 'default', inputFocus: 'default', dark: true }
+  // Sem o fundo conhecido, o realce da selecção fica num cinzento médio, legível com texto claro ou escuro.
+  if (!m) return { ...base, messages: 'default', messagesFocus: 'default', input: 'default', inputFocus: 'default', selected: 240, dark: true }
   const luma = 0.299 * parseInt(m[1]!, 16) + 0.587 * parseInt(m[2]!, 16) + 0.114 * parseInt(m[3]!, 16)
   const dark = luma < 128
   const shade = (delta: number) => gray256(luma + (dark ? delta : -delta))
-  return { ...base, messages: shade(18), messagesFocus: shade(28), input: shade(28), inputFocus: shade(38), dark }
+  return { ...base, messages: shade(18), messagesFocus: shade(28), input: shade(28), inputFocus: shade(38), selected: shade(48), dark }
 }
 
 /**
@@ -123,6 +124,12 @@ export class Ui {
   private inputTop = 0
   private disableKittyKeyboard?: () => void
   private lineMap: (MessageRow | null)[] = []
+  /** Mensagens desenhadas, por ordem; a seleccionada (clique ou setas no painel) e a que está a ser respondida ou reagida. */
+  private rows: MessageRow[] = []
+  private selected: MessageRow | null = null
+  private replyTo: MessageRow | null = null
+  private reactTo: MessageRow | null = null
+  private inputHeader = false
   private images: ImageSlot[] = []
   private mode: ImageMode
   private kitty: KittyImages | undefined
@@ -159,7 +166,7 @@ export class Ui {
     })
     this.msgBox = blessed.box({
       parent: this.screen, top: 0, left: 0, right: 0, height: '100%-3', padding: { left: 1, right: 1 },
-      tags: true, scrollable: true, alwaysScroll: true, keys: true, vi: true, mouse: true,
+      tags: true, scrollable: true, alwaysScroll: true, mouse: true,
       style: { bg: this.BG.messages, focus: { bg: this.BG.messagesFocus } } as unknown as blessed.Widgets.Types.TStyle,
     }) as ClinesBox
     this.input = blessed.box({
@@ -231,14 +238,15 @@ export class Ui {
       if (x >= seg.closeX0 && x < seg.closeX1) return this.closeTab(seg.index)
       this.activateTab(seg.index)
     })
-    // Clicar nas mensagens activa a escrita (e abre o anexo se o clique cair num).
+    // Clicar numa mensagem selecciona-a (e abre o anexo se o clique cair num); fora das mensagens volta à escrita.
     this.msgBox.on('click', (data: { x: number; y: number }) => {
-      this.setFocus('input')
       const line = this.msgBox.childBase + (data.y - num(this.msgBox.atop) - num(this.msgBox.itop))
       const orig = this.msgBox._clines?.rtof?.[line]
       const row = orig != null ? this.lineMap[orig] : null
+      if (row) this.select(row)
+      else this.setFocus('input')
       if (row?.media_mime) this.openMedia(row)
-      this.screen.render()
+      this.renderNow()
     })
     this.msgBox.on('scroll', () => this.updateAtBottom())
     // Clicar na escrita põe o cursor na posição clicada (ou no fim da linha, se o clique cair depois do texto).
@@ -246,7 +254,7 @@ export class Ui {
       if (!this.pickerOpen) this.setFocus('input')
       {
         const x = data.x - num(this.input.aleft) - num(this.input.ileft) - 2
-        const row = this.inputTop + data.y - num(this.input.atop) - num(this.input.itop)
+        const row = this.inputTop + data.y - num(this.input.atop) - num(this.input.itop) - (this.inputHeader ? 1 : 0)
         let pos = 0
         for (let r = 0; r < Math.min(row, this.inputLines.length); r++) pos += this.inputLines[r]!.length
         const line = this.inputLines[row]
@@ -303,7 +311,7 @@ export class Ui {
         if (err) { logger.error({ err }, 'qr'); return }
         this.showingQr = true
         this.msgBox.setContent(['', '  {bold}Ligar o WhatsApp{/bold}', '', '  No telemóvel: WhatsApp › Definições › Dispositivos associados › Associar dispositivo', '', qr].join('\n'))
-        this.lineMap = []; this.images = []
+        this.lineMap = []; this.images = []; this.rows = []; this.selected = null
         this.screen.render()
       })
       this.connText = `{${FG.warn}-fg}● à espera do QR{/${FG.warn}-fg}`
@@ -325,8 +333,11 @@ export class Ui {
     this.touchActivity()
     const k = key.full
     if (k === 'C-c') return this.quit()
-    // ESC fecha, por ordem: o filtro do escolhedor, o escolhedor, o tab activo, o programa.
+    // ESC fecha, por ordem: a resposta ou reacção em curso, a selecção, o filtro do escolhedor, o escolhedor, o tab
+    // activo, o programa.
     if (k === 'escape') {
+      if (this.replyTo || this.reactTo) { this.replyTo = this.reactTo = null; this.drawInput(); return this.screen.render() }
+      if (this.focus === 'messages') { this.setFocus('input'); return this.renderNow() }
       if (this.pickerOpen) {
         if (this.filter) { this.filter = ''; this.filterCursor = 0; this.refreshPicker(); return this.screen.render() }
         // Sem tabs não há para onde voltar: o escolhedor é o único painel, e fechá-lo é sair.
@@ -367,17 +378,85 @@ export class Ui {
       if (ch === '/' && !this.inputValue) return this.openPicker()
       if (k === 'enter' || k === 'return') { const v = this.inputValue; this.inputValue = ''; this.cursor = 0; this.drawInput(); this.screen.render(); return void this.submit(v) }
       const e = edit(this.inputValue, this.cursor, k, ch, key)
-      if (!e) return
+      if (!e) { if (k === 'up') this.moveSelection(-1); return }
       this.inputValue = e.value
       this.cursor = e.cursor
       this.drawInput()
       return this.screen.render()
     }
-    if (this.focus === 'messages' && k === 'i') { this.setFocus('input'); return this.screen.render() }
+    if (this.focus === 'messages') {
+      if (k === 'i') { this.setFocus('input'); return this.renderNow() }
+      if (k === 'up' || k === 'down') return this.moveSelection(k === 'up' ? -1 : 1)
+      if ((k === 'r' || k === 'e') && this.selected) {
+        // A escrita passa a ser a resposta (ou o emoji da reacção) à mensagem seleccionada; o cabeçalho diz qual.
+        if (k === 'r') { this.replyTo = this.selected; this.reactTo = null } else { this.reactTo = this.selected; this.replyTo = null }
+        this.setFocus('input')
+        return this.renderNow()
+      }
+    }
+  }
+
+  // ---------- selecção de mensagens ----------
+
+  private select(row: MessageRow | null) {
+    this.selected = row
+    this.dirtyMessages = true
+    if (row) { if (this.focus !== 'messages') this.setFocus('messages') }
+    else if (this.focus === 'messages') this.setFocus('input')
+  }
+
+  /** Move a selecção para a mensagem anterior (-1) ou seguinte (+1); sem selecção, ↑ pega na última; ↓ da última volta à escrita. */
+  private moveSelection(dir: -1 | 1) {
+    if (!this.current || !this.rows.length) return
+    const i = this.selected ? this.rows.findIndex(r => r.id === this.selected!.id) : this.rows.length
+    const next = i + dir
+    this.select(next >= this.rows.length ? null : this.rows[Math.max(0, next)]!)
+    this.renderNow()
+    if (this.selected) this.scrollToSelected()
+    this.screen.render()
+  }
+
+  /** Faz scroll ao painel só o bastante para a mensagem seleccionada ficar toda visível. */
+  private scrollToSelected() {
+    const id = this.selected?.id
+    const first = this.lineMap.findIndex(r => r?.id === id)
+    if (first < 0) return
+    let last = first
+    while (last + 1 < this.lineMap.length && this.lineMap[last + 1]?.id === id) last++
+    const ftor = this.msgBox._clines?.ftor
+    const top = ftor?.[first]?.[0], bottom = ftor?.[last]?.at(-1)
+    if (top == null || bottom == null) return
+    const base = this.msgBox.childBase, h = this.innerHeight()
+    if (top < base) this.msgBox.scrollTo(top)
+    else if (bottom >= base + h) this.msgBox.scrollTo(bottom - h + 1)
+  }
+
+  private who(row: MessageRow): string {
+    return row.from_me ? 'eu' : row.chat_jid.endsWith('@g.us') ? contactName(row.sender_jid) : chatName(row.chat_jid)
+  }
+
+  private snippet(row: MessageRow): string {
+    return row.text.split('\n')[0] || `[${row.type}]`
   }
 
   private async submit(v: string) {
     const text = emojify(v.trim())
+    // Reacção em curso: o que se escreveu é o emoji (vazio retira a reacção), e vai para a mensagem escolhida.
+    const reactTo = this.reactTo
+    if (reactTo) {
+      this.reactTo = null
+      this.drawInput()
+      this.screen.render()
+      if (this.wa.state !== 'open') return this.flash('sem ligação ao WhatsApp; espera pelo ● verde')
+      try {
+        await this.wa.react(reactTo.chat_jid, reactTo.id, text)
+        if (!text) this.flash('reacção retirada')
+      } catch (e) {
+        logger.error({ e }, 'react')
+        this.flash(`erro: ${(e as Error).message}`, 10000)
+      }
+      return
+    }
     if (!text) return
     if (text.startsWith('/')) return this.openPicker(text.slice(1).trim())
     if (!this.current) return this.flash('abre primeiro uma conversa (Ctrl-T ou "conversas")')
@@ -400,7 +479,11 @@ export class Ui {
         return this.flash(`${r.copied} anexos copiados para ~/Downloads/wa${r.pending ? `, ${r.pending} ainda a descarregar (repete :down daqui a pouco)` : ''}`)
       }
       if (text.startsWith(':')) return this.flash(`comando desconhecido: ${text.split(' ')[0]}. ${HELP}`, 10000)
-      await this.wa.send(jid, text)
+      const replyTo = this.replyTo?.chat_jid === jid ? this.replyTo : null
+      this.replyTo = null
+      this.drawInput()
+      this.screen.render()
+      await this.wa.send(jid, text, replyTo?.id)
     } catch (e) {
       logger.error({ e }, 'submit')
       this.flash(`erro: ${(e as Error).message}`, 10000)
@@ -468,7 +551,7 @@ export class Ui {
   private activateTab(i: number) {
     const jid = this.tabs[i]
     if (!jid) return
-    if (i !== this.active) { this.active = i; this.atBottom = true; this.dirtyMessages = true }
+    if (i !== this.active) { this.active = i; this.atBottom = true; this.dirtyMessages = true; this.selected = this.replyTo = this.reactTo = null }
     this.dirtyTabs = true
     this.saveTabs()
     if (this.pickerOpen) this.closePicker(false)
@@ -486,7 +569,7 @@ export class Ui {
     else if (this.active === i) { this.active = Math.min(i, this.tabs.length - 1); this.atBottom = true }
     this.dirtyTabs = true
     this.dirtyMessages = true
-    this.lineMap = []; this.images = []
+    this.lineMap = []; this.images = []; this.rows = []; this.selected = null
     this.saveTabs()
     this.renderNow()
     // Sem tabs, o renderNow abre as "conversas"; sair fica para o Esc aí.
@@ -604,6 +687,7 @@ export class Ui {
   private setFocus(f: Focus) {
     uiLog.info({ de: this.focus, para: f }, 'foco')
     this.focus = f
+    if (f !== 'messages' && this.selected) { this.selected = null; this.dirtyMessages = true }
     const w = f === 'picker' ? this.picker : f === 'messages' ? this.msgBox : this.input
     w.focus()
     this.drawInput()
@@ -661,8 +745,15 @@ export class Ui {
   private drawInput() {
     // Duas linhas, prompt ">" na primeira, texto partido por palavras (nunca a meio de uma) e continuação indentada.
     // Com mais de duas linhas mostram-se as duas à volta do cursor, que fica na de baixo sempre que possível. Com as
-    // "conversas" abertas, a mesma linha serve para escrever o filtro.
+    // "conversas" abertas, a mesma linha serve para escrever o filtro. A responder ou a reagir, a primeira
+    // linha diz a que mensagem, e sobra uma para o texto.
     const w = num(this.input.width) - num(this.input.iwidth) - 1
+    const target = this.pickerOpen ? null : this.replyTo ?? this.reactTo
+    const header = !target ? null : this.replyTo
+      ? `↩ ${this.who(target)}: ${this.snippet(target)}`
+      : `reagir a ${this.who(target)}: ${this.snippet(target)} · emoji e Enter; Enter vazio retira`
+    this.inputHeader = header != null
+    const rowsAvail = header ? 1 : 2
     const width = Math.max(4, w - 2)
     const chars = graphemes(this.pickerOpen ? this.filter : this.inputValue)
     const cursor = Math.min(this.pickerOpen ? this.filterCursor : this.cursor, chars.length)
@@ -673,14 +764,16 @@ export class Ui {
     let col = cursor - start
     if (col >= lines[row]!.length && visibleWidth(esc(lines[row]!.join(''))) >= width) { lines.push([]); row++; col = 0 }
     this.inputLines = lines
-    this.inputTop = Math.max(0, Math.min(row - 1, lines.length - 2))
+    this.inputTop = Math.max(0, Math.min(row - (rowsAvail - 1), lines.length - rowsAvail))
     const showCursor = this.focus === 'input' || this.focus === 'picker'
     const render = (line: string[], r: number) => {
       if (!showCursor || r !== row) return esc(line.join(''))
       return esc(line.slice(0, col).join('')) + '{inverse}' + esc(line[col] ?? ' ') + '{/inverse}' + esc(line.slice(col + 1).join(''))
     }
-    const visible = lines.slice(this.inputTop, this.inputTop + 2)
-    this.input.setContent(visible.map((l, i) => (this.inputTop + i === 0 ? '> ' : '  ') + render(l, this.inputTop + i)).join('\n'))
+    const visible = lines.slice(this.inputTop, this.inputTop + rowsAvail)
+    const out = visible.map((l, i) => (this.inputTop + i === 0 ? '> ' : '  ') + render(l, this.inputTop + i))
+    if (header) out.unshift(`{gray-fg}${esc(truncate(header, w))}{/gray-fg}`)
+    this.input.setContent(out.join('\n'))
   }
 
   private imagePathFor(row: MessageRow): string | null {
@@ -697,10 +790,19 @@ export class Ui {
     const lines: string[] = []
     const map: (MessageRow | null)[] = []
     const images: ImageSlot[] = []
-    const push = (line: string, row: MessageRow | null) => { lines.push(line); map.push(row) }
+    const selectedId = this.selected?.id
+    const push = (line: string, row: MessageRow | null) => {
+      lines.push(row && row.id === selectedId ? `{${this.BG.selected}-bg}${line}{/${this.BG.selected}-bg}` : line)
+      map.push(row)
+    }
+    const reactions = new Map<string, ReactionRow[]>()
+    for (const r of store.listReactions(jid)) reactions.set(r.msg_id, [...(reactions.get(r.msg_id) ?? []), r])
+    const rows = store.listMessages(jid)
+    this.rows = rows
+    this.selected = rows.find(r => r.id === selectedId) ?? null
     let lastDay = ''
 
-    for (const row of store.listMessages(jid)) {
+    for (const row of rows) {
       const day = dayKey(row.ts)
       if (day !== lastDay) {
         lastDay = day
@@ -745,6 +847,14 @@ export class Ui {
 
       if (row.text && (type === 'text' || type === 'image' || type === 'video' || type === 'gif' || type === 'document')) {
         for (const l of waMarkup(row.text).split('\n')) out(l, row)
+      }
+      // Reacções por baixo: cada emoji com quem reagiu, ou só a contagem quando foram vários.
+      const rs = reactions.get(row.id)
+      if (rs?.length) {
+        const byEmoji = new Map<string, string[]>()
+        for (const r of rs) byEmoji.set(r.emoji, [...(byEmoji.get(r.emoji) ?? []), r.sender_jid === this.wa.me ? 'eu' : contactName(r.sender_jid)])
+        const parts = [...byEmoji].map(([emoji, who]) => `${emoji} ${who.length > 1 ? who.length : who[0]}`)
+        out(`{gray-fg}${esc(parts.join('  '))}{/gray-fg}`, row)
       }
       push('', null)
     }
