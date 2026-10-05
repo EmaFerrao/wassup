@@ -13,7 +13,7 @@ import type { TermCaps } from './term.js'
 import { emojify, emoticonify, completeEmoji, codeMatches } from './emoji.js'
 import { enableKittyKeyboard } from './kittykeys.js'
 import { parseHex, rainbowRing, mix, nearest256, type Rgb } from './rainbow.js'
-import { suggest, locateWord, llmEnabled, type Suggestion } from './llm.js'
+import { suggest, llmEnabled, type Suggestion } from './llm.js'
 import { patchBlessedItalic, italic } from './italic.js'
 
 type Focus = 'picker' | 'messages' | 'input'
@@ -1074,9 +1074,8 @@ export class Ui {
     const v = s && this.ghostView(s)
     if (!s || !v) return
     if (v.kind === 'fix') {
-      const loc = locateWord(this.inputValue, s.fix!.from)
-      if (!loc) return
-      this.inputValue = this.inputValue.slice(0, loc.start) + s.fix!.to + this.inputValue.slice(loc.end)
+      const { start, end, to } = s.fix!
+      this.inputValue = this.inputValue.slice(0, start) + to + this.inputValue.slice(end)
     } else {
       this.inputValue = this.inputValue.slice(0, this.inputValue.length - s.word!.from.length) + s.word!.to
     }

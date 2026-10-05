@@ -1,7 +1,7 @@
 /**
  * Sugestões de escrita por um modelo local (llama-server, API compatível com a da OpenAI), só de duas espécies: a
  * palavra que está a meio no cursor, completa ou corrigida, e a correcção de uma palavra errada já escrita na frase
- * (incluindo duas palavras coladas sem espaço, que a correcção separa).
+ * (ortografia, palavras coladas, palavra trocada numa expressão, gramática).
  * Desligado com WA_LLM=off; sem servidor a responder, as sugestões simplesmente não aparecem.
  */
 import { logger } from './log.js'
@@ -14,14 +14,18 @@ export const llmEnabled = URL !== 'off' && URL !== ''
 export interface Suggestion {
   /** A palavra a meio no cursor (`from`, o que está escrito) e a palavra inteira que o modelo propõe (`to`). */
   word: { from: string; to: string } | null
-  /** Palavra já terminada que o modelo dá por errada, tal como está no texto, e a correcção. */
-  fix: { from: string; to: string } | null
+  /**
+   * Palavras já terminadas que o modelo dá por erradas, tal como estão no texto, a correcção, e onde estão
+   * (unidades de código do texto para que a sugestão foi pedida). Quando o modelo devolve uma expressão inteira
+   * ("de vem em quando" → "de vez em quando"), fica só a parte que muda ("vem" → "vez").
+   */
+  fix: { from: string; to: string; start: number; end: number } | null
 }
 
 const SYSTEM = `Ajudas a escrever mensagens de WhatsApp em português de Portugal (ortografia europeia). Recebes a conversa recente e o texto em curso, que termina onde está o cursor.
 Responde só com JSON: {"word": "...", "wrong": "...", "fix": "..."}.
 - "word": se o texto em curso acabar a meio de uma palavra, essa palavra inteira, como deve ficar escrita (completa-a; se o que está escrito tiver erro, dá a forma certa; se forem duas palavras coladas, separa-as); senão "". Escolhe pelo tom e assunto da conversa.
-- "wrong" e "fix": se alguma palavra já terminada do texto em curso tiver erro ortográfico ou acento em falta, ou forem duas palavras coladas sem espaço ("vamosjantar"), essa palavra exactamente como está escrita e a sua correcção (com o espaço, se for o caso: "vamos jantar"); senão ambas "". Uma palavra de cada vez, a mais à direita. Não mudes nomes próprios, estrangeirismos nem abreviaturas correntes.`
+- "wrong" e "fix": se alguma palavra já terminada do texto em curso tiver erro ortográfico ou acento em falta ("amanha" → "amanhã", "as 8" → "às 8", "nao" → "não"), forem duas palavras coladas sem espaço ("vamosjantar"), for uma palavra trocada por outra parecida que não faz sentido ali ("de vem em quando" → "de vez em quando"), ou houver um erro gramatical (concordância, conjugação, regência: "a gente vamos" → "a gente vai", "houveram problemas" → "houve problemas", "fazem dois anos" → "faz dois anos"), o trecho exactamente como está escrito (o mais curto possível, só as palavras precisas) e a sua correcção; senão ambas "". Um erro de cada vez, o mais à direita. Não mudes nomes próprios, estrangeirismos, abreviaturas correntes, a linguagem informal nem o estilo de quem escreve.`
 
 const SCHEMA = {
   type: 'object',
@@ -30,8 +34,8 @@ const SCHEMA = {
   additionalProperties: false,
 }
 
-const WORD = /[\p{L}\p{M}'-]+/gu
 const PARTIAL = /[\p{L}\p{M}'-]+$/u
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 function levenshtein(a: string, b: string): number {
   let prev = Array.from({ length: b.length + 1 }, (_, i) => i)
@@ -60,18 +64,38 @@ export function partialWord(text: string): string | null {
 }
 
 /**
- * Onde está, no texto, a palavra que o modelo diz estar errada: a última ocorrência inteira, nunca a palavra ainda a
- * meio no fim. Devolve o intervalo em unidades de código, ou null se não existir assim.
+ * Onde está, no texto, a palavra ou expressão que o modelo diz estar errada: a última ocorrência inteira (delimitada
+ * por não-letras), nunca a que acaba na palavra ainda a meio no fim. Devolve o intervalo em unidades de código.
  */
-export function locateWord(text: string, word: string): { start: number; end: number } | null {
+export function locateWord(text: string, phrase: string): { start: number; end: number } | null {
   const atEnd = PARTIAL.test(text)
+  const re = new RegExp(`(?<![\\p{L}\\p{M}\\p{N}'-])${escapeRe(phrase)}(?![\\p{L}\\p{M}\\p{N}'-])`, 'gu')
   let found: { start: number; end: number } | null = null
-  for (const m of text.matchAll(WORD)) {
+  for (const m of text.matchAll(re)) {
     const end = m.index + m[0].length
     if (atEnd && end === text.length) break
-    if (m[0] === word) found = { start: m.index, end }
+    found = { start: m.index, end }
   }
   return found
+}
+
+/**
+ * Reduz uma correcção de expressão às palavras que mudam: tiram-se as palavras iguais no início e no fim de ambas.
+ * "de vem em quando" → "de vez em quando" fica "vem" → "vez", no sítio certo dentro da ocorrência encontrada.
+ */
+export function narrowFix(text: string, wrong: string, fix: string): Suggestion['fix'] {
+  const loc = locateWord(text, wrong)
+  if (!loc) return null
+  const a = wrong.split(' '), b = fix.split(' ')
+  let head = 0
+  while (head < a.length && head < b.length && a[head] === b[head]) head++
+  let tail = 0
+  while (tail < a.length - head && tail < b.length - head && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++
+  const from = a.slice(head, a.length - tail).join(' '), to = b.slice(head, b.length - tail).join(' ')
+  if (!from || !to || from === to) return null
+  const start = loc.start + a.slice(0, head).join(' ').length + (head ? 1 : 0)
+  const end = loc.end - a.slice(a.length - tail).join(' ').length - (tail ? 1 : 0)
+  return { from, to, start, end }
 }
 
 export async function suggest(context: { who: string; text: string }[], text: string, signal: AbortSignal): Promise<Suggestion | null> {
@@ -98,13 +122,13 @@ export async function suggest(context: { who: string; text: string }[], text: st
   if (!content) return null
   let parsed: { word?: unknown; wrong?: unknown; fix?: unknown }
   try { parsed = JSON.parse(content) } catch { logger.warn({ content }, 'llm: resposta não é JSON'); return null }
-  // Só palavras feitas de letras, ou duas separadas por um espaço (palavras coladas a separar): o modelo às vezes
-  // devolve aspas, pontuação ou o fim do texto colado.
-  const str = (v: unknown) => (typeof v === 'string' && /^[\p{L}\p{M}'-]+( [\p{L}\p{M}'-]+)?$/u.test(v.trim()) ? v.trim() : '')
+  // Só palavras feitas de letras ou algarismos, até quatro separadas por um espaço (palavras coladas a separar, expressões): o
+  // modelo às vezes devolve aspas, pontuação ou o fim do texto colado.
+  const str = (v: unknown) => (typeof v === 'string' && /^[\p{L}\p{M}\p{N}'-]+( [\p{L}\p{M}\p{N}'-]+){0,3}$/u.test(v.trim()) ? v.trim() : '')
   const partial = partialWord(text)
   const wordTo = str(parsed.word)
   const word = partial && wordTo && wordTo !== partial && plausibleWord(partial, wordTo) ? { from: partial, to: wordTo } : null
   const wrong = str(parsed.wrong), fixTo = str(parsed.fix)
-  const fix = wrong && fixTo && fixTo !== wrong && !wrong.includes(' ') && locateWord(text, wrong) ? { from: wrong, to: fixTo } : null
+  const fix = wrong && fixTo && fixTo !== wrong ? narrowFix(text, wrong, fixTo) : null
   return word || fix ? { word, fix } : null
 }
