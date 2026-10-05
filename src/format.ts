@@ -3,6 +3,11 @@ import { tameEmoji } from './unicode.js'
 
 export const strWidth = (s: string): number => (blessed as unknown as { unicode: { strWidth: (s: string) => number } }).unicode.strWidth(s)
 
+/** Itálico, pela sequência ANSI que o remendo em italic.ts ensina ao blessed (ESC[3m … ESC[23m, como o chalk). */
+export function italic(s: string): string {
+  return `\x1b[3m${s}\x1b[23m`
+}
+
 /** Texto do utilizador pronto para o ecrã: chavetas escapadas (o blessed lê-as como etiquetas) e emojis domados. */
 export function esc(s: string): string {
   return tameEmoji(s).replace(/[{}]/g, m => (m === '{' ? '{open}' : '{close}'))
@@ -11,7 +16,7 @@ export function esc(s: string): string {
 const URL_RE = /(https?:\/\/[^\s<>"')\]]+)/g
 
 /**
- * Converte a marcação do WhatsApp em etiquetas do blessed: *negrito*, _itálico_ (sublinhado, o blessed não sabe itálico),
+ * Converte a marcação do WhatsApp em etiquetas do blessed: *negrito*, _itálico_ (a sério, pelo remendo em italic.ts),
  * ~riscado~ (cinzento), `mono` e ```blocos``` (amarelo), linhas "> citação" (cinzento) e endereços (azul sublinhado).
  */
 export function waMarkup(text: string): string {
@@ -27,7 +32,7 @@ export function waMarkup(text: string): string {
     s = s.replace(new RegExp(`(^|[\\s(\\[{>])${c}(\\S(?:[^${c}\\n]*?\\S)?)${c}(?=$|[\\s.,!?;:)\\]}])`, 'gm'), `$1${open}$2${close}`)
   }
   inline('*', '{bold}', '{/bold}')
-  inline('_', '{underline}', '{/underline}')
+  inline('_', '\x1b[3m', '\x1b[23m')
   inline('~', `{${DIM}-fg}~`, `~{/${DIM}-fg}`)
   s = s.replace(/^(&gt;|>) ?(.*)$/gm, (_m, _q, line: string) => dim(`│ ${line}`))
   s = s.replace(/\u0000(\d+)\u0000/g, (_m, i: string) => `{yellow-fg}${blocks[Number(i)]}{/yellow-fg}`)
@@ -98,7 +103,8 @@ export function padEnd(s: string, width: number): string {
   return w >= width ? s : s + ' '.repeat(width - w)
 }
 
-const TAG_RE = /(\{[^}]*\})/
+/** Etiquetas do blessed e códigos SGR: nenhum ocupa células. */
+const TAG_RE = /(\{[^}]*\}|\x1b\[[\d;]*m)/
 
 /** Sem etiquetas do blessed nem códigos SGR; `{open}`/`{close}` ficam como um carácter. */
 const stripTags = (s: string) => s.replace(/\x1b\[[\d;]*m/g, '').replace(/\{[^}]*\}/g, m => (m === '{open}' || m === '{close}' ? 'x' : ''))

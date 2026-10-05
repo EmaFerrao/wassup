@@ -62,7 +62,3 @@ export function patchBlessedItalic(screen: blessed.Widgets.Screen) {
   const unicode = (blessed as unknown as { unicode: unknown }).unicode
   proto.draw = new Function('unicode', 'angles', `return ${patched}`)(unicode, ANGLES) as ScreenProto['draw']
 }
-
-export function italic(s: string): string {
-  return `\x1b[3m${s}\x1b[23m`
-}

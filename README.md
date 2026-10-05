@@ -82,8 +82,8 @@ assume-se escuro e o cinzento da selecção é médio.
 
 ### Formatação e emojis
 
-A marcação do WhatsApp é mostrada com atributos do terminal: `*negrito*` a negrito, `_itálico_` sublinhado (o
-blessed não sabe itálico), `~riscado~` a cinzento, `` `código` `` e blocos a amarelo, linhas `> citação` a cinzento,
+A marcação do WhatsApp é mostrada com atributos do terminal: `*negrito*` a negrito, `_itálico_` em itálico (o
+blessed não o sabia; `src/italic.ts` ensina-lho), `~riscado~` a cinzento, `` `código` `` e blocos a amarelo, linhas `> citação` a cinzento,
 endereços a azul. Ao enviar, escreve-se a marcação tal como no telemóvel.
 
 Códigos `:nome:` na linha de escrita são trocados pelo emoji assim que se fecha o segundo `:`, com nomes em português
@@ -144,3 +144,5 @@ O histórico começa no primeiro arranque com o que o WhatsApp envia aos disposi
 | `src/image.ts` | Descodificação com jimp, meios-blocos, protocolo gráfico do Kitty |
 | `src/term.ts` | Sondagem das capacidades do terminal antes de arrancar a interface |
 | `src/emoji.ts` | Tabela de códigos `:nome:` |
+| `src/italic.ts` | Itálico no blessed, por um bit livre da máscara de atributos |
+| `src/llm.ts` | Sugestões de escrita pelo `llama-server` local |
