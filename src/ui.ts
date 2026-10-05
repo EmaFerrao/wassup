@@ -137,6 +137,8 @@ export class Ui {
   private ghostTimer: NodeJS.Timeout | undefined
   private ghostAbort: AbortController | undefined
   private ghostHide: NodeJS.Timeout | undefined
+  /** O texto tal como ficou ao aceitar uma sugestão que acabou numa palavra: a letra seguinte leva um espaço antes. */
+  private accepted: string | undefined
   /** O aviso de mensagem noutra conversa e o instante em que começou a aparecer; o relógio anima-o até sumir. */
   private notice: { jid: string; text: string; since: number } | undefined
   private noticeTimer: NodeJS.Timeout | undefined
@@ -478,6 +480,13 @@ export class Ui {
         if (k === 'enter' || k === 'return') return this.acceptSuggestion()
       }
       if (k === 'enter' || k === 'return') { const v = this.inputValue; this.inputValue = ''; this.cursor = 0; this.stopComposing(); this.updateSuggestions(); this.drawInput(); this.screen.render(); return void this.submit(v) }
+      // Logo a seguir a aceitar uma sugestão que acabou numa palavra, uma letra ou algarismo começa palavra nova:
+      // entra com um espaço antes. Espaço e pontuação seguem-se directamente.
+      if (this.accepted === this.inputValue && this.cursorAtEnd() && ch && /^[\p{L}\p{N}]$/u.test(ch) && !key.ctrl && !key.meta) {
+        this.inputValue += ' '
+        this.cursor++
+      }
+      this.accepted = undefined
       const e = edit(this.inputValue, this.cursor, k, ch, key)
       if (!e) { if (k === 'up') this.moveSelection(-1); return }
       if (e.value !== this.inputValue) this.promoteActive()
@@ -1072,6 +1081,7 @@ export class Ui {
       this.inputValue = this.inputValue.slice(0, this.inputValue.length - s.word!.from.length) + s.word!.to
     }
     this.cursor = graphemes(this.inputValue).length
+    this.accepted = /[\p{L}\p{M}\p{N}'-]$/u.test(this.inputValue) ? this.inputValue : undefined
     this.clearGhost()
     this.promoteActive()
     this.updateSuggestions()
