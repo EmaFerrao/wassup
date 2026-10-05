@@ -591,6 +591,11 @@ export class Wa extends EventEmitter<WaEvents> {
     this.sock.sendPresenceUpdate(on ? 'available' : 'unavailable').catch(e => logger.warn({ e }, 'sendPresenceUpdate'))
   }
 
+  /** Diz à conversa que estamos a escrever (ou que parámos): é o "a escrever…" que a outra pessoa vê. */
+  setComposing(chatJid: string, on: boolean) {
+    this.sock?.sendPresenceUpdate(on ? 'composing' : 'paused', chatJid).catch(e => logger.warn({ e, chatJid }, 'setComposing'))
+  }
+
   /** Pede ao WhatsApp a presença (a escrever, a gravar) de uma conversa; sem isso nada chega. */
   subscribePresence(chatJid: string) {
     this.sock?.presenceSubscribe(chatJid).catch(e => logger.warn({ e, chatJid }, 'presenceSubscribe'))

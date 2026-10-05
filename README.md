@@ -39,6 +39,8 @@ assume-se escuro e o cinzento da selecção é médio.
   activo passa para a primeira posição, junto da escrita, ficando os outros pela ordem em que estavam. `/` ou Ctrl-T
   abrem as "conversas". Com as "conversas" abertas nenhum tab fica realçado. Enquanto alguém está a escrever ou a
   gravar numa conversa com tab, o nome dela mexe, com as cores a correr pelas letras; pára quando a pessoa pára.
+  No sentido inverso, enquanto se escreve na linha de escrita a conversa activa recebe o "a escrever…", que pára ao
+  fim de 5 segundos parados, ao enviar ou ao mudar de tab.
   Mensagens novas numa conversa sem tab abrem um tab no fim, sem o activar nem reordenar os outros. Os tabs abertos e
   o activo ficam guardados e voltam no arranque seguinte.
 - **Conversas**: a lista de conversas, com as mais recentes em baixo, mostrando o nome, as não lidas, um `·`

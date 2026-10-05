@@ -433,12 +433,13 @@ export class Ui {
       }
       // Apagar numa linha vazia abre a última mensagem minha para a corrigir; Enter envia a edição, Esc desiste.
       if ((k === 'backspace' || k === 'delete') && !this.inputValue && !this.editing && !this.replyTo && !this.reactTo) return this.editLast()
-      if (k === 'enter' || k === 'return') { const v = this.inputValue; this.inputValue = ''; this.cursor = 0; this.updateSuggestions(); this.drawInput(); this.screen.render(); return void this.submit(v) }
+      if (k === 'enter' || k === 'return') { const v = this.inputValue; this.inputValue = ''; this.cursor = 0; this.stopComposing(); this.updateSuggestions(); this.drawInput(); this.screen.render(); return void this.submit(v) }
       const e = edit(this.inputValue, this.cursor, k, ch, key)
       if (!e) { if (k === 'up') this.moveSelection(-1); return }
       if (e.value !== this.inputValue) this.promoteActive()
       this.inputValue = e.value
       this.cursor = e.cursor
+      this.noteComposing()
       this.updateSuggestions()
       this.drawInput()
       return this.screen.render()
@@ -585,6 +586,10 @@ export class Ui {
   private lastActive = Date.now()
   private lastActiveSaved = 0
   private lastPresenceTouch = 0
+  /** Conversa a que dissemos "a escrever", quando o dissemos, e o prazo para dizer que parámos. */
+  private composingJid: string | null = null
+  private composingSentAt = 0
+  private composingTimer: NodeJS.Timeout | undefined
 
   private loadTabs() {
     const saved = store.getState<TerminalState>(this.tabsKey())
@@ -598,6 +603,31 @@ export class Ui {
   private saveTabs() {
     this.lastActiveSaved = this.lastActive
     store.setState(this.tabsKey(), { tabs: this.tabs, active: this.active, pid: process.pid, lastActive: this.lastActive } satisfies TerminalState)
+  }
+
+  /**
+   * A escrita mudou: a conversa activa fica a saber que estamos a escrever, repetido de 5 em 5 segundos enquanto
+   * continuarmos, e que parámos ao fim de 5 segundos parados, ao enviar, ao apagar tudo ou ao mudar de tab.
+   */
+  private noteComposing() {
+    const jid = this.current
+    if (!jid || !this.inputValue || this.pickerOpen) return this.stopComposing()
+    const now = Date.now()
+    if (jid !== this.composingJid || now - this.composingSentAt > 5000) {
+      if (this.composingJid && jid !== this.composingJid) this.wa.setComposing(this.composingJid, false)
+      this.wa.setComposing(jid, true)
+      this.composingJid = jid
+      this.composingSentAt = now
+    }
+    if (this.composingTimer) clearTimeout(this.composingTimer)
+    this.composingTimer = setTimeout(() => this.stopComposing(), 5000)
+  }
+
+  private stopComposing() {
+    if (this.composingTimer) { clearTimeout(this.composingTimer); this.composingTimer = undefined }
+    if (!this.composingJid) return
+    this.wa.setComposing(this.composingJid, false)
+    this.composingJid = null
   }
 
   /** Marca este terminal como o usado mais recentemente; grava no máximo de dois em dois segundos. */
@@ -636,7 +666,7 @@ export class Ui {
   private activateTab(i: number) {
     const jid = this.tabs[i]
     if (!jid) return
-    if (i !== this.active) { this.active = i; this.atBottom = true; this.dirtyMessages = true; this.selected = this.replyTo = this.reactTo = null; if (this.editing) { this.editing = null; this.inputValue = ''; this.cursor = 0; this.updateSuggestions() } }
+    if (i !== this.active) { this.stopComposing(); this.active = i; this.atBottom = true; this.dirtyMessages = true; this.selected = this.replyTo = this.reactTo = null; if (this.editing) { this.editing = null; this.inputValue = ''; this.cursor = 0; this.updateSuggestions() } }
     if (this.notice?.jid === jid) this.notice = undefined
     this.dirtyTabs = true
     this.saveTabs()
