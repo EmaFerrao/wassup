@@ -19,14 +19,14 @@ Requisitos: Node 22.13 ou mais recente (usa o SQLite embutido no Node). Testado 
 ## Interface
 
 Mensagens a toda a largura, duas linhas de escrita com o prompt `>`, e no fundo a barra de tabs, com o estado da
-ligação e os avisos encostados à direita. Painéis distinguidos pelo fundo, sem molduras; o painel activo fica um tom
-mais afastado do fundo.
+ligação e os avisos encostados à direita. Sem molduras nem fundos próprios: tudo no fundo por omissão do terminal,
+e o tab activo marcado só pelo texto, a negrito e na cor mais forte do tema.
 
-As cores são as do tema do terminal: a barra de tabs e a lista de conversas usam o fundo e o texto por omissão, e os
-realces usam as 16 cores nomeadas (cinzento, vermelho, amarelo…), que o tema já garante legíveis. No arranque o
-cliente pergunta ao terminal a cor real do fundo (OSC 11); os painéis de mensagens e de escrita ficam em cinzentos
-um pouco mais claros que ela num tema escuro, ou um pouco mais escuros num tema claro, e os nomes nas mensagens
-usam tons claros ou escuros conforme o caso. Se o terminal não responder, fica tudo no fundo por omissão.
+As cores são as do tema do terminal: fundo e texto por omissão em todos os painéis, e os realces nas 16 cores
+nomeadas (cinzento, vermelho, amarelo…), que o tema já garante legíveis. No arranque o cliente pergunta ao terminal a
+cor real do fundo (OSC 11) para saber se o tema é escuro ou claro: os nomes nas mensagens usam tons claros ou
+escuros conforme o caso, o tab activo fica branco vivo ou preto, e a mensagem seleccionada ganha um fundo cinzento
+afastado do fundo real. Se o terminal não responder, assume-se escuro e o cinzento é médio.
 
 - **Tabs**: um por conversa aberta, com o número de não lidas a vermelho e um `×` para fechar. Clique no nome activa,
   clique no `×` fecha. Ctrl-W fecha o tab activo; Tab e Shift-Tab percorrem os tabs e, a seguir ao último, as "conversas", que Ctrl-T também abre; Ctrl-N e Ctrl-P também mudam de tab. Com as "conversas" abertas

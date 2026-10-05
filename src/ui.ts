@@ -46,30 +46,24 @@ const HELP = 'Tab/Shift-Tab muda de tab · Ctrl-T conversas · Ctrl-W fecha tab 
 // Cores do tema do terminal, nunca assumidas: texto e fundo por omissão e as 16 nomeadas, que o tema garante
 // legíveis sobre o seu fundo. Os avisos passageiros são discretos; só a espera do QR e as quebras de ligação se
 // destacam. Ligado não se mostra.
-const FG = { tab: 'default', tabDim: 'gray', separator: 'gray', badge: 'red', note: 'gray', warn: 'yellow', error: 'red' }
+const FG = { tab: 'default', tabDim: 'gray', badge: 'red', note: 'gray', warn: 'yellow', error: 'red' }
 
 /** Cinzento da rampa de 256 cores (232..255, de #080808 a #eeeeee em passos de 10) mais próximo de uma luminosidade. */
 function gray256(luma: number): number {
   return 232 + Math.max(0, Math.min(23, Math.round((luma - 8) / 10)))
 }
 
-type Bg = number | 'default'
 /**
- * Fundos dos painéis a partir do fundo real do terminal (OSC 11): barra de tabs e escolhedor no fundo por omissão;
- * mensagens e escrita em cinzentos um pouco afastados da luminosidade dele, para o lado claro num tema escuro e para
- * o escuro num claro, o painel activo um tom mais afastado e a mensagem seleccionada mais um. Cinzentos porque a paleta de 256 só é fina na rampa
- * deles; o cubo de cores salta de 0 para 95 e não tem tons perto de um fundo escuro colorido. Sem o fundo conhecido
- * fica tudo no fundo por omissão.
+ * O que se tira do fundo real do terminal (OSC 11): se o tema é escuro, e o cinzento do realce da mensagem
+ * seleccionada, afastado da luminosidade dele para o lado claro num tema escuro e para o escuro num claro. Sem
+ * resposta assume-se escuro e o realce fica num cinzento médio, legível com texto claro ou escuro.
  */
-function palette(bg: string | null): { bar: Bg; messages: Bg; messagesFocus: Bg; input: Bg; inputFocus: Bg; picker: Bg; pickerFocus: Bg; selected: number; dark: boolean } {
-  const base = { bar: 'default' as Bg, picker: 'default' as Bg, pickerFocus: 'default' as Bg }
+function theme(bg: string | null): { dark: boolean; selected: number } {
   const m = bg && /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(bg)
-  // Sem o fundo conhecido, o realce da selecção fica num cinzento médio, legível com texto claro ou escuro.
-  if (!m) return { ...base, messages: 'default', messagesFocus: 'default', input: 'default', inputFocus: 'default', selected: 240, dark: true }
+  if (!m) return { dark: true, selected: 240 }
   const luma = 0.299 * parseInt(m[1]!, 16) + 0.587 * parseInt(m[2]!, 16) + 0.114 * parseInt(m[3]!, 16)
   const dark = luma < 128
-  const shade = (delta: number) => gray256(luma + (dark ? delta : -delta))
-  return { ...base, messages: shade(18), messagesFocus: shade(28), input: shade(28), inputFocus: shade(38), selected: shade(48), dark }
+  return { dark, selected: gray256(luma + (dark ? 48 : -48)) }
 }
 
 /**
@@ -142,12 +136,14 @@ export class Ui {
   private dirtyMessages = true
   private showingQr = false
 
-  private BG: ReturnType<typeof palette>
+  /** Fundo do terminal escuro (decide a cor forte do tab activo e a dos nomes) e cinzento da mensagem seleccionada. */
+  private dark: boolean
+  private selectedBg: number
 
   constructor(private wa: Backend, caps: TermCaps) {
     this.mode = detectImageMode(caps.kittyGraphics)
-    this.BG = palette(caps.bg)
-    setNameColors(this.BG.dark)
+    ;({ dark: this.dark, selected: this.selectedBg } = theme(caps.bg))
+    setNameColors(this.dark)
     patchBlessedUnicode()
     this.screen = blessed.screen({ smartCSR: true, fullUnicode: caps.utf8, title: 'wa', warnings: false })
     // Com localização UTF-8 as molduras saem em caracteres de caixa Unicode (─│┌). Sem isto o blessed muda para o
@@ -157,27 +153,24 @@ export class Ui {
     if (this.mode === 'kitty') this.kitty = new KittyImages(s => program._write(s))
     // Só com o terminal a confirmar o protocolo: é o que permite distinguir Shift+Backspace para apagar palavras.
     if (caps.kittyKeyboard) this.disableKittyKeyboard = enableKittyKeyboard((this.screen.program as unknown as { input: Parameters<typeof enableKittyKeyboard>[0] }).input, s => program._write(s))
-    logger.info({ caps, images: this.mode, bg: this.BG, term: process.env.TERM }, 'terminal')
+    logger.info({ caps, images: this.mode, dark: this.dark, term: process.env.TERM }, 'terminal')
 
     // Disposição: mensagens a toda a largura, escrita em duas linhas, e no fundo a barra de tabs com o estado à direita.
     this.tabsBar = blessed.box({
       parent: this.screen, top: '100%-1', left: 0, width: '100%', height: 1, tags: true, mouse: true,
-      style: { bg: this.BG.bar } as unknown as blessed.Widgets.Types.TStyle,
     })
     this.msgBox = blessed.box({
       parent: this.screen, top: 0, left: 0, right: 0, height: '100%-3', padding: { left: 1, right: 1 },
       tags: true, scrollable: true, alwaysScroll: true, mouse: true,
-      style: { bg: this.BG.messages, focus: { bg: this.BG.messagesFocus } } as unknown as blessed.Widgets.Types.TStyle,
     }) as ClinesBox
     this.input = blessed.box({
       parent: this.screen, top: '100%-3', left: 0, right: 0, height: 2, padding: { left: 1, right: 1 },
       tags: true, mouse: true,
-      style: { bg: this.BG.input, focus: { bg: this.BG.inputFocus } } as unknown as blessed.Widgets.Types.TStyle,
     })
     this.picker = blessed.list({
       parent: this.screen, top: 0, left: 0, right: 0, height: '100%-3', padding: { left: 1, right: 1 }, hidden: true,
       tags: true, keys: true, mouse: true,
-      style: { bg: this.BG.picker, focus: { bg: this.BG.pickerFocus }, item: { bg: this.BG.picker }, selected: { inverse: true, bold: true } } as unknown as blessed.Widgets.ListElementStyle,
+      style: { selected: { inverse: true, bold: true } } as unknown as blessed.Widgets.ListElementStyle,
     })
 
     // Rato só com cliques e roda (1000) em codificação SGR (1006), em vez do conjunto que o blessed activa para xterm
@@ -589,20 +582,20 @@ export class Ui {
     let nameW = Math.max(...tabs.map(t => strWidth(t.name)), 0)
     const fits = (w: number) => tabs.reduce((sum, t) => sum + Math.min(strWidth(t.name), w) + overhead(t), 0) <= maxName
     while (nameW > 6 && !fits(nameW)) nameW--
-    // A escrita muda de tom quando está activa; o tab activo acompanha-a para o fundo ser sempre o mesmo.
-    const activeBg = this.focus === 'input' ? this.BG.inputFocus : this.BG.input
+    // O tab activo distingue-se só pelo texto: negrito e na cor mais forte do tema; os outros ficam na cor normal.
+    const strong = this.dark ? 'bright-white' : 'black'
     let out = '', x = 0
     this.segments = []
     for (const t of tabs) {
       const name = truncate(t.name, nameW)
-      const text = ` ${name}${t.badge ? ' ' + t.badge : ''} ×│`
+      const text = ` ${name}${t.badge ? ' ' + t.badge : ''} × `
       const w = strWidth(text)
       const closeX0 = x + w - 2
       this.segments.push({ x0: x, x1: x + w, index: t.i, closeX0, closeX1: closeX0 + 1 })
       const badge = t.badge ? ` {${FG.badge}-fg}{bold}${t.badge}{/bold}{/${FG.badge}-fg}` : ''
       out += t.i === this.active && !this.pickerOpen
-        ? `{${activeBg}-bg}{bold} ${esc(name)}{/bold}${badge} {${FG.tabDim}-fg}×{/${FG.tabDim}-fg} {/${activeBg}-bg}`
-        : `{${FG.tab}-fg} ${esc(name)}${badge} {${FG.tabDim}-fg}×{/${FG.tabDim}-fg}{/${FG.tab}-fg}{${FG.separator}-fg}│{/${FG.separator}-fg}`
+        ? `{${strong}-fg}{bold} ${esc(name)}{/bold}{/${strong}-fg}${badge} {${FG.tabDim}-fg}×{/${FG.tabDim}-fg} `
+        : `{${FG.tab}-fg} ${esc(name)}{/${FG.tab}-fg}${badge} {${FG.tabDim}-fg}×{/${FG.tabDim}-fg} `
       x += w
     }
     // Estado encostado à direita: a mensagem passageira (amarela) ou a ligação; cortado se não couber.
@@ -794,7 +787,7 @@ export class Ui {
     // A seleccionada leva o fundo a toda a largura, seja de quem for: as linhas chegam aqui já partidas à largura do
     // painel, e completam-se com espaços até ao bordo.
     const push = (line: string, row: MessageRow | null) => {
-      if (row && row.id === selectedId) line = `{${this.BG.selected}-bg}${line}${' '.repeat(Math.max(0, width - 1 - visibleWidth(line)))}{/${this.BG.selected}-bg}`
+      if (row && row.id === selectedId) line = `{${this.selectedBg}-bg}${line}${' '.repeat(Math.max(0, width - 1 - visibleWidth(line)))}{/${this.selectedBg}-bg}`
       lines.push(line)
       map.push(row)
     }
