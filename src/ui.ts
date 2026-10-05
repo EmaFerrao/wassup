@@ -276,7 +276,8 @@ export class Ui {
   private bindEvents() {
     this.bindDiagnostics()
     this.screen.on('keypress', (ch: string, key: blessed.Widgets.Events.IKeyEventArg) => this.onKey(ch, key))
-    this.screen.on('resize', () => { this.dirtyMessages = true; this.dirtyTabs = true; this.scheduleRender() })
+    // A lista do escolhedor tem posição e altura calculadas à mão: com o terminal a mudar de tamanho refaz-se.
+    this.screen.on('resize', () => { this.dirtyMessages = true; this.dirtyTabs = true; if (this.pickerOpen) this.refreshPicker(); this.scheduleRender() })
     this.screen.on('render', () => { this.loadVisibleImages(); this.placeImages() })
 
     // A roda do rato faz scroll de uma linha por notch (de série o blessed salta meio painel, ou duas entradas na lista).
@@ -431,6 +432,9 @@ export class Ui {
   private onKey(ch: string, key: blessed.Widgets.Events.IKeyEventArg) {
     this.touchActivity()
     const k = key.full
+    // O blessed emite cada Enter duas vezes: um "enter" sintético e logo o "return" verdadeiro. Só o segundo conta;
+    // senão, com sugestões abertas, o primeiro aceitava o emoji e o segundo enviava a mensagem.
+    if (k === 'enter' && key.sequence === '\r') return
     if (k === 'C-c') return this.quit()
     // ESC fecha, por ordem: a resposta ou reacção em curso, a selecção, o filtro do escolhedor, o escolhedor, o tab
     // activo, o programa.
