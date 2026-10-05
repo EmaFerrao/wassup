@@ -40,7 +40,7 @@ interface ClinesBox extends blessed.Widgets.BoxElement {
   childBase: number
 }
 
-const HELP = 'Tab muda de tab · Ctrl-T conversas · Esc fecha · PgUp/PgDn histórico · ↑ ou clique selecciona mensagem, Enter responde, : reage · :fixe: emoji'
+const HELP = 'Tab muda de tab · Ctrl-T conversas · Esc fecha · PgUp/PgDn histórico · ↑ ou clique selecciona mensagem, escrever responde, : reage · :fixe: emoji'
 
 // Cores do tema do terminal, nunca assumidas: texto e fundo por omissão e as 16 nomeadas, que o tema garante
 // legíveis sobre o seu fundo. Os avisos passageiros são discretos; só a espera do QR e as quebras de ligação se
@@ -368,13 +368,13 @@ export class Ui {
       return this.screen.render()
     }
     if (this.focus === 'messages') {
-      if (k === 'i') { this.setFocus('input'); return this.renderNow() }
       if (k === 'up' || k === 'down') return this.moveSelection(k === 'up' ? -1 : 1)
-      // Enter responde à seleccionada; ":" reage, e fica já escrito para se continuar com o :código: do emoji. O
-      // cabeçalho da escrita diz a que mensagem.
-      if ((k === 'enter' || k === 'return' || ch === ':') && this.selected) {
-        if (ch === ':') { this.reactTo = this.selected; this.replyTo = null; this.inputValue = ':'; this.cursor = 1 }
-        else { this.replyTo = this.selected; this.reactTo = null }
+      // Escrever sobre a seleccionada começa logo a resposta, com o que se escreveu; ":" começa uma reacção, e fica
+      // já escrito para se continuar com o :código: do emoji. O cabeçalho da escrita diz a que mensagem.
+      if (this.selected && ch && !key.ctrl && !key.meta && ch >= ' ' && ch !== '\x7f') {
+        if (ch === ':') { this.reactTo = this.selected; this.replyTo = null } else { this.replyTo = this.selected; this.reactTo = null }
+        this.inputValue = ch
+        this.cursor = 1
         this.setFocus('input')
         return this.renderNow()
       }
