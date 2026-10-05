@@ -48,7 +48,7 @@ const FADE_MS = 1500
 /** O aviso de mensagem noutra conversa: tempo a aparecer, a ficar e a desaparecer, em milissegundos. */
 const NOTICE = { fadeIn: 400, hold: 6000, fadeOut: 800 }
 
-const HELP = 'Tab muda de tab (com texto, aceita a sugestão) · Ctrl-T conversas · Esc fecha · PgUp/PgDn histórico · ↑ ou clique selecciona mensagem, escrever responde, : reage · :fixe: emoji'
+const HELP = 'Tab muda de tab (com texto, aceita a sugestão) · / conversas · Esc fecha · PgUp/PgDn histórico · ↑ ou clique selecciona mensagem, escrever responde, : reage · :fixe: emoji'
 
 // Cores do tema do terminal, nunca assumidas: texto e fundo por omissão e as 16 nomeadas, que o tema garante
 // legíveis sobre o seu fundo. Os avisos passageiros são discretos; só a espera do QR e as quebras de ligação se
@@ -240,7 +240,7 @@ export class Ui {
     }
     this.screen.program.hideCursor()
     this.bindEvents()
-    this.loadTabs()
+    this.registerTerminal()
     this.setFocus('input')
     this.drawInput()
     this.drawStatus()
@@ -428,7 +428,6 @@ export class Ui {
       if (this.current) return this.closeTab(this.active)
       return this.quit()
     }
-    if (k === 'C-t') return this.openPicker()
     if (k === 'pageup') { this.msgBox.scroll(-(this.innerHeight() - 1)); return this.screen.render() }
     if (k === 'pagedown') { this.msgBox.scroll(this.innerHeight() - 1); return this.screen.render() }
     // Tab circula pelos tabs abertos; com o escolhedor aberto volta ao tab activo. Conversas novas abrem-se com "/".
@@ -594,7 +593,7 @@ export class Ui {
     }
     if (!text) return
     if (text.startsWith('/')) return this.openPicker(text.slice(1).trim())
-    if (!this.current) return this.flash('abre primeiro uma conversa (Ctrl-T ou "conversas")')
+    if (!this.current) return this.flash('abre primeiro uma conversa ("/")')
     if (this.wa.state !== 'open') return this.flash('sem ligação ao WhatsApp; espera pelo ● verde')
     const jid = this.current
     // Ao enviar, o painel vai para o fundo para mostrar a mensagem nova, mesmo que estivesse a ver o histórico.
@@ -619,8 +618,9 @@ export class Ui {
    * também o pid e a hora da última interacção: é assim que os vários processos sabem, só pela base, que tabs estão
    * abertos noutros terminais vivos e qual foi o terminal usado mais recentemente.
    */
+  /** O registo deste terminal na base: só serve para os terminais abertos ao mesmo tempo se coordenarem. */
   private tabsKey(): string {
-    try { return `tabs:${fs.readlinkSync('/proc/self/fd/0')}` } catch { return `tabs:pid${process.pid}` }
+    return `tabs:pid${process.pid}`
   }
 
   private lastActive = Date.now()
@@ -631,12 +631,9 @@ export class Ui {
   private composingSentAt = 0
   private composingTimer: NodeJS.Timeout | undefined
 
-  private loadTabs() {
-    const saved = store.getState<TerminalState>(this.tabsKey())
-    if (saved) {
-      this.tabs = saved.tabs.filter(jid => store.getChat(jid))
-      this.active = this.tabs.length ? Math.min(Math.max(saved.active, 0), this.tabs.length - 1) : -1
-    }
+  /** Começa sempre sem tabs (nada se repõe de execuções anteriores) e limpa os registos de terminais já mortos. */
+  private registerTerminal() {
+    for (const r of store.listState<TerminalState>('tabs:')) if (!r.value.pid || !pidAlive(r.value.pid)) store.deleteState(r.key)
     this.saveTabs()
   }
 
@@ -763,8 +760,9 @@ export class Ui {
     this.dirtyMessages = true
     this.lineMap = []; this.images = []; this.rows = []; this.selected = null
     this.saveTabs()
+    // Fechar o último tab é sair: não se volta ao escolhedor.
+    if (!this.tabs.length) return this.quit()
     this.renderNow()
-    // Sem tabs, o renderNow abre as "conversas"; sair fica para o Esc aí.
     const jid = this.current
     if (jid) this.wa.markRead(jid).catch(e => logger.warn({ e }, 'markRead'))
   }
@@ -948,8 +946,12 @@ export class Ui {
   private renderNow() {
     if (this.dirtyTabs) { this.dirtyTabs = false; this.drawTabs() }
     if (this.dirtyMessages && !this.showingQr) { this.dirtyMessages = false; if (this.current) this.renderMessages() }
-    // Sem tabs não há painel inicial: fica o escolhedor (excepto enquanto se mostra o QR, sem conversas ainda).
-    if (!this.current && !this.pickerOpen && !this.showingQr && store.listChats().length) return this.openPicker()
+    // Sem tabs (arranque sem nada guardado, ou as conversas a chegar pela primeira vez) abre-se a conversa mais
+    // recente; o escolhedor só aparece com "/".
+    if (!this.current && !this.pickerOpen && !this.showingQr) {
+      const recent = store.listChats().find(c => !c.archived)
+      if (recent) return this.openTab(recent.jid)
+    }
     this.screen.render()
   }
 
@@ -959,6 +961,7 @@ export class Ui {
     this.screen.destroy()
     if (reason) process.stderr.write(`${reason}\n`)
     this.wa.stop().catch(() => {})
+    store.deleteState(this.tabsKey())
     store.close()
     process.exit(0)
   }

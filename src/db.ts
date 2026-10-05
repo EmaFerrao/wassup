@@ -161,6 +161,7 @@ const q = {
   getState: db.prepare(`SELECT value FROM state WHERE key = ?`),
   listState: db.prepare(`SELECT key, value FROM state WHERE key LIKE ? ESCAPE '\\'`),
   setState: db.prepare(`INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)`),
+  deleteState: db.prepare(`DELETE FROM state WHERE key = ?`),
 }
 
 export const store = {
@@ -269,6 +270,9 @@ export const store = {
     const row = q.getState.get(key) as { value: string } | undefined
     if (!row) return undefined
     try { return JSON.parse(row.value) as T } catch { return undefined }
+  },
+  deleteState(key: string) {
+    q.deleteState.run(key)
   },
   setState(key: string, value: unknown) {
     q.setState.run(key, JSON.stringify(value))

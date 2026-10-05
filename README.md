@@ -38,14 +38,14 @@ assume-se escuro e o cinzento da selecção é médio.
   clique no `×` fecha. Tab, com a escrita vazia, circula pelos tabs abertos sem lhes mexer na ordem; é ao começar a
   escrever que o tab activo passa para a primeira posição, junto da escrita, ficando os outros pela ordem em que
   estavam. A escrita é de cada conversa: o que ficou por enviar fica guardado no tab de onde se sai e volta quando se
-  regressa, e nunca aparece na linha de outra conversa. `/` ou Ctrl-T
-  abrem as "conversas". Com as "conversas" abertas nenhum tab fica realçado. Enquanto alguém está a escrever ou a
+  regressa, e nunca aparece na linha de outra conversa. `/` abre as "conversas". Com as "conversas" abertas nenhum
+  tab fica realçado. Enquanto alguém está a escrever ou a
   gravar numa conversa com tab, um arco-íris suave corre pelas letras do nome dela, e desvanece-se quando a pessoa
   pára.
   No sentido inverso, enquanto se escreve na linha de escrita a conversa activa recebe o "a escrever…", que pára ao
   fim de 5 segundos parados, ao enviar ou ao mudar de tab.
-  Mensagens novas numa conversa sem tab abrem um tab no fim, sem o activar nem reordenar os outros. Os tabs abertos e
-  o activo ficam guardados e voltam no arranque seguinte.
+  Mensagens novas numa conversa sem tab abrem um tab no fim, sem o activar nem reordenar os outros. Nada fica
+  guardado entre execuções: o arranque abre sempre a conversa mais recente, e só essa.
 - **Conversas**: a lista de conversas, com as mais recentes em baixo, mostrando o nome, as não lidas, um `·`
   nas que já têm tab e um excerto da última mensagem. O que se escreve vai para a linha do prompt, que passa a `/`,
   e filtra a lista, sem acentos nem maiúsculas; setas, Enter ou clique abrem a conversa num tab e activam-no; Esc
@@ -65,12 +65,13 @@ assume-se escuro e o cinzento da selecção é médio.
   vale para o filtro das "conversas". Clique num painel activa-o. Um `:` seguido de duas ou mais letras abre, por
   cima da escrita, a lista dos emojis cujo nome começa assim; ↑/↓ escolhem, Enter ou Tab metem o emoji no lugar do
   `:prefixo` sem enviar nada, Esc fecha a lista e continuar a escrever refina-a.
-- Esc fecha, por ordem: o filtro do escolhedor, o escolhedor, o tab activo. Fechar o último tab leva às "conversas"; Esc aí, sem tabs abertos, sai do programa. Ctrl-C sai logo.
+- Esc fecha, por ordem: o filtro do escolhedor, o escolhedor, o tab activo. Fechar o último tab sai do programa, sem
+  passar pelas "conversas". Ctrl-C sai logo.
 - Mensagens novas noutra conversa fazem soar a campainha do terminal e aparecem uns segundos por cima do tab dessa
   conversa, sem fundo, a emergir do fundo e a fundir-se nele outra vez; abrir ou activar o tab marca-as como lidas.
 - **Vários terminais**: podes abrir o `wa` em quantos terminais quiseres. O primeiro processo é o servidor, com a
   ligação ao WhatsApp, e abre um socket em `$XDG_RUNTIME_DIR/wa-<id>.sock`; os seguintes ligam-se a ele e são só
-  interface, cada um com os seus tabs, guardados por terminal. Uma conversa com tab num terminal não abre tab noutro, e
+  interface, cada um com os seus tabs. Uma conversa com tab num terminal não abre tab noutro, e
   uma mensagem nova numa conversa sem tab abre-o só no terminal usado mais recentemente. Se o servidor terminar, um
   dos outros assume a ligação sozinho.
 
