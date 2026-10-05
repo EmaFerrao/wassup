@@ -179,8 +179,10 @@ export class Ui {
   private dark: boolean
   private selectedBg: number
 
-  /** `wa ema`: só essa conversa. Sem tabs, sem escolhedor e sem avisos nem estado das outras. */
+  /** `wa ema`: só essa conversa de cada vez. Sem tabs e sem avisos nem estado das outras; o escolhedor troca-a. */
   private get fixed(): boolean { return !!this.wanted }
+  /** Linhas ocupadas em baixo: a escrita (2) e a barra de tabs (1), que em conversa única não existe. */
+  private get bottom(): number { return this.fixed ? 2 : 3 }
 
   constructor(private wa: Backend, caps: TermCaps, private wanted?: string) {
     this.mode = detectImageMode(caps.kittyGraphics)
@@ -206,21 +208,23 @@ export class Ui {
       parent: this.screen, top: '100%-1', left: 0, width: '100%', height: 1, tags: true, mouse: true,
     })
     this.msgBox = blessed.box({
-      parent: this.screen, top: 0, left: 0, right: 0, height: '100%-3', padding: { left: 1, right: 1 },
+      parent: this.screen, top: 0, left: 0, right: 0, height: `100%-${this.bottom}`, padding: { left: 1, right: 1 },
       tags: true, scrollable: true, alwaysScroll: true, mouse: true,
     }) as ClinesBox
     this.input = blessed.box({
-      parent: this.screen, top: '100%-3', left: 0, right: 0, height: 2, padding: { left: 1, right: 1 },
+      parent: this.screen, top: `100%-${this.bottom}`, left: 0, right: 0, height: 2, padding: { left: 1, right: 1 },
       tags: true, mouse: true,
     })
     this.picker = blessed.list({
-      parent: this.screen, top: 0, left: 0, right: 0, height: '100%-4', padding: { left: 1, right: 1 }, hidden: true,
+      parent: this.screen, top: 0, left: 0, right: 0, height: `100%-${this.bottom + 1}`, padding: { left: 1, right: 1 }, hidden: true,
       tags: true, keys: true, mouse: true,
       // A conversa seleccionada marca-se como o tab activo: negrito e a cor mais forte do tema, sem inverter.
       style: { selected: { bold: true, fg: this.dark ? 'bright-white' : 'black' } } as unknown as blessed.Widgets.ListElementStyle,
     })
     // Por cima da segunda linha da escrita, encostado ao tab da conversa; criado por último para ficar à frente.
-    this.toast = blessed.box({ parent: this.screen, top: '100%-2', left: 0, width: 1, height: 1, tags: true, hidden: true })
+    this.toast = blessed.box({ parent: this.screen, top: `100%-${this.bottom - 1}`, left: 0, width: 1, height: 1, tags: true, hidden: true })
+    // Em conversa única a barra sai e as mensagens ganham a linha; o estado vai para a caixa flutuante, à direita.
+    if (this.fixed) this.tabsBar.hide()
     // Sugestões de emoji, por cima da escrita e sobre as mensagens, com o fundo do realce para se destacar.
     this.suggest = blessed.box({
       parent: this.screen, top: '100%-4', left: 0, width: 1, height: 1, tags: true, hidden: true, padding: { left: 1, right: 1 }, wrap: false,
@@ -784,7 +788,8 @@ export class Ui {
   private drawTabs() {
     const width = num(this.tabsBar.width)
     const maxName = width
-    const tabs = this.tabs.map((jid, i) => {
+    // Em conversa única não há tab a mostrar: a linha fica só com o estado à direita.
+    const tabs = this.fixed ? [] : this.tabs.map((jid, i) => {
       const unread = store.getChat(jid)?.unread ?? 0
       return { jid, i, name: chatName(jid), badge: unread > 0 ? `(${unread})` : '' }
     })
@@ -816,6 +821,13 @@ export class Ui {
     // Ligado não se anuncia: só avisos passageiros e os estados que pedem atenção (QR, ligação caída).
     const avail = width - x - 2
     const text = this.transient ? dim(esc(truncate(this.transient, avail))) : this.connText
+    if (this.fixed) {
+      if (!text) return this.toast.hide()
+      const w = Math.min(width, visibleWidth(text) + 2)
+      this.toast.left = width - w; this.toast.width = w
+      this.toast.setContent(` ${text} `)
+      return this.toast.show()
+    }
     if (avail >= 6 && text) out += ' '.repeat(Math.max(1, width - x - visibleWidth(text) - 1)) + text
     this.tabsBar.setContent(out)
     this.drawNotice(width)
@@ -867,7 +879,6 @@ export class Ui {
   // ---------- escolhedor ----------
 
   private openPicker(filter = '') {
-    if (this.fixed) return this.flash(`só a conversa com ${chatName(this.current!)}`)
     this.filter = filter
     this.filterCursor = graphemes(filter).length
     this.pickerOpen = true
@@ -898,7 +909,15 @@ export class Ui {
     const jid = this.filtered[index]?.jid
     uiLog.info({ index, jid }, 'escolher conversa')
     if (!jid) return
+    // Em conversa única o escolhedor troca a conversa em vez de juntar um tab; o rascunho da anterior fica guardado.
+    const prev = this.fixed ? this.current : null
     this.openTab(jid)
+    if (prev && prev !== jid) {
+      this.tabs = [jid]; this.active = 0
+      this.dirtyTabs = true
+      this.saveTabs()
+      this.renderNow()
+    }
   }
 
   private refreshPicker() {
@@ -930,7 +949,7 @@ export class Ui {
     })
     this.picker.setItems(items as unknown as string[])
     // Lista encostada ao fundo quando é mais curta que o painel, com uma linha em branco a separá-la do prompt.
-    const panel = num(this.screen.height) - 4
+    const panel = num(this.screen.height) - this.bottom - 1
     const top = Math.max(0, panel - this.filtered.length)
     this.picker.top = top
     this.picker.height = panel - top
@@ -1121,7 +1140,7 @@ export class Ui {
     // Uma coluna a mais além do padding: o blessed parte a linha se a etiqueta de fecho cair na última coluna.
     this.suggest.width = Math.max(...lines.map(visibleWidth)) + 3
     this.suggest.height = lines.length
-    this.suggest.top = `100%-${3 + lines.length}`
+    this.suggest.top = `100%-${this.bottom + lines.length}`
     this.suggest.setContent(lines.join('\n'))
     this.suggest.show()
   }
