@@ -10,7 +10,7 @@ import { decode, cached, cellSize, halfBlocks, detectImageMode, KittyImages, typ
 import { logger, uiLog } from './log.js'
 import { patchBlessedUnicode } from './unicode.js'
 import type { TermCaps } from './term.js'
-import { emojify, emoticonify, completeEmoji, codeMatches } from './emoji.js'
+import { emojify, completeEmoji } from './emoji.js'
 import { enableKittyKeyboard } from './kittykeys.js'
 import { parseHex, rainbowRing, mix, nearest256, type Rgb } from './rainbow.js'
 import { suggest, llmEnabled, type Suggestion } from './llm.js'
@@ -92,32 +92,14 @@ function edit(value: string, cursor: number, k: string, ch: string, key: blessed
   if (k === 'C-u') return join([], [])
   if (k === 'S-backspace') return join(graphemes(chars.slice(0, at).join('').replace(/\S*\s*$/, '')), chars.slice(at))
   if (ch && !key.ctrl && !key.meta && ch >= ' ' && ch !== '\x7f') {
-    // Ao isolar um smiley com espaço/pontuação, o emoji aparece logo na escrita. Os :códigos: ficam como texto até
-    // ao envio; o drawInput mostra o emoji a seguir a cada um, como pré-visualização.
+    // Ao fechar um :código: ou isolar um smiley com espaço/pontuação, o texto é trocado logo pelo emoji.
     const before = chars.slice(0, at).join('') + ch
-    return join(graphemes(/[\s.,!?]/.test(ch) ? emoticonify(before) : before), chars.slice(at))
+    return join(graphemes(/[:\s.,!?]/.test(ch) ? emojify(before) : before), chars.slice(at))
   }
   return null
 }
 
 
-/**
- * Texto da escrita para desenhar: cada :código: fechado que corresponda a um emoji leva o emoji a seguir, como
- * pré-visualização, sem mexer no texto escrito. `map[i]` é a posição desenhada do grafema escrito `i` (e `map[n]` a do
- * fim); o cursor no fim de um código fica depois do emoji.
- */
-function previewEmoji(raw: string[]): { chars: string[]; map: number[] } {
-  const text = raw.join('')
-  const matches = codeMatches(text)
-  if (!matches.length) return { chars: raw, map: raw.map((_, i) => i).concat(raw.length) }
-  const chars: string[] = [], map: number[] = []
-  let offset = 0, next = 0
-  const insert = () => { while (next < matches.length && matches[next]!.end <= offset) { if (matches[next]!.end === offset) chars.push(matches[next]!.emoji); next++ } }
-  for (const g of raw) { insert(); map.push(chars.length); chars.push(g); offset += g.length }
-  insert()
-  map.push(chars.length)
-  return { chars, map }
-}
 
 export class Ui {
   private screen: blessed.Widgets.Screen
@@ -171,8 +153,6 @@ export class Ui {
   private drafts = new Map<string, { value: string; cursor: number }>()
   private reactTo: MessageRow | null = null
   private inputHeader = false
-  /** Posição no texto desenhado de cada grafema do texto escrito (mais uma, o fim): os emojis de pré-visualização desalinham-nos. */
-  private inputMap: number[] = [0]
   private images: ImageSlot[] = []
   private mode: ImageMode
   private kitty: KittyImages | undefined
@@ -326,11 +306,8 @@ export class Ui {
           let col = 0
           for (const ch of line) { const w = visibleWidth(esc(ch)); if (col + w / 2 > x) break; col += w; pos++ }
         }
-        // `pos` é no texto desenhado; o cursor é no escrito: o último grafema escrito que começa até aí.
-        let raw = 0
-        while (raw + 1 < this.inputMap.length && this.inputMap[raw + 1]! <= pos) raw++
-        if (this.pickerOpen) this.filterCursor = raw
-        else this.cursor = raw
+        if (this.pickerOpen) this.filterCursor = pos
+        else this.cursor = pos
         this.drawInput()
       }
       this.screen.render()
@@ -455,8 +432,12 @@ export class Ui {
     if (k === 'pageup') { this.msgBox.scroll(-(this.innerHeight() - 1)); return this.screen.render() }
     if (k === 'pagedown') { this.msgBox.scroll(this.innerHeight() - 1); return this.screen.render() }
     // Tab circula pelos tabs abertos; com o escolhedor aberto volta ao tab activo. Conversas novas abrem-se com "/".
-    // Com texto na escrita, Tab é da sugestão do modelo (aceita-a, se houver); sem texto, muda de tab.
-    if (k === 'tab' && this.focus === 'input' && !this.pickerOpen && this.inputValue) { if (this.ghostShown()) this.acceptGhost(); return }
+    // Com texto na escrita, Tab aceita a sugestão à vista: a lista de emojis, ou a do modelo; sem texto, muda de tab.
+    if (k === 'tab' && this.focus === 'input' && !this.pickerOpen && this.inputValue) {
+      if (this.suggestions.length) return this.acceptSuggestion()
+      if (this.ghostShown()) this.acceptGhost()
+      return
+    }
     if (k === 'tab') {
       if (!this.tabs.length) return
       return this.activateTab(this.pickerOpen ? this.active : (this.active + 1) % this.tabs.length)
@@ -474,7 +455,7 @@ export class Ui {
     if (this.focus === 'input') {
       // "/" com a escrita vazia abre logo as conversas; o que se escrever a seguir filtra a lista.
       if (ch === '/' && !this.inputValue) return this.openPicker()
-      // Com sugestões de emoji abertas, ↑/↓ escolhem e Enter aceita; o resto continua a escrever e refina-as.
+      // Com sugestões de emoji abertas, ↑/↓ escolhem e Enter ou Tab aceitam; o resto continua a escrever e refina-as.
       if (this.suggestions.length) {
         if (k === 'up' || k === 'down') {
           this.suggestIndex = (this.suggestIndex + (k === 'up' ? -1 : 1) + this.suggestions.length) % this.suggestions.length
@@ -1141,10 +1122,8 @@ export class Ui {
     this.inputHeader = header != null
     const rowsAvail = header ? 1 : 2
     const width = Math.max(4, w - 2)
-    const raw = graphemes(this.pickerOpen ? this.filter : this.inputValue)
-    const { chars, map } = this.pickerOpen ? { chars: raw, map: raw.map((_, i) => i).concat(raw.length) } : previewEmoji(raw)
-    this.inputMap = map
-    const cursor = map[Math.min(this.pickerOpen ? this.filterCursor : this.cursor, raw.length)]!
+    const chars = graphemes(this.pickerOpen ? this.filter : this.inputValue)
+    const cursor = Math.min(this.pickerOpen ? this.filterCursor : this.cursor, chars.length)
     const lines = wrapChars(chars, width)
     // Linha e coluna do cursor: no fim do texto fica depois do último grafema, e passa a uma linha nova se não cabe.
     let row = 0, start = 0

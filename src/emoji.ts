@@ -259,16 +259,6 @@ export function emojify(text: string): string {
   }))
 }
 
-/** Os :códigos: fechados que correspondem a um emoji, com a posição (em unidades da string) logo a seguir ao fecho. */
-export function codeMatches(text: string): { end: number; emoji: string }[] {
-  const out: { end: number; emoji: string }[] = []
-  for (const m of text.matchAll(CODE_RE)) {
-    const e = TABLE[m[2]!.toLowerCase()]
-    if (e) out.push({ end: m.index! + m[0].length, emoji: e })
-  }
-  return out
-}
-
 export const emojiCodes = Object.keys(TABLE)
 
 /**

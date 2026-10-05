@@ -63,8 +63,8 @@ assume-se escuro e o cinzento da selecção é médio.
   põe-no onde se clicou; Backspace e Delete apagam para trás e para a frente, Ctrl-U limpa a linha e Shift-Backspace
   apaga a palavra anterior (só em terminais com o protocolo de teclado do Kitty: Kitty, Ghostty, foot, WezTerm). O mesmo
   vale para o filtro das "conversas". Clique num painel activa-o. Um `:` seguido de duas ou mais letras abre, por
-  cima da escrita, a lista dos emojis cujo nome começa assim; ↑/↓ escolhem, Enter mete o emoji no lugar do
-  `:prefixo`, Esc fecha a lista e continuar a escrever refina-a.
+  cima da escrita, a lista dos emojis cujo nome começa assim; ↑/↓ escolhem, Enter ou Tab metem o emoji no lugar do
+  `:prefixo` sem enviar nada, Esc fecha a lista e continuar a escrever refina-a.
 - Esc fecha, por ordem: o filtro do escolhedor, o escolhedor, o tab activo. Fechar o último tab leva às "conversas"; Esc aí, sem tabs abertos, sai do programa. Ctrl-C sai logo.
 - Mensagens novas noutra conversa fazem soar a campainha do terminal e aparecem uns segundos por cima do tab dessa
   conversa, sem fundo, a emergir do fundo e a fundir-se nele outra vez; abrir ou activar o tab marca-as como lidas.
@@ -86,8 +86,8 @@ A marcação do WhatsApp é mostrada com atributos do terminal: `*negrito*` a ne
 blessed não sabe itálico), `~riscado~` a cinzento, `` `código` `` e blocos a amarelo, linhas `> citação` a cinzento,
 endereços a azul. Ao enviar, escreve-se a marcação tal como no telemóvel.
 
-Códigos `:nome:` na linha de escrita ficam como texto, com o emoji a seguir como pré-visualização assim que se fecha o
-segundo `:`, e são trocados pelo emoji ao enviar. Nomes em português de Portugal, sem acentos, e em inglês: `:fixe:` ou `:thumbsup:` 👍, `:gargalhada:` 😂, `:beijinho:` 😘, `:coracao:` ❤️, `:fogo:` 🔥,
+Códigos `:nome:` na linha de escrita são trocados pelo emoji assim que se fecha o segundo `:`, com nomes em português
+de Portugal, sem acentos, e em inglês: `:fixe:` ou `:thumbsup:` 👍, `:gargalhada:` 😂, `:beijinho:` 😘, `:coracao:` ❤️, `:fogo:` 🔥,
 `:certo:` ✅, `:bica:` ☕, `:imperial:` 🍺, `:galo:` 🐓, `:autocarro:` 🚌, `:telemovel:` 📱, `:portugal:` 🇵🇹 … A lista
 completa está em `src/emoji.ts`. Os smileys clássicos também são convertidos quando isolados por espaços: `:)` 🙂,
 `:-D` 😁, `:(` 🙁, `;)` 😉, `:P` 😛, `:*` 😘, `:O` 😮, `:'(` 😢, `:/` 😕, `<3` ❤️, `xD` 😆, `B)` 😎 … Um `:/` dentro de
