@@ -1619,8 +1619,8 @@ export class Ui {
     // past the width would make blessed wrap the line. A trailing space that fits is drawn, so the cursor advances with it.
     const text = (l: string[]) => { const t = l.filter(c => c !== '\n').join(''); return strWidth(t) > width ? t.replace(/\s+$/, '') : t }
     // The missing letters go right at the cursor when they fit on its line. Any other suggestion is the whole word
-    // as it should be, floating right above the word it replaces, starting on the word's column (pulled left when it
-    // would run past the edge).
+    // as it should be, after "⇢" (the hint that → or Tab accepts), floating right above the word it replaces, the
+    // word on the word's column and the arrow two cells to its left (pulled left when it would run past the edge).
     const cursorLine = lines[row]!
     const avail = width - visibleWidth(esc(text(cursorLine))) - 1
     let ghostNext = '', ghostAbove = '', ghostLine = -1, ghostCol = 0
@@ -1631,9 +1631,9 @@ export class Ui {
         const startUnit = view.kind === 'fix' ? ghost!.fix!.start : this.inputValue.length - ghost!.word!.from.length
         let at = graphemes(this.inputValue.slice(0, startUnit)).length, wl = 0
         while (wl < lines.length - 1 && at >= lines[wl]!.length) at -= lines[wl++]!.length
-        ghostAbove = truncate(word, width)
+        ghostAbove = truncate(`⇢ ${word}`, width)
         ghostLine = wl
-        ghostCol = Math.max(0, Math.min(strWidth(lines[wl]!.slice(0, at).join('')), width - strWidth(ghostAbove)))
+        ghostCol = Math.max(0, Math.min(strWidth(lines[wl]!.slice(0, at).join('')) - 2, width - strWidth(ghostAbove)))
       }
     }
     // The input grows with the text, up to half the screen; the header (reply, react, edit) takes up one of the lines.
@@ -1665,7 +1665,7 @@ export class Ui {
     // the bottom, the header (if any) takes its first row, the prompt its first two columns, after the padding.
     if (ghostAbove && ghostLine >= this.inputTop && ghostLine < this.inputTop + rowsAvail) {
       this.ghostBox.top = num(this.screen.height) - rows + extra + (ghostLine - this.inputTop) - 1
-      this.ghostBox.left = num(this.input.ileft) + 2 + ghostCol
+      this.ghostBox.left = num(this.input.ileft) + 1 + ghostCol
       this.ghostBox.width = strWidth(ghostAbove) + 1
       this.ghostBox.setContent(dim(italic(esc(ghostAbove))))
       this.ghostBox.show()
