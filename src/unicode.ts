@@ -1,12 +1,12 @@
 import blessed from 'blessed'
 
 /**
- * As tabelas Unicode do blessed são de 2015 e só conhecem largura dupla nos blocos CJK: para ele qualquer emoji tem
- * largura 1, o terminal desenha-o com 2 células, e a partir daí a grelha fica desalinhada e aparece lixo. Aqui
- * remenda-se o módulo `unicode` do blessed para contar os emojis de apresentação como largura 2, que é o que os
- * terminais fazem (wcwidth). O mesmo para um pictograma de texto seguido do selector de variação U+FE0F ("❤️", "✔️"):
- * o selector pede a forma emoji, que o terminal desenha com 2 células; o blessed via-o como combinante de largura 0
- * sobre um carácter de largura 1, e cada um deixava uma coluna de lixo para a direita.
+ * blessed's Unicode tables date from 2015 and only know double width for CJK blocks: to it any emoji has width 1,
+ * the terminal draws it with 2 cells, and from there the grid gets misaligned and garbage shows up. Here blessed's
+ * `unicode` module is patched to count emoji-presentation characters as width 2, which is what terminals do
+ * (wcwidth). Same for a text pictograph followed by the U+FE0F variation selector ("❤️", "✔️"): the selector asks
+ * for the emoji form, which the terminal draws with 2 cells; blessed saw it as a width-0 combining character over
+ * a width-1 character, and each one left a column of garbage to the right.
  */
 interface BlessedUnicode {
   charWidth: (str: string | number, i?: number) => number
@@ -29,20 +29,20 @@ export function patchBlessedUnicode() {
     if (cp == null || cp <= 0xff) return orig.call(u, str, i)
     const c = String.fromCodePoint(cp)
     if (EMOJI_WIDE.test(c)) return 2
-    // O render do blessed junta o U+FE0F à célula do carácter anterior, por isso aqui ele vem logo a seguir.
+    // blessed's renderer merges the U+FE0F into the previous character's cell, so here it comes right after it.
     if (typeof str !== 'number' && str[at + c.length] === VS16 && PICTOGRAPH.test(c)) return 2
     return orig.call(u, str, i)
   }
 
-  // chars.all é o que o parseContent usa para marcar a segunda célula de cada carácter largo. Reconstrói-se em modo
-  // `u`, com os planos CJK por código e os emojis por propriedade; o U+FE0F fica dentro da sequência para a marca
-  // cair depois dele.
+  // chars.all is what parseContent uses to mark the second cell of each wide character. It's rebuilt in `u` mode,
+  // with the CJK planes by code point and emoji by property; the U+FE0F stays inside the sequence so the marker
+  // falls after it.
   u.chars.all = new RegExp(`(\\p{Extended_Pictographic}\\uFE0F|\\p{Emoji_Presentation}|[\\u{20000}-\\u{2FFFD}\\u{30000}-\\u{3FFFD}]|${u.chars.wide.source})`, 'gu')
 }
 
 /**
- * Sequências que os terminais medem de forma imprevisível (ZWJ, tons de pele, bandeiras) reduzem-se a algo de largura
- * conhecida: o primeiro emoji da sequência, o emoji sem tom, e `[PT]` em vez da bandeira.
+ * Sequences that terminals measure unpredictably (ZWJ, skin tones, flags) are reduced to something of known
+ * width: the first emoji in the sequence, the emoji without its tone, and `[PT]` instead of the flag.
  */
 export function tameEmoji(s: string): string {
   return s

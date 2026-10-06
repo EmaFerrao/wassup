@@ -1,8 +1,8 @@
 /**
- * Colagem com parênteses (bracketed paste, modo 2004): o terminal embrulha o texto colado em `ESC[200~ … ESC[201~`.
- * Sem isto o texto chega como teclas soltas: os fins de linha ou se perdem ou, nos terminais que os mandam como
- * Enter, enviam uma mensagem por linha. Lêem-se os bytes antes do blessed e o bloco inteiro sai como uma só tecla
- * "paste", com o texto em `ch`. O bloco pode chegar partido em vários pacotes, até a meio das sequências.
+ * Bracketed paste (mode 2004): the terminal wraps pasted text in `ESC[200~ … ESC[201~`. Without this the text
+ * arrives as loose keystrokes: line endings either get lost or, on terminals that send them as Enter, trigger one
+ * message per line. The bytes are read before blessed and the whole block comes out as a single "paste" key, with
+ * the text in `ch`. The block can arrive split across several packets, even mid-sequence.
  */
 const ENABLE = '\x1b[?2004h'
 const DISABLE = '\x1b[?2004l'
@@ -11,7 +11,7 @@ const END = '\x1b[201~'
 
 type Input = NodeJS.ReadStream & { emit: (event: string, ...args: unknown[]) => boolean }
 
-/** Quantos bytes do fim de `s` são o início de `seq` (sem ser `seq` inteira). */
+/** How many bytes at the end of `s` are the start of `seq` (without being the whole of `seq`). */
 function partial(s: string, seq: string): number {
   for (let k = Math.min(seq.length - 1, s.length); k > 0; k--) if (s.endsWith(seq.slice(0, k))) return k
   return 0

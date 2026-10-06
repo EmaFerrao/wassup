@@ -15,16 +15,17 @@ import { emojify, completeEmoji } from './emoji.js'
 import { enableKittyKeyboard } from './kittykeys.js'
 import { enableBracketedPaste } from './paste.js'
 import { Hearts, reaction } from './hearts.js'
+import { t } from './i18n.js'
 import { parseHex, rainbowRing, mix, nearest256, type Rgb } from './rainbow.js'
 import { suggest, llmEnabled, type Suggestion } from './llm.js'
 import { patchBlessedItalic } from './italic.js'
 
 type Focus = 'picker' | 'messages' | 'input'
 
-/** Uma imagem no painel: pronta (com pixels) ou só reservada, à espera de ser descarregada e descodificada quando ficar visível. */
+/** An image in the panel: ready (with pixels) or just reserved, waiting to be downloaded and decoded once it becomes visible. */
 interface ImageSlot { row: MessageRow; origLine: number; cols: number; rows: number; pad: number; path?: string; d?: Decoded }
 
-/** O que cada terminal guarda em `state`: os seus tabs, o processo que os tem e a última interacção. */
+/** What each terminal keeps in `state`: its tabs, the process that holds them, and the last interaction. */
 interface TerminalState { tabs: string[]; active: number; pid?: number; lastActive?: number; herdrTab?: string }
 
 function pidAlive(pid: number): boolean {
@@ -34,39 +35,40 @@ function pidAlive(pid: number): boolean {
   } catch { return false }
 }
 
-/** Um troço da barra de tabs: a que tab corresponde e onde está o seu × (ou se é o +). */
+/** A segment of the tab bar: which tab it corresponds to and where its × is (or whether it's the +). */
 interface TabSegment { x0: number; x1: number; index: number; closeX0: number; closeX1: number }
 
 const num = (x: unknown): number => x as number
 
-// Campos internos do blessed que a interface usa: as linhas já partidas à largura do painel e os mapas entre
-// linha original e linha desenhada (ftor: original→desenhadas, rtof: desenhada→original).
+// Internal blessed fields the UI uses: the lines already wrapped to the panel width and the maps between
+// original line and drawn line (ftor: original→drawn, rtof: drawn→original).
 interface ClinesBox extends blessed.Widgets.BoxElement {
   _clines: string[] & { ftor: number[][]; rtof: number[] }
   childBase: number
 }
 
-/** Quanto dura o desvanecer do arco-íris depois de a pessoa parar de escrever. */
+/** How long the rainbow fade lasts after the person stops typing. */
 const FADE_MS = 1500
-/** O aviso de mensagem noutra conversa: tempo a aparecer, a ficar e a desaparecer, em milissegundos. */
+/** The notice for a message in another chat: time to appear, stay, and disappear, in milliseconds. */
 const NOTICE = { fadeIn: 400, hold: 6000, fadeOut: 800 }
 
-const HELP = 'Tab muda de tab (com texto, aceita a sugestão) · / conversas · Esc fecha · PgUp/PgDn histórico · ↑ ou clique selecciona mensagem, escrever responde, : reage · :fixe: emoji'
+const HELP = t('help')
 
-// Cores do tema do terminal, nunca assumidas: texto e fundo por omissão e as 16 nomeadas, que o tema garante
-// legíveis sobre o seu fundo. Os avisos passageiros são discretos; só a espera do QR e as quebras de ligação se
-// destacam. Ligado não se mostra.
+// Terminal theme colors, never assumed: default foreground and background, and the 16 named ones, which the theme
+// guarantees are readable over its background. Transient notices are discreet; only waiting for the QR code and
+// connection drops stand out. Connected is not shown.
 const FG = { tab: 'default', badge: 'red', warn: 'yellow', error: 'red' }
 
-/** Cinzento da rampa de 256 cores (232..255, de #080808 a #eeeeee em passos de 10) mais próximo de uma luminosidade. */
+/** Gray from the 256-color ramp (232..255, from #080808 to #eeeeee in steps of 10) closest to a given luminance. */
 function gray256(luma: number): number {
   return 232 + Math.max(0, Math.min(23, Math.round((luma - 8) / 10)))
 }
 
 /**
- * O que se tira do fundo real do terminal (OSC 11): se o tema é escuro, e o cinzento do realce da mensagem
- * seleccionada, afastado da luminosidade dele para o lado claro num tema escuro e para o escuro num claro. Sem
- * resposta assume-se escuro e o realce fica num cinzento médio, legível com texto claro ou escuro.
+ * What's derived from the terminal's real background (OSC 11): whether the theme is dark, and the gray for the
+ * selected-message highlight, moved away from its luminance toward the light side on a dark theme and toward the
+ * dark side on a light one. With no response, dark is assumed and the highlight is a medium gray, readable with
+ * either light or dark text.
  */
 function theme(bg: string | null): { dark: boolean; selected: number } {
   const m = bg && /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(bg)
@@ -77,10 +79,10 @@ function theme(bg: string | null): { dark: boolean; selected: number } {
 }
 
 /**
- * Uma tecla aplicada a um texto com cursor (em grafemas): setas, Home/End, Backspace/Delete, Ctrl-U (tudo),
- * Shift+Backspace (palavra anterior, só em terminais com o protocolo de teclado do Kitty) e caracteres escritos,
- * inseridos no cursor, com :códigos: e smileys trocados pelo emoji assim que ficam completos. Devolve null se a tecla
- * não é de edição.
+ * A key applied to a text with a cursor (in graphemes): arrows, Home/End, Backspace/Delete, Ctrl-U (everything),
+ * Shift+Backspace (previous word, only on terminals with the Kitty keyboard protocol), and typed characters,
+ * inserted at the cursor, with :codes: and smileys swapped for the emoji as soon as they're complete. Returns null
+ * if the key isn't an editing key.
  */
 function edit(value: string, cursor: number, k: string, ch: string, key: blessed.Widgets.Events.IKeyEventArg): { value: string; cursor: number } | null {
   const chars = graphemes(value)
@@ -95,7 +97,7 @@ function edit(value: string, cursor: number, k: string, ch: string, key: blessed
   if (k === 'C-u') return join([], [])
   if (k === 'S-backspace') return join(graphemes(chars.slice(0, at).join('').replace(/\S*\s*$/, '')), chars.slice(at))
   if (ch && !key.ctrl && !key.meta && ch >= ' ' && ch !== '\x7f') {
-    // Ao fechar um :código: ou isolar um smiley com espaço/pontuação, o texto é trocado logo pelo emoji.
+    // On closing a :code: or isolating a smiley with space/punctuation, the text is swapped for the emoji right away.
     const before = chars.slice(0, at).join('') + ch
     return join(graphemes(/[:\s.,!?]/.test(ch) ? emojify(before) : before), chars.slice(at))
   }
@@ -110,23 +112,23 @@ export class Ui {
   private msgBox: ClinesBox
   private input: blessed.Widgets.BoxElement
   private picker: blessed.Widgets.ListElement
-  /** Aviso de mensagem nova noutra conversa: uma linha com fundo, pousada sobre o tab dela na barra. */
+  /** Notice of a new message in another chat: a line with a background, sitting over its tab in the bar. */
   private toast: blessed.Widgets.BoxElement
-  /** Sugestões de emoji para o :prefixo antes do cursor: a caixa por cima da escrita, as opções, a escolhida e onde o prefixo começa. */
+  /** Emoji suggestions for the :prefix before the cursor: the box above the input, the options, the chosen one, and where the prefix starts. */
   private suggest: blessed.Widgets.BoxElement
   private suggestions: { emoji: string; name: string }[] = []
   private suggestIndex = 0
   private suggestStart = 0
-  /** Sugestão do modelo local para o texto `text` (continuação ou correcção), pedida 150 ms depois da última tecla e mostrada 4 s. */
+  /** Local model suggestion for the text `text` (continuation or correction), requested 150 ms after the last keystroke and shown for 4 s. */
   private ghost: { text: string; s: Suggestion } | undefined
   private ghostTimer: NodeJS.Timeout | undefined
   private ghostAbort: AbortController | undefined
-  /** Setas → premidas com a sugestão seguinte ainda a caminho: aceitam-se à chegada, uma por seta, para → → → corrigir em cadeia. */
+  /** Right-arrow presses with the next suggestion still on the way: accepted on arrival, one per arrow, so → → → correct in a chain. */
   private acceptOnArrival = 0
   private ghostHide: NodeJS.Timeout | undefined
-  /** O texto tal como ficou ao aceitar uma sugestão que acabou numa palavra: a letra seguinte leva um espaço antes. */
+  /** The text as it was left after accepting a suggestion that ended mid-word: the next letter gets a space before it. */
   private accepted: string | undefined
-  /** O aviso de mensagem noutra conversa e o instante em que começou a aparecer; o relógio anima-o até sumir. */
+  /** The notice for a message in another chat and the moment it started appearing; the clock animates it until it's gone. */
   private notice: { jid: string; text: string; since: number } | undefined
   private noticeTimer: NodeJS.Timeout | undefined
 
@@ -140,39 +142,39 @@ export class Ui {
   private pickerFilterShown: string | undefined
   private focus: Focus = 'input'
   private inputValue = ''
-  /** Posição do cursor na escrita e no filtro das conversas, em grafemas. */
+  /** Cursor position in the input and in the chat filter, in graphemes. */
   private cursor = 0
   private filterCursor = 0
-  /** Disposição da escrita no último desenho, para mapear cliques: linhas de grafemas e a primeira linha visível. */
+  /** Layout of the input on the last draw, used to map clicks: grapheme lines and the first visible line. */
   private inputLines: string[][] = [[]]
   private inputTop = 0
   private disableKittyKeyboard?: () => void
   private disablePaste: () => void
   private hearts: Hearts
-  /** Conversas cujo tab do Herdr foi pedido há pouco e ainda pode não estar registado. */
+  /** Chats whose Herdr tab was requested recently and may not be registered yet. */
   private spawning = new Set<string>()
   private lineMap: (MessageRow | null)[] = []
-  /** Mensagens desenhadas, por ordem; a seleccionada (clique ou setas no painel) e a que está a ser respondida ou reagida. */
+  /** Drawn messages, in order; the selected one (click or arrows in the panel) and the one being replied to or reacted to. */
   private rows: MessageRow[] = []
   private selected: MessageRow | null = null
   private replyTo: MessageRow | null = null
-  /** Mensagem minha aberta na escrita para editar (Backspace ou Delete com a linha vazia). */
+  /** My own message open in the input for editing (Backspace or Delete with an empty line). */
   private editing: MessageRow | null = null
-  /** O que ficou por enviar em cada conversa: mudar de tab troca a escrita, para nada ir para a pessoa errada. */
+  /** What's left unsent in each chat: switching tabs swaps the input, so nothing goes to the wrong person. */
   private drafts = new Map<string, { value: string; cursor: number }>()
   private reactTo: MessageRow | null = null
   private inputHeader = false
   private images: ImageSlot[] = []
   private mode: ImageMode
   private kitty: KittyImages | undefined
-  private connText = 'a ligar…'
+  private connText = t('connecting')
   private transient = ''
   private transientTimer: NodeJS.Timeout | undefined
   private atBottom = true
   private renderTimer: NodeJS.Timeout | undefined
   /**
-   * Conversas onde alguém está a escrever (null) ou acabou de parar (o instante em que parou, para o arco-íris se
-   * desvanecer), e o relógio que redesenha a barra enquanto houver nomes a animar.
+   * Chats where someone is typing (null) or just stopped (the moment they stopped, for the rainbow to fade), and the
+   * clock that redraws the bar while there are names animating.
    */
   private typing = new Map<string, number | null>()
   private typingTimer: NodeJS.Timeout | undefined
@@ -183,18 +185,18 @@ export class Ui {
   private dirtyMessages = true
   private showingQr = false
 
-  /** Fundo do terminal escuro (decide a cor forte do tab activo e a dos nomes) e cinzento da mensagem seleccionada. */
+  /** Whether the terminal background is dark (decides the strong color of the active tab and of names) and the gray for the selected message. */
   private dark: boolean
   private selectedBg: number
 
   /**
-   * `wa ema`, ou qualquer arranque dentro do Herdr: só uma conversa de cada vez. Sem tabs (no Herdr os tabs são os
-   * dele) e sem avisos nem estado das outras; o escolhedor troca-a.
+   * `wa ema`, or any startup inside Herdr: only one chat at a time. No tabs (in Herdr, the tabs are its own) and no
+   * notices or state from the others; the picker switches it.
    */
   private get fixed(): boolean { return !!this.wanted || inHerdr }
-  /** Linhas da escrita: duas no mínimo, e cresce com o texto até metade do ecrã. */
+  /** Input lines: two at minimum, growing with the text up to half the screen. */
   private inputRows = 2
-  /** Linhas ocupadas em baixo: a escrita e a barra de tabs (1), que em conversa única não existe. */
+  /** Lines occupied at the bottom: the input and the tab bar (1), which doesn't exist in single-chat mode. */
   private get bottom(): number { return this.inputRows + (this.fixed ? 0 : 1) }
 
   constructor(private wa: Backend, caps: TermCaps, private wanted?: string) {
@@ -207,18 +209,18 @@ export class Ui {
     patchBlessedUnicode()
     this.screen = blessed.screen({ smartCSR: true, fullUnicode: caps.utf8, title: 'wa', warnings: false })
     patchBlessedItalic(this.screen)
-    // Com localização UTF-8 as molduras saem em caracteres de caixa Unicode (─│┌). Sem isto o blessed muda para o
-    // conjunto DEC de linhas, que apps de SSH no telemóvel não conhecem e mostram como q, x, l, k.
+    // With a UTF-8 locale, frames come out in Unicode box-drawing characters (─│┌). Without this, blessed switches to
+    // the DEC line-drawing set, which SSH apps on phones don't know and show as q, x, l, k.
     if (caps.utf8) (this.screen.program as unknown as { tput: { brokenACS: boolean } }).tput.brokenACS = true
     const program = this.screen.program as unknown as { _write: (s: string) => void }
     if (this.mode === 'kitty') this.kitty = new KittyImages(s => program._write(s))
-    // Só com o terminal a confirmar o protocolo: é o que permite distinguir Shift+Backspace para apagar palavras.
+    // Only with the terminal confirming the protocol: it's what lets Shift+Backspace be distinguished, for deleting words.
     if (caps.kittyKeyboard) this.disableKittyKeyboard = enableKittyKeyboard((this.screen.program as unknown as { input: Parameters<typeof enableKittyKeyboard>[0] }).input, s => program._write(s))
-    // Por fora do tradutor do Kitty: o texto colado não passa por ele.
+    // Outside the Kitty translator: pasted text doesn't go through it.
     this.disablePaste = enableBracketedPaste((this.screen.program as unknown as { input: Parameters<typeof enableBracketedPaste>[0] }).input, s => program._write(s))
     logger.info({ caps, images: this.mode, dark: this.dark, term: process.env.TERM }, 'terminal')
 
-    // Disposição: mensagens a toda a largura, escrita em duas linhas, e no fundo a barra de tabs com o estado à direita.
+    // Layout: messages at full width, input in two lines, and at the bottom the tab bar with status on the right.
     this.tabsBar = blessed.box({
       parent: this.screen, top: '100%-1', left: 0, width: '100%', height: 1, tags: true, mouse: true,
     })
@@ -233,19 +235,19 @@ export class Ui {
     this.picker = blessed.list({
       parent: this.screen, top: 0, left: 0, right: 0, height: `100%-${this.bottom + 1}`, padding: { left: 1, right: 1 }, hidden: true,
       tags: true, keys: true, mouse: true,
-      // A conversa seleccionada marca-se como o tab activo: negrito e a cor mais forte do tema, sem inverter.
+      // The selected chat is marked as the active tab: bold and the theme's strongest color, without inverting.
       style: { selected: { bold: true, fg: this.dark ? 'bright-white' : 'black' } } as unknown as blessed.Widgets.ListElementStyle,
     })
-    // Por cima da segunda linha da escrita, encostado ao tab da conversa; criado por último para ficar à frente.
+    // Above the input's second line, flush against the chat's tab; created last so it stays on top.
     this.toast = blessed.box({ parent: this.screen, top: `100%-${this.bottom - 1}`, left: 0, width: 1, height: 1, tags: true, hidden: true })
-    // Em conversa única a barra sai e as mensagens ganham a linha; o estado vai para a caixa flutuante, à direita.
+    // In single-chat mode the bar is gone and messages gain the line; status goes to the floating box, on the right.
     if (this.fixed) this.tabsBar.hide()
-    // Sugestões de emoji, por cima da escrita e sobre as mensagens, com o fundo do realce para se destacar.
+    // Emoji suggestions, above the input and over the messages, with the highlight background to stand out.
     this.suggest = blessed.box({
       parent: this.screen, top: '100%-4', left: 0, width: 1, height: 1, tags: true, hidden: true, padding: { left: 1, right: 1 }, wrap: false, mouse: true,
       style: { bg: this.selectedBg } as unknown as blessed.Widgets.Types.TStyle,
     })
-    // Um clique numa linha da lista de emojis escolhe esse.
+    // A click on a line of the emoji list selects that one.
     this.suggest.on('click', (data: { x: number; y: number }) => {
       const i = data.y - num(this.suggest.atop)
       if (i < 0 || i >= this.suggestions.length) return
@@ -253,18 +255,18 @@ export class Ui {
       this.acceptSuggestion()
     })
 
-    // Por cima de tudo, os corações a subir quando se envia ou recebe um coração sozinho.
+    // Above everything, the hearts rising when a heart-only message is sent or received.
     this.hearts = new Hearts(this.screen, this.msgBox, this.bgRgb, blessed.box)
 
-    // Rato só com cliques e roda (1000) em codificação SGR (1006), em vez do conjunto que o blessed activa para xterm
-    // (1000/1002/1003/1005): o relato de movimento (1003) e a codificação UTF-8 (1005) baralham apps de SSH no
-    // telemóvel como o Termius, que com 1000+1006 mandam toques como cliques. O blessed desliga à saída o que ficou ligado.
+    // Mouse with only clicks and wheel (1000) in SGR encoding (1006), instead of the set blessed enables for xterm
+    // (1000/1002/1003/1005): motion reporting (1003) and UTF-8 encoding (1005) confuse SSH apps on phones like
+    // Termius, which with 1000+1006 send taps as clicks. blessed turns off whatever was enabled on exit.
     const mouse = this.screen.program as unknown as { disableMouse: () => void; setMouse: (o: Record<string, boolean>, enable: boolean) => void; _bindMouse: (s: string, buf: Buffer) => void }
     mouse.disableMouse()
     mouse.setMouse({ vt200Mouse: true, sgrMouse: true }, true)
-    // O blessed só lê a primeira sequência de rato de cada pacote de bytes, e os terminais mandam a pressão e a largada
-    // do botão (ou dois notches da roda) no mesmo pacote: a largada perdia-se e nunca havia clique. Parte-se o pacote em
-    // sequências SGR individuais antes de ele as ler.
+    // blessed only reads the first mouse sequence in each byte packet, and terminals send the button press and
+    // release (or two wheel notches) in the same packet: the release was lost and there was never a click. The
+    // packet is split into individual SGR sequences before blessed reads them.
     const bindMouse = mouse._bindMouse
     mouse._bindMouse = (s, buf) => {
       const parts = s.match(/\x1b\[<\d+;\d+;\d+[mM]|[^\x1b]+|\x1b(?!\[<)[\s\S]*?(?=\x1b\[<|$)/g)
@@ -277,14 +279,14 @@ export class Ui {
     this.setFocus('input')
     this.drawInput()
     this.drawStatus()
-    // `wa paula` abre logo essa conversa: a primeira, da mais recente para trás, cujo nome ou número contém o texto.
+    // `wa paula` opens that chat right away: the first, from most recent backward, whose name or number contains the text.
     if (this.wanted) {
       const jid = this.findChat(this.wanted)
-      if (!jid) { this.quit(`nenhuma conversa com "${this.wanted}"`); return }
+      if (!jid) { this.quit(t('noChatWith', this.wanted)); return }
       this.openTab(jid)
     }
     this.renderNow()
-    // drawStatus já deixou a barra de tabs desenhada, por isso o renderNow acima não passa pelo título nem pelo Herdr.
+    // drawStatus has already left the tab bar drawn, so the renderNow above doesn't touch the title or Herdr.
     this.updateTitle()
   }
 
@@ -292,16 +294,16 @@ export class Ui {
     return this.tabs[this.active] ?? null
   }
 
-  // ---------- eventos ----------
+  // ---------- events ----------
 
   private bindEvents() {
     this.bindDiagnostics()
     this.screen.on('keypress', (ch: string, key: blessed.Widgets.Events.IKeyEventArg) => this.onKey(ch, key))
-    // A lista do escolhedor tem posição e altura calculadas à mão: com o terminal a mudar de tamanho refaz-se.
+    // The picker list has its position and height calculated by hand: it's recomputed when the terminal resizes.
     this.screen.on('resize', () => { this.dirtyMessages = true; this.dirtyTabs = true; if (this.pickerOpen) this.refreshPicker(); this.scheduleRender() })
     this.screen.on('render', () => { this.loadVisibleImages(); this.placeImages() })
 
-    // A roda do rato faz scroll de uma linha por notch (de série o blessed salta meio painel, ou duas entradas na lista).
+    // The mouse wheel scrolls one line per notch (by default blessed jumps half the panel, or two list entries).
     this.msgBox.removeAllListeners('wheeldown')
     this.msgBox.removeAllListeners('wheelup')
     this.msgBox.on('wheeldown', () => { this.msgBox.scroll(1); this.screen.render() })
@@ -312,20 +314,21 @@ export class Ui {
     this.picker.on('element wheelup', () => { this.picker.scroll(-1, true); this.screen.render() })
 
     this.picker.on('select', (_item, index) => this.pickChat(index))
-    // O clique cai no item (filho da lista) e chega como 'element click', já depois do blessed ter movido a selecção.
+    // The click lands on the item (a child of the list) and arrives as 'element click', after blessed has already moved the selection.
     this.picker.on('element click', () => this.pickChat((this.picker as unknown as { selected: number }).selected))
 
     this.tabsBar.on('click', (data: { x: number; y: number }) => {
       const x = data.x - num(this.tabsBar.aleft)
       const seg = this.segments.find(s => x >= s.x0 && x < s.x1)
-      uiLog.info({ x, seg }, 'clique na barra de tabs')
+      uiLog.info({ x, seg }, 'tab bar click')
       if (!seg) return
       if (x >= seg.closeX0 && x < seg.closeX1) return this.closeTab(seg.index)
       this.activateTab(seg.index)
     })
-    // Clicar numa mensagem selecciona-a (e abre o anexo se o clique cair num); fora das mensagens volta à escrita.
-    // Arrastar uma mensagem para a direita (premir e largar na mesma linha, 4 ou mais colunas à frente) começa a
-    // resposta a ela, como no WhatsApp do telemóvel. O terminal só dá a pressão e a largada, não o movimento.
+    // Clicking a message selects it (and opens the attachment if the click lands on one); outside messages it
+    // returns focus to the input. Dragging a message to the right (press and release on the same line, 4 or more
+    // columns ahead) starts a reply to it, like on WhatsApp mobile. The terminal only gives the press and release,
+    // not the movement.
     let pressed: { x: number; y: number } | undefined
     this.msgBox.on('mousedown', (data: { x: number; y: number }) => { pressed = { x: data.x, y: data.y } })
     this.msgBox.on('click', (data: { x: number; y: number }) => {
@@ -346,7 +349,7 @@ export class Ui {
       this.renderNow()
     })
     this.msgBox.on('scroll', () => this.updateAtBottom())
-    // Clicar na escrita põe o cursor na posição clicada (ou no fim da linha, se o clique cair depois do texto).
+    // Clicking the input places the cursor at the clicked position (or at the end of the line, if the click lands past the text).
     this.input.on('click', (data: { x: number; y: number }) => {
       if (!this.pickerOpen) this.setFocus('input')
       {
@@ -376,47 +379,48 @@ export class Ui {
         if (row.type === 'text' && reaction(row.text)) this.heartFor(r => r.id === row.id, row.text)
         return
       }
-      // No Herdr a conversa nova abre num tab dele, em segundo plano, pela mesma regra do tab novo: só o terminal
-      // usado mais recentemente, e nunca se já estiver aberta noutro. Até o tab novo se registar, lembra-se o pedido.
+      // In Herdr the new chat opens in one of its tabs, in the background, by the same rule as a new tab: only the
+      // most recently used terminal, and never if it's already open in another. Until the new tab registers, the
+      // request is remembered.
       if (this.fixed) {
         if (inHerdr && !this.openElsewhere(jid) && this.isMostRecentTerminal() && !this.spawning.has(jid)) {
           this.spawning.add(jid)
           setTimeout(() => this.spawning.delete(jid), 15000)
-          openChatHerdr(jid, chatName(jid), false).catch(e => logger.warn({ e }, 'herdr: abrir tab'))
+          openChatHerdr(jid, chatName(jid), false).catch(e => logger.warn({ e }, 'herdr: open tab'))
         }
         return
       }
       if (this.tabs.includes(jid)) { this.screen.program.bell(); this.notify(jid, row.text || `[${row.type}]`); return }
-      // Conversa sem tab: com vários terminais, só o usado mais recentemente abre o tab, e nunca se a conversa já
-      // tiver tab noutro terminal vivo.
+      // Chat without a tab: with several terminals, only the most recently used one opens the tab, and never if the
+      // chat already has a tab in another live terminal.
       if (this.openElsewhere(jid) || !this.isMostRecentTerminal()) return
       this.openTab(jid, false)
       this.screen.program.bell()
       this.notify(jid, row.text || `[${row.type}]`)
     })
     this.wa.on('status', text => this.flash(text))
-    // Uma reacção com coração ou beijo, minha ou de outros, anima-se a partir do sítio onde ela aparece na mensagem.
+    // A heart or kiss reaction, mine or someone else's, animates from the spot where it appears in the message.
     this.wa.on('reaction', (jid, msgId, _sender, emoji) => { if (jid === this.current && reaction(emoji)) this.heartFor(r => r.id === msgId, emoji) })
   }
 
-  /** Regista no wa.log tudo o que chega do terminal e o que a interface faz com isso. */
+  /** Logs to wa.log everything that arrives from the terminal and what the UI does with it. */
   private bindDiagnostics() {
     const program = this.screen.program as unknown as { input: NodeJS.ReadStream }
     program.input.on('data', (b: Buffer) => {
-      // Só sequências de escape (rato, teclas especiais), nunca o texto escrito.
+      // Only escape sequences (mouse, special keys), never the typed text.
       if (b[0] === 0x1b) uiLog.info({ raw: JSON.stringify(b.toString('latin1')) }, 'bytes')
     })
     this.screen.on('mouse', (d: { action: string; button?: string; x: number; y: number; shift?: boolean; ctrl?: boolean }) => {
       this.touchActivity()
-      uiLog.info({ action: d.action, button: d.button, x: d.x, y: d.y, shift: d.shift, ctrl: d.ctrl }, 'rato')
+      uiLog.info({ action: d.action, button: d.button, x: d.x, y: d.y, shift: d.shift, ctrl: d.ctrl }, 'mouse')
     })
-    const named: [string, blessed.Widgets.BlessedElement][] = [['tabs', this.tabsBar], ['mensagens', this.msgBox], ['escrita', this.input], ['escolhedor', this.picker]]
+    const named: [string, blessed.Widgets.BlessedElement][] = [['tabs', this.tabsBar], ['messages', this.msgBox], ['input', this.input], ['picker', this.picker]]
     for (const [name, w] of named) {
       ;(w as unknown as { on: (ev: string, fn: (el: blessed.Widgets.BlessedElement, d: { action: string; x: number; y: number }) => void) => void })
-        .on('element mouse', (el, d) => uiLog.info({ painel: name, filho: el !== w ? el.type : undefined, action: d.action, x: d.x, y: d.y }, 'rato no painel'))
+        .on('element mouse', (el, d) => uiLog.info({ panel: name, child: el !== w ? el.type : undefined, action: d.action, x: d.x, y: d.y }, 'mouse in panel'))
     }
-    this.screen.on('keypress', (_ch: string, key: blessed.Widgets.Events.IKeyEventArg) => uiLog.info({ key: key.full, foco: this.focus }, 'tecla'))
-    uiLog.info({ modos: 'rato 1000+1006', term: process.env.TERM, program: process.env.TERM_PROGRAM, cols: this.screen.width, rows: this.screen.height }, 'arranque')
+    this.screen.on('keypress', (_ch: string, key: blessed.Widgets.Events.IKeyEventArg) => uiLog.info({ key: key.full, focus: this.focus }, 'key'))
+    uiLog.info({ modes: 'mouse 1000+1006', term: process.env.TERM, program: process.env.TERM_PROGRAM, cols: this.screen.width, rows: this.screen.height }, 'startup')
   }
 
   private onConnection(state: ConnState, detail?: string) {
@@ -424,11 +428,11 @@ export class Ui {
       QRCode.toString(this.wa.qr, { type: 'terminal', small: true }, (err, qr) => {
         if (err) { logger.error({ err }, 'qr'); return }
         this.showingQr = true
-        this.msgBox.setContent(['', '  {bold}Ligar o WhatsApp{/bold}', '', '  No telemóvel: WhatsApp › Definições › Dispositivos associados › Associar dispositivo', '', qr].join('\n'))
+        this.msgBox.setContent(['', `  {bold}${esc(t('qrTitle'))}{/bold}`, '', `  ${esc(t('qrHint'))}`, '', qr].join('\n'))
         this.lineMap = []; this.images = []; this.rows = []; this.selected = null
         this.screen.render()
       })
-      this.connText = `{${FG.warn}-fg}● à espera do QR{/${FG.warn}-fg}`
+      this.connText = `{${FG.warn}-fg}● ${esc(t('waitingQr'))}{/${FG.warn}-fg}`
     } else if (state === 'open') {
       this.connText = ''
       this.showingQr = false
@@ -437,15 +441,15 @@ export class Ui {
       if (Date.now() - this.lastActive < 120000) { this.lastPresenceTouch = Date.now(); this.wa.touchPresence() }
       this.scheduleRender()
     } else if (state === 'closed') {
-      this.connText = `{${FG.error}-fg}● ${esc(detail ?? 'desligado')}{/${FG.error}-fg}`
+      this.connText = `{${FG.error}-fg}● ${esc(detail ?? t('disconnected'))}{/${FG.error}-fg}`
     } else {
-      this.connText = `{${FG.warn}-fg}● a ligar…{/${FG.warn}-fg}`
+      this.connText = `{${FG.warn}-fg}● ${esc(t('connecting'))}{/${FG.warn}-fg}`
     }
     this.drawStatus()
     this.screen.render()
   }
 
-  /** Alguém começou ou parou de escrever: o arco-íris corre pelo nome do tab e, ao parar, desvanece-se. */
+  /** Someone started or stopped typing: the rainbow runs across the tab's name and, once they stop, fades out. */
   private onTyping(jid: string, active: boolean) {
     if (active) this.typing.set(jid, null)
     else if (this.typing.has(jid)) this.typing.set(jid, Date.now())
@@ -462,8 +466,9 @@ export class Ui {
   }
 
   /**
-   * O nome com o arco-íris: o anel de matizes corre pelas letras (uma volta em ~3 s, a 25 imagens por segundo), e depois de a pessoa
-   * parar cada cor mistura-se com a do texto ao longo de FADE_MS, com uma curva suave, até ficar normal.
+   * The name with the rainbow: the ring of hues runs across the letters (one full turn in ~3 s, at 25 frames per
+   * second), and once the person stops, each color blends into the text color over FADE_MS, with a smooth curve,
+   * until it's back to normal.
    */
   private rainbow(name: string, stopped: number | null): string {
     const n = this.ring.length
@@ -476,7 +481,7 @@ export class Ui {
     }).join('')
   }
 
-  /** Texto colado entra inteiro onde está o cursor; na escrita guarda as linhas, no filtro do escolhedor fica numa só. */
+  /** Pasted text goes in whole where the cursor is; in the input it keeps the lines, in the picker filter it collapses to one. */
   private paste(text: string) {
     if (this.focus === 'picker') {
       const chars = graphemes(this.filter), at = Math.min(this.filterCursor, chars.length)
@@ -501,13 +506,13 @@ export class Ui {
     this.touchActivity()
     const k = key.full
     if (k !== 'right') this.acceptOnArrival = 0
-    // O blessed emite cada Enter duas vezes: um "enter" sintético e logo o "return" verdadeiro. Só o segundo conta;
-    // senão, com sugestões abertas, o primeiro aceitava o emoji e o segundo enviava a mensagem.
+    // blessed emits each Enter twice: a synthetic "enter" and right after the real "return". Only the second counts;
+    // otherwise, with suggestions open, the first would accept the emoji and the second would send the message.
     if (key.name === 'enter' && key.sequence === '\r') return
     if (k === 'C-c') return this.quit()
     if (k === 'paste') return this.paste(ch)
-    // ESC fecha, por ordem: a resposta ou reacção em curso, a selecção, o filtro do escolhedor, o escolhedor, o tab
-    // activo, o programa.
+    // ESC closes, in order: the reply or reaction in progress, the selection, the picker filter, the picker, the
+    // active tab, the program.
     if (k === 'escape') {
       if (this.suggestions.length) { this.suggestions = []; this.drawSuggestions(); return this.screen.render() }
       if (this.replyTo || this.reactTo) { this.replyTo = this.reactTo = null; this.drawInput(); return this.screen.render() }
@@ -515,7 +520,7 @@ export class Ui {
       if (this.focus === 'messages') { this.setFocus('input'); return this.renderNow() }
       if (this.pickerOpen) {
         if (this.filter) { this.filter = ''; this.filterCursor = 0; this.refreshPicker(); return this.screen.render() }
-        // Sem tabs não há para onde voltar: o escolhedor é o único painel, e fechá-lo é sair.
+        // With no tabs there's nowhere to go back to: the picker is the only panel, and closing it means quitting.
         return this.tabs.length ? this.closePicker() : this.quit()
       }
       if (this.current) return this.closeTab(this.active)
@@ -523,15 +528,16 @@ export class Ui {
     }
     if (k === 'pageup') { this.msgBox.scroll(-(this.innerHeight() - 1)); return this.screen.render() }
     if (k === 'pagedown') { this.msgBox.scroll(this.innerHeight() - 1); return this.screen.render() }
-    // Tab circula pelos tabs abertos; com o escolhedor aberto volta ao tab activo. Conversas novas abrem-se com "/".
-    // Com texto na escrita, Tab aceita a sugestão à vista: a lista de emojis, ou a do modelo; sem texto, muda de tab.
-    // A seta para a direita, com o cursor já no fim, faz o mesmo que o Tab; a meio do texto continua a mover o cursor.
+    // Tab cycles through the open tabs; with the picker open it goes back to the active tab. New chats open with "/".
+    // With text in the input, Tab accepts the suggestion in view: the emoji list, or the model's; with no text, it
+    // switches tabs. The right arrow, with the cursor already at the end, does the same as Tab; mid-text it keeps
+    // moving the cursor.
     if ((k === 'tab' || (k === 'right' && this.cursorAtEnd() && (this.suggestions.length || this.ghostShown()))) && this.focus === 'input' && !this.pickerOpen && this.inputValue) {
       if (this.suggestions.length) return this.acceptSuggestion()
       if (this.ghostShown()) this.acceptGhost()
       return
     }
-    // → no fim, sem sugestão à vista mas com uma pedida: fica a aceitação marcada para quando ela chegar.
+    // → at the end, with no suggestion in view but one requested: the acceptance is flagged for when it arrives.
     if (k === 'right' && this.focus === 'input' && !this.pickerOpen && this.inputValue && this.cursorAtEnd() && (this.ghostTimer || this.ghostAbort)) {
       this.acceptOnArrival++
       return
@@ -542,7 +548,7 @@ export class Ui {
     }
 
     if (this.focus === 'picker') {
-      // Escrever com o escolhedor aberto filtra as conversas; setas e Enter são da lista.
+      // Typing with the picker open filters the chats; arrows and Enter belong to the list.
       const e = edit(this.filter, this.filterCursor, k, ch, key)
       if (!e) return
       this.filterCursor = e.cursor
@@ -551,11 +557,11 @@ export class Ui {
       return this.screen.render()
     }
     if (this.focus === 'input') {
-      // "/" com a escrita vazia abre logo as conversas; o que se escrever a seguir filtra a lista.
+      // "/" with the input empty opens the chat list right away; whatever's typed next filters the list.
       if (ch === '/' && !this.inputValue) return this.openPicker()
-      // Shift+Enter (só com o protocolo do Kitty, que o distingue) ou Ctrl+J começam uma linha nova na mensagem.
+      // Shift+Enter (only with the Kitty protocol, which distinguishes it) or Ctrl+J start a new line in the message.
       if (k === 'S-return' || k === 'linefeed') return this.paste('\n')
-      // Com sugestões de emoji abertas, ↑/↓ escolhem e Enter ou Tab aceitam; o resto continua a escrever e refina-as.
+      // With emoji suggestions open, ↑/↓ choose and Enter or Tab accept; everything else keeps typing and refines them.
       if (this.suggestions.length) {
         if (k === 'up' || k === 'down') {
           this.suggestIndex = (this.suggestIndex + (k === 'up' ? -1 : 1) + this.suggestions.length) % this.suggestions.length
@@ -565,15 +571,15 @@ export class Ui {
         if (k === 'enter' || k === 'return') return this.acceptSuggestion()
       }
       if (k === 'enter' || k === 'return') { const v = this.inputValue; this.inputValue = ''; this.cursor = 0; this.stopComposing(); this.updateSuggestions(); this.drawInput(); this.screen.render(); return void this.submit(v) }
-      // Logo a seguir a aceitar uma sugestão que acabou numa palavra, uma letra ou algarismo começa palavra nova:
-      // entra com um espaço antes. Espaço e pontuação seguem-se directamente.
+      // Right after accepting a suggestion that ended mid-word, a letter or digit starts a new word: it goes in
+      // with a space before it. Space and punctuation follow directly.
       if (this.accepted === this.inputValue && this.cursorAtEnd() && ch && /^[\p{L}\p{N}]$/u.test(ch) && !key.ctrl && !key.meta) {
         this.inputValue += ' '
         this.cursor++
       }
       const e = edit(this.inputValue, this.cursor, k, ch, key)
       if (!e) { if (k === 'up') this.moveSelection(-1); return }
-      // Só o texto a mudar gasta o espaço prometido; mover o cursor (→ no fim, sem sugestão) deixa-o por dar.
+      // Only the text changing spends the promised space; moving the cursor (→ at the end, with no suggestion) leaves it unspent.
       if (e.value !== this.inputValue) { this.accepted = undefined; this.promoteActive() }
       this.inputValue = e.value
       this.cursor = e.cursor
@@ -584,19 +590,19 @@ export class Ui {
     }
     if (this.focus === 'messages') {
       if (k === 'up' || k === 'down') return this.moveSelection(k === 'up' ? -1 : 1)
-      // → sobre a mensagem seleccionada responde-lhe. É também o que o Termius manda num deslize para a direita: uma
-      // rajada de setas, sem posição; as seguintes caem na escrita vazia e não fazem nada.
+      // → over the selected message replies to it. It's also what Termius sends on a right swipe: a burst of
+      // arrows, with no position; the following ones land on the empty input and do nothing.
       if (k === 'right' && this.selected) {
         this.replyTo = this.selected; this.reactTo = null
         this.setFocus('input')
         this.drawInput()
         return this.screen.render()
       }
-      // Delete ou Backspace sobre uma mensagem minha de texto abre-a na escrita para a corrigir; Enter envia a edição,
-      // Esc desiste.
+      // Delete or Backspace over my own text message opens it in the input to correct it; Enter sends the edit,
+      // Esc gives up.
       if ((k === 'delete' || k === 'backspace') && this.selected) return this.editMessage(this.selected)
-      // Escrever sobre a seleccionada começa logo a resposta, com o que se escreveu; ":" começa uma reacção, e fica
-      // já escrito para se continuar com o :código: do emoji. O cabeçalho da escrita diz a que mensagem.
+      // Typing over the selected message starts a reply right away, with what was typed; ":" starts a reaction, and
+      // stays typed so it can continue with the emoji's :code:. The input's header says which message.
       if (this.selected && ch && !key.ctrl && !key.meta && ch >= ' ' && ch !== '\x7f') {
         if (ch === ':') { this.reactTo = this.selected; this.replyTo = null } else { this.replyTo = this.selected; this.reactTo = null }
         this.inputValue = ch
@@ -608,7 +614,7 @@ export class Ui {
     }
   }
 
-  // ---------- selecção de mensagens ----------
+  // ---------- message selection ----------
 
   private select(row: MessageRow | null) {
     this.selected = row
@@ -617,7 +623,7 @@ export class Ui {
     else if (this.focus === 'messages') this.setFocus('input')
   }
 
-  /** Move a selecção para a mensagem anterior (-1) ou seguinte (+1); sem selecção, ↑ pega na última; ↓ da última volta à escrita. */
+  /** Moves the selection to the previous (-1) or next (+1) message; with no selection, ↑ picks the last one; ↓ from the last one goes back to the input. */
   private moveSelection(dir: -1 | 1) {
     if (!this.current || !this.rows.length) return
     const i = this.selected ? this.rows.findIndex(r => r.id === this.selected!.id) : this.rows.length
@@ -628,7 +634,7 @@ export class Ui {
     this.screen.render()
   }
 
-  /** Faz scroll ao painel só o bastante para a mensagem seleccionada ficar toda visível. */
+  /** Scrolls the panel just enough for the selected message to become fully visible. */
   private scrollToSelected() {
     const id = this.selected?.id
     const first = this.lineMap.findIndex(r => r?.id === id)
@@ -643,13 +649,13 @@ export class Ui {
     else if (bottom >= base + h) this.msgBox.scrollTo(bottom - h + 1)
   }
 
-  /** Põe uma mensagem de texto minha na escrita, para a corrigir e reenviar como edição. */
+  /** Puts one of my own text messages in the input, to correct and resend it as an edit. */
   private editMessage(row: MessageRow) {
-    if (!row.from_me || row.type !== 'text') return this.flash('só podes corrigir mensagens de texto tuas')
+    if (!row.from_me || row.type !== 'text') return this.flash(t('onlyOwnText'))
     this.editing = row
     this.replyTo = this.reactTo = null
     this.setFocus('input')
-    this.inputValue = row.text.replace(/\n\(editada\)$/, '')
+    this.inputValue = row.text.replace(/\n\((editada|edited)\)$/, '')
     this.cursor = graphemes(this.inputValue).length
     this.updateSuggestions()
     this.drawInput()
@@ -657,7 +663,7 @@ export class Ui {
   }
 
   private who(row: MessageRow): string {
-    return row.from_me ? 'eu' : row.chat_jid.endsWith('@g.us') ? contactName(row.sender_jid) : chatName(row.chat_jid)
+    return row.from_me ? t('me') : row.chat_jid.endsWith('@g.us') ? contactName(row.sender_jid) : chatName(row.chat_jid)
   }
 
   private snippet(row: MessageRow): string {
@@ -666,70 +672,70 @@ export class Ui {
 
   private async submit(v: string) {
     const text = emojify(v.trim())
-    // Reacção em curso: o que se escreveu é o emoji (vazio retira a reacção), e vai para a mensagem escolhida.
+    // Reaction in progress: what was typed is the emoji (empty removes the reaction), and it goes to the chosen message.
     const reactTo = this.reactTo
     if (reactTo) {
       this.reactTo = null
       this.drawInput()
       this.screen.render()
-      if (this.wa.state !== 'open') return this.flash('sem ligação ao WhatsApp; espera pelo ● verde')
-      // O ":" com que a reacção começa, sozinho, vale o mesmo que nada: retira a reacção.
+      if (this.wa.state !== 'open') return this.flash(t('noConnection'))
+      // The ":" the reaction starts with, alone, counts the same as nothing: it removes the reaction.
       const emoji = text === ':' ? '' : text
       try {
         await this.wa.react(reactTo.chat_jid, reactTo.id, emoji)
-        if (!emoji) this.flash('reacção retirada')
+        if (!emoji) this.flash(t('reactionRemoved'))
       } catch (e) {
         logger.error({ e }, 'react')
-        this.flash(`erro: ${(e as Error).message}`, 10000)
+        this.flash(`${t('error')}: ${(e as Error).message}`, 10000)
       }
       return
     }
-    // Edição em curso: o texto substitui o da mensagem aberta; vazio não envia nada e a edição fica aberta.
+    // Edit in progress: the text replaces the open message's; empty sends nothing and the edit stays open.
     const editing = this.editing
     if (editing) {
       if (!text) { this.drawInput(); return this.screen.render() }
       this.editing = null
       this.drawInput()
       this.screen.render()
-      if (this.wa.state !== 'open') return this.flash('sem ligação ao WhatsApp; espera pelo ● verde')
+      if (this.wa.state !== 'open') return this.flash(t('noConnection'))
       try {
         await this.wa.edit(editing.chat_jid, editing.id, text)
       } catch (e) {
         logger.error({ e }, 'edit')
-        this.flash(`erro: ${(e as Error).message}`, 10000)
+        this.flash(`${t('error')}: ${(e as Error).message}`, 10000)
       }
       return
     }
     if (!text) return
     if (text.startsWith('/')) return this.openPicker(text.slice(1).trim())
-    if (!this.current) return this.flash('abre primeiro uma conversa ("/")')
-    if (this.wa.state !== 'open') return this.flash('sem ligação ao WhatsApp; espera pelo ● verde')
+    if (!this.current) return this.flash(t('openFirst'))
+    if (this.wa.state !== 'open') return this.flash(t('noConnection'))
     const jid = this.current
-    // Ao enviar, o painel vai para o fundo para mostrar a mensagem nova, mesmo que estivesse a ver o histórico.
+    // On sending, the panel jumps to the bottom to show the new message, even if it was looking at history.
     this.atBottom = true
     try {
-      if (text.startsWith(':')) return this.flash(`comando desconhecido: ${text.split(' ')[0]}. ${HELP}`, 10000)
+      if (text.startsWith(':')) return this.flash(`${t('unknownCommand')}: ${text.split(' ')[0]}. ${HELP}`, 10000)
       const replyTo = this.replyTo?.chat_jid === jid ? this.replyTo : null
       this.replyTo = null
       this.drawInput()
       this.screen.render()
       await this.wa.send(jid, text, replyTo?.id)
-      // A minha mensagem só aparece quando o servidor a devolver; procura-se então a mais recente minha com o coração.
+      // My own message only appears once the server echoes it back; the most recent one of mine with the heart is then searched for.
       if (reaction(text)) this.heartFor(r => r.from_me === 1 && r.text === text && Date.now() - r.ts * 1000 < 30000, text)
     } catch (e) {
       logger.error({ e }, 'submit')
-      this.flash(`erro: ${(e as Error).message}`, 10000)
+      this.flash(`${t('error')}: ${(e as Error).message}`, 10000)
     }
   }
 
   // ---------- tabs ----------
 
   /**
-   * Cada terminal tem os seus tabs, guardados em `state` sob o dispositivo do terminal (/dev/pts/N). O registo leva
-   * também o pid e a hora da última interacção: é assim que os vários processos sabem, só pela base, que tabs estão
-   * abertos noutros terminais vivos e qual foi o terminal usado mais recentemente.
+   * Each terminal has its own tabs, stored in `state` under the terminal's device (/dev/pts/N). The record also
+   * carries the pid and the time of the last interaction: that's how the various processes know, from the database
+   * alone, which tabs are open in other live terminals and which terminal was used most recently.
    */
-  /** O registo deste terminal na base: só serve para os terminais abertos ao mesmo tempo se coordenarem. */
+  /** This terminal's record in the database: it only serves to coordinate terminals open at the same time. */
   private tabsKey(): string {
     return `tabs:pid${process.pid}`
   }
@@ -737,12 +743,12 @@ export class Ui {
   private lastActive = Date.now()
   private lastActiveSaved = 0
   private lastPresenceTouch = 0
-  /** Conversa a que dissemos "a escrever", quando o dissemos, e o prazo para dizer que parámos. */
+  /** The chat we told "typing" to, when we told it, and the deadline to say we stopped. */
   private composingJid: string | null = null
   private composingSentAt = 0
   private composingTimer: NodeJS.Timeout | undefined
 
-  /** Começa sempre sem tabs (nada se repõe de execuções anteriores) e limpa os registos de terminais já mortos. */
+  /** Always starts with no tabs (nothing is restored from previous runs) and clears the records of terminals already dead. */
   private registerTerminal() {
     for (const r of store.listState<TerminalState>('tabs:')) if (!r.value.pid || !pidAlive(r.value.pid)) store.deleteState(r.key)
     this.saveTabs()
@@ -754,8 +760,8 @@ export class Ui {
   }
 
   /**
-   * A escrita mudou: a conversa activa fica a saber que estamos a escrever, repetido de 5 em 5 segundos enquanto
-   * continuarmos, e que parámos ao fim de 5 segundos parados, ao enviar, ao apagar tudo ou ao mudar de tab.
+   * The input changed: the active chat gets told we're typing, repeated every 5 seconds while we keep going, and
+   * that we stopped after 5 seconds idle, on sending, on clearing everything, or on switching tabs.
    */
   private noteComposing() {
     const jid = this.current
@@ -778,15 +784,15 @@ export class Ui {
     this.composingJid = null
   }
 
-  /** Marca este terminal como o usado mais recentemente; grava no máximo de dois em dois segundos. */
+  /** Marks this terminal as the most recently used; saves at most every two seconds. */
   private touchActivity() {
     this.lastActive = Date.now()
     if (this.lastActive - this.lastActiveSaved > 2000) this.saveTabs()
-    // Mantém o dispositivo "disponível" enquanto se usa o terminal; de 10 em 10 segundos chega.
+    // Keeps the device "available" while the terminal is in use; every 10 seconds is enough.
     if (this.lastActive - this.lastPresenceTouch > 10000) { this.lastPresenceTouch = this.lastActive; this.wa.touchPresence() }
   }
 
-  /** Registos dos outros terminais cujo processo ainda está vivo. */
+  /** Records of the other terminals whose process is still alive. */
   private otherTerminals(): TerminalState[] {
     const mine = this.tabsKey()
     return store.listState<TerminalState>('tabs:').filter(r => r.key !== mine && r.value.pid && pidAlive(r.value.pid)).map(r => r.value)
@@ -800,17 +806,17 @@ export class Ui {
     return this.otherTerminals().every(t => (t.lastActive ?? 0) <= this.lastActive)
   }
 
-  /** Abre (ou encontra) o tab da conversa; com `activate` passa a ser o activo e a conversa marca-se como lida. */
+  /** Opens (or finds) the chat's tab; with `activate` it becomes the active one and the chat is marked as read. */
   private openTab(jid: string, activate = true) {
     let i = this.tabs.indexOf(jid)
     if (i < 0) { this.tabs.push(jid); i = this.tabs.length - 1 }
-    uiLog.info({ jid, index: i, activate }, 'abrir tab')
+    uiLog.info({ jid, index: i, activate }, 'open tab')
     this.dirtyTabs = true
     if (activate) this.activateTab(i)
     else { this.saveTabs(); this.scheduleRender() }
   }
 
-  /** Activa o tab sem mexer na ordem da barra; é a escrita que o traz para a frente (promoteActive). */
+  /** Activates the tab without touching the bar's order; it's typing that brings it to the front (promoteActive). */
   private activateTab(i: number) {
     const jid = this.tabs[i]
     if (!jid) return
@@ -818,7 +824,7 @@ export class Ui {
       this.stopComposing()
       const prev = this.current
       this.active = i; this.atBottom = true; this.dirtyMessages = true; this.selected = this.replyTo = this.reactTo = null
-      // A correcção de uma mensagem não é rascunho: cai. O resto fica guardado na conversa de onde se sai.
+      // A message correction isn't a draft: it's dropped. Everything else stays saved in the chat being left.
       if (this.editing) { this.editing = null; this.inputValue = ''; this.cursor = 0 }
       this.switchDraft(prev, jid)
     }
@@ -832,7 +838,7 @@ export class Ui {
     this.wa.markRead(jid).catch(e => logger.warn({ e }, 'markRead'))
   }
 
-  /** Move o tab activo para a primeira posição, junto da escrita, quando se começa a escrever nele. */
+  /** Moves the active tab to the first position, next to the input, when typing starts in it. */
   private promoteActive() {
     if (this.active <= 0 || !this.tabs[this.active]) return
     const [jid] = this.tabs.splice(this.active, 1)
@@ -843,7 +849,7 @@ export class Ui {
     this.drawTabs()
   }
 
-  /** Guarda a escrita como rascunho da conversa de onde se sai e põe na linha o rascunho da conversa para onde se vai. */
+  /** Saves the input as a draft of the chat being left and puts the draft of the chat being entered on the line. */
   private switchDraft(from: string | null, to: string | null) {
     if (from) {
       if (this.inputValue) this.drafts.set(from, { value: this.inputValue, cursor: this.cursor })
@@ -855,23 +861,23 @@ export class Ui {
     this.updateSuggestions()
   }
 
-  /** Fecha o tab; se era o activo passa para o da direita, ou o da esquerda, ou para as "conversas". */
+  /** Closes the tab; if it was the active one, moves to the one on the right, or the one on the left, or to "chats". */
   private closeTab(i: number) {
     const closing = this.tabs[i]
     if (!closing) return
-    uiLog.info({ jid: closing, index: i }, 'fechar tab')
+    uiLog.info({ jid: closing, index: i }, 'close tab')
     const wasActive = this.active === i
     this.tabs.splice(i, 1)
     if (this.active > i) this.active--
     else if (wasActive) { this.active = Math.min(i, this.tabs.length - 1); this.atBottom = true }
-    // O rascunho vai com o tab; se era o activo, a escrita passa a ser a da conversa que fica.
+    // The draft goes with the tab; if it was the active one, the input becomes that of the remaining chat.
     this.drafts.delete(closing)
     if (wasActive) { this.editing = null; this.switchDraft(null, this.current) }
     this.dirtyTabs = true
     this.dirtyMessages = true
     this.lineMap = []; this.images = []; this.rows = []; this.selected = null
     this.saveTabs()
-    // Fechar o último tab é sair: não se volta ao escolhedor.
+    // Closing the last tab means quitting: there's no going back to the picker.
     if (!this.tabs.length) return this.quit()
     this.renderNow()
     const jid = this.current
@@ -881,18 +887,18 @@ export class Ui {
   private drawTabs() {
     const width = num(this.tabsBar.width)
     const maxName = width
-    // Em conversa única não há tab a mostrar: a linha fica só com o estado à direita.
+    // In single-chat mode there's no tab to show: the line is left with just the status on the right.
     const tabs = this.fixed ? [] : this.tabs.map((jid, i) => {
       const unread = store.getChat(jid)?.unread ?? 0
       return { jid, i, name: chatName(jid), badge: unread > 0 ? `(${unread})` : '' }
     })
-    // Encurtar os nomes para caberem todos, até um mínimo de 6 caracteres; para lá disso a barra corta à direita.
+    // Shorten the names so they all fit, down to a minimum of 6 characters; beyond that the bar truncates on the right.
     const close = this.fixed ? '' : ' ×'
     const overhead = (t: { badge: string }) => 1 + (t.badge ? strWidth(t.badge) + 1 : 0) + strWidth(close) + 1
     let nameW = Math.max(...tabs.map(t => strWidth(t.name)), 0)
     const fits = (w: number) => tabs.reduce((sum, t) => sum + Math.min(strWidth(t.name), w) + overhead(t), 0) <= maxName
     while (nameW > 6 && !fits(nameW)) nameW--
-    // O tab activo distingue-se só pelo texto: negrito e na cor mais forte do tema; os outros ficam na cor normal.
+    // The active tab stands out only through its text: bold and in the theme's strongest color; the others stay in the normal color.
     const strong = this.dark ? 'bright-white' : 'black'
     let out = '', x = 0
     this.segments = []
@@ -910,18 +916,18 @@ export class Ui {
         : `{${FG.tab}-fg} ${label}{/${FG.tab}-fg}${badge}${closeMark} `
       x += w
     }
-    // Estado encostado à direita: a mensagem passageira (amarela) ou a ligação; cortado se não couber.
-    // Ligado não se anuncia: só avisos passageiros e os estados que pedem atenção (QR, ligação caída).
+    // Status flush right: the transient message (yellow) or the connection; truncated if it doesn't fit.
+    // Connected isn't announced: only transient notices and states that need attention (QR, connection dropped).
     const avail = width - x - 2
     let text = this.transient ? dim(esc(truncate(this.transient, avail))) : this.connText
     if (this.fixed) {
-      // Sem tab por onde correr o arco-íris, "a escrever…" corre aqui enquanto a outra pessoa escreve.
+      // With no tab for the rainbow to run across, "typing…" runs here while the other person is typing.
       const jid = this.current
       const typing = !text && !!jid && this.typing.has(jid)
-      if (typing) text = this.rainbow('a escrever…', this.typing.get(jid)!)
+      if (typing) text = this.rainbow(t('typing'), this.typing.get(jid)!)
       if (!text) return this.toast.hide()
       const w = Math.min(width, visibleWidth(text) + 2)
-      // O estado encosta à direita, na última linha; "a escrever…" fica à esquerda, na linha acima da escrita.
+      // Status sticks to the right, on the last line; "typing…" stays on the left, on the line above the input.
       this.toast.left = typing ? 0 : width - w; this.toast.width = w
       this.toast.top = typing ? `100%-${this.bottom + 1}` : `100%-${this.bottom - 1}`
       this.toast.setContent(` ${text} `)
@@ -933,9 +939,10 @@ export class Ui {
   }
 
   /**
-   * Pousa o aviso sobre o tab da conversa (ou encostado à direita se o tab não estiver à vista), sem o nome dela e
-   * sem fundo: o texto emerge do fundo até um tom um pouco abaixo do texto normal, fica, e volta a fundir-se com o
-   * fundo. A cor de cada instante é a mistura fundo→texto pela opacidade do momento, quantizada às 256 cores.
+   * Lays the notice over the chat's tab (or flush right if the tab isn't in view), without its name and without a
+   * background: the text emerges from the background up to a tone a bit below normal text, stays, then merges back
+   * into the background. The color at each instant is the background→text blend at the moment's opacity, quantized
+   * to 256 colors.
    */
   private drawNotice(width: number) {
     const n = this.notice
@@ -951,7 +958,7 @@ export class Ui {
     this.toast.show()
   }
 
-  /** Opacidade do aviso (0..1) desde que começou: sobe, fica, desce; curva suave nas duas pontas. */
+  /** Notice opacity (0..1) since it started: rises, holds, falls; smooth curve at both ends. */
   private noticeOpacity(since: number): number {
     const t = Date.now() - since
     const ease = (x: number) => x * x * (3 - 2 * x)
@@ -961,7 +968,7 @@ export class Ui {
   }
 
   private notify(jid: string, text: string) {
-    // Um aviso por cima de outro já visível não volta a emergir: continua opaco com o texto novo.
+    // A notice on top of another already visible one doesn't fade in again: it stays opaque with the new text.
     const since = this.notice && this.noticeOpacity(this.notice.since) >= 1 ? Date.now() - NOTICE.fadeIn : Date.now()
     this.notice = { jid, text, since }
     if (!this.noticeTimer) {
@@ -975,7 +982,7 @@ export class Ui {
     this.screen.render()
   }
 
-  // ---------- escolhedor ----------
+  // ---------- picker ----------
 
   private openPicker(filter = '') {
     this.filter = filter
@@ -1007,17 +1014,17 @@ export class Ui {
 
   private pickChat(index: number) {
     const jid = this.filtered[index]?.jid
-    uiLog.info({ index, jid }, 'escolher conversa')
+    uiLog.info({ index, jid }, 'pick chat')
     if (!jid) return
-    // No Herdr cada conversa é um tab dele: a escolhida abre num tab novo, ou passa-se para o tab onde já está.
+    // In Herdr each chat is one of its tabs: the chosen one opens in a new tab, or switches to the tab where it already is.
     if (inHerdr && jid !== this.current) {
       this.closePicker()
       const other = this.otherTerminals().find(t => t.herdrTab && t.tabs.includes(jid))
       if (other?.herdrTab) focusTabHerdr(other.herdrTab)
-      else openChatHerdr(jid, chatName(jid)).catch(e => logger.warn({ e }, 'herdr: abrir tab'))
+      else openChatHerdr(jid, chatName(jid)).catch(e => logger.warn({ e }, 'herdr: open tab'))
       return
     }
-    // Em conversa única o escolhedor troca a conversa em vez de juntar um tab; o rascunho da anterior fica guardado.
+    // In single-chat mode the picker switches the chat instead of adding a tab; the previous one's draft stays saved.
     const prev = this.fixed ? this.current : null
     this.openTab(jid)
     if (prev && prev !== jid) {
@@ -1029,16 +1036,16 @@ export class Ui {
   }
 
   private refreshPicker() {
-    // Manter a selecção na mesma conversa: os eventos do WhatsApp redesenham a lista a toda a hora e repunham-na no topo.
+    // Keep the selection on the same chat: WhatsApp events redraw the list all the time and used to reset it to the top.
     const selectedJid = this.filtered[(this.picker as unknown as { selected: number }).selected]?.jid
     const sameFilter = this.pickerFilterShown === this.filter
     this.pickerFilterShown = this.filter
-    // Mais recentes em baixo, como as mensagens; a selecção por omissão é a última (a mais recente).
+    // Most recent at the bottom, like the messages; the default selection is the last one (the most recent).
     this.chats = store.listChats().filter(c => !c.archived).reverse()
     const f = fold(this.filter)
     this.filtered = f ? this.chats.filter(c => fold(chatName(c.jid)).includes(f) || jidUser(c.jid).includes(f)) : this.chats
     const width = num(this.picker.width) - num(this.picker.iwidth) - 1
-    // Nome da pessoa ou grupo à esquerda e um pedaço da última mensagem à direita, como numa lista de conversas.
+    // Person or group name on the left and a snippet of the last message on the right, like in a chat list.
     const nameW = Math.min(28, Math.max(12, Math.floor(width * 0.35)))
     const items = this.filtered.map(c => {
       const badge = c.unread > 0 ? ` (${c.unread})` : ''
@@ -1048,15 +1055,15 @@ export class Ui {
       const last = store.lastMessage(c.jid)
       let preview = ''
       if (last) {
-        const who = last.from_me ? 'eu: ' : c.is_group ? `${contactName(last.sender_jid).split(' ')[0]}: ` : ''
-        const kind: Record<string, string> = { image: 'imagem', video: 'vídeo', gif: 'gif', sticker: 'sticker', document: 'ficheiro', audio: 'áudio', voice: 'voz', location: 'localização', contact: 'contacto', poll: 'sondagem' }
-        const body = last.type === 'text' ? last.text.replace(/\s+/g, ' ') : last.type === 'deleted' ? 'mensagem apagada' : `[${kind[last.type] ?? last.type}]${last.text ? ' ' + last.text.replace(/\s+/g, ' ') : ''}`
+        const who = last.from_me ? `${t('me')}: ` : c.is_group ? `${contactName(last.sender_jid).split(' ')[0]}: ` : ''
+        const kind: Record<string, string> = { image: t('image'), video: t('video'), gif: t('gif'), sticker: t('sticker'), document: t('file'), audio: t('audio'), voice: t('voice'), location: t('location'), contact: t('contact'), poll: t('poll') }
+        const body = last.type === 'text' ? last.text.replace(/\s+/g, ' ') : last.type === 'deleted' ? t('deleted') : `[${kind[last.type] ?? last.type}]${last.text ? ' ' + last.text.replace(/\s+/g, ' ') : ''}`
         preview = truncate(`${fmtTime(last.ts)} ${who}${body}`, width - nameW - 2)
       }
       return `${left}${' '.repeat(Math.max(1, nameW - visibleWidth(left)))}${dim(esc(preview))}`
     })
     this.picker.setItems(items as unknown as string[])
-    // Lista encostada ao fundo quando é mais curta que o painel, com uma linha em branco a separá-la do prompt.
+    // List flush to the bottom when it's shorter than the panel, with a blank line separating it from the prompt.
     const panel = num(this.screen.height) - this.bottom - 1
     const top = Math.max(0, panel - this.filtered.length)
     this.picker.top = top
@@ -1066,10 +1073,10 @@ export class Ui {
     this.drawInput()
   }
 
-  // ---------- estado ----------
+  // ---------- state ----------
 
   private setFocus(f: Focus) {
-    uiLog.info({ de: this.focus, para: f }, 'foco')
+    uiLog.info({ from: this.focus, to: f }, 'focus')
     this.focus = f
     if (f !== 'messages' && this.selected) { this.selected = null; this.dirtyMessages = true }
     if (f !== 'input' && this.suggestions.length) { this.suggestions = []; this.drawSuggestions() }
@@ -1095,8 +1102,8 @@ export class Ui {
   private renderNow() {
     if (this.dirtyTabs) { this.dirtyTabs = false; this.drawTabs(); this.updateTitle() }
     if (this.dirtyMessages && !this.showingQr) { this.dirtyMessages = false; if (this.current) this.renderMessages() }
-    // Sem tabs (arranque sem nada guardado, ou as conversas a chegar pela primeira vez) abre-se a conversa mais
-    // recente; o escolhedor só aparece com "/".
+    // With no tabs (startup with nothing saved, or chats arriving for the first time) the most recent chat opens;
+    // the picker only appears with "/".
     if (!this.current && !this.pickerOpen && !this.showingQr) {
       const recent = store.listChats().find(c => !c.archived)
       if (recent) return this.openTab(recent.jid)
@@ -1104,15 +1111,15 @@ export class Ui {
     this.screen.render()
   }
 
-  // Título da janela: a conversa activa, com uma bola à frente enquanto houver mensagens por ler em qualquer conversa.
+  // Window title: the active chat, with a dot in front while there are unread messages in any chat.
   private titleShown = ''
   private updateTitle() {
     const unread = store.listChats().filter(c => c.unread > 0 && (this.fixed ? c.jid === this.current : !c.archived))
     const title = `${unread.length ? '● ' : ''}${this.current ? chatName(this.current) : 'wa'}`
     if (title !== this.titleShown) { this.titleShown = title; this.screen.title = title; titleHerdr(title) }
-    // No Herdr o mesmo sinal vai para o estado do agente: alguém a escrever é trabalho em curso, por ler pede atenção.
+    // In Herdr the same signal goes to the agent's status: someone typing is work in progress, unread asks for attention.
     const typing = [...this.typing].filter(([jid, stopped]) => stopped == null && (!this.fixed || jid === this.current)).map(([jid]) => chatName(jid))
-    if (typing.length) reportHerdr('working', `${typing.join(', ')} a escrever`)
+    if (typing.length) reportHerdr('working', t('typingWho', typing.join(', ')))
     else if (unread.length) reportHerdr('blocked', unread.map(c => `${chatName(c.jid)} (${c.unread})`).join(', '))
     else reportHerdr('idle')
   }
@@ -1139,7 +1146,7 @@ export class Ui {
     this.atBottom = this.msgBox.childBase + this.innerHeight() >= total
   }
 
-  // ---------- desenho ----------
+  // ---------- drawing ----------
 
   private drawStatus() {
     this.dirtyTabs = true
@@ -1147,9 +1154,9 @@ export class Ui {
     this.dirtyTabs = false
   }
 
-  // ---------- sugestões de emoji ----------
+  // ---------- emoji suggestions ----------
 
-  /** Um `:prefixo` com duas ou mais letras logo antes do cursor abre a lista dos emojis cujo nome começa assim. */
+  /** A `:prefix` with two or more letters right before the cursor opens the list of emojis whose name starts that way. */
   private updateSuggestions(ghostDelay = 150) {
     const chars = graphemes(this.inputValue)
     const at = Math.min(this.cursor, chars.length)
@@ -1163,23 +1170,23 @@ export class Ui {
     this.scheduleGhost(ghostDelay)
   }
 
-  // ---------- sugestões do modelo local ----------
+  // ---------- local model suggestions ----------
 
   private cursorAtEnd(): boolean {
     return this.cursor >= graphemes(this.inputValue).length
   }
 
-  /** A sugestão guardada ainda vale para o que está escrito e o cursor está no fim: é a que se mostra e se aceita. */
+  /** The stored suggestion still applies to what's typed and the cursor is at the end: it's the one shown and accepted. */
   private ghostShown(): Suggestion | null {
     const g = this.ghost
     return g && g.text === this.inputValue && !this.pickerOpen && this.cursorAtEnd() ? g.s : null
   }
 
   /**
-   * Pede ao modelo uma sugestão para o texto actual, `delay` ms depois da última tecla (150 a escrever; 0 logo depois
-   * de aceitar uma, que é quando se está parado à espera da seguinte) e só com o cursor no fim, sem reacção em curso
-   * nem sugestões de emoji abertas. Um pedido novo cancela o anterior; a resposta só se usa se o texto ainda for o
-   * mesmo quando chega, e fica 4 s à vista.
+   * Asks the model for a suggestion for the current text, `delay` ms after the last keystroke (150 while typing; 0
+   * right after accepting one, which is when it's idle waiting for the next one), and only with the cursor at the
+   * end, with no reaction in progress nor emoji suggestions open. A new request cancels the previous one; the
+   * response is only used if the text is still the same when it arrives, and it stays in view for 4 s.
    */
   private scheduleGhost(delay = 150) {
     if (this.ghost && this.ghost.text !== this.inputValue) this.clearGhost()
@@ -1215,7 +1222,7 @@ export class Ui {
     if (this.ghostHide) { clearTimeout(this.ghostHide); this.ghostHide = undefined }
   }
 
-  /** O que se mostra: a palavra a meio (as letras que faltam, ou a palavra certa) tem prioridade sobre a correcção atrás. */
+  /** What's shown: the word mid-typing (the missing letters, or the correct word) takes priority over a correction behind it. */
   private ghostView(s: Suggestion): { kind: 'suffix' | 'word' | 'fix'; text: string } | null {
     if (s.word) {
       const { from, to } = s.word
@@ -1249,7 +1256,7 @@ export class Ui {
     const lines = this.suggestions.map((o, i) => i === this.suggestIndex
       ? `{bold}› ${esc(o.emoji)}  :${esc(o.name)}:{/bold}`
       : `  ${esc(o.emoji)}  :${esc(o.name)}:`)
-    // Uma coluna a mais além do padding: o blessed parte a linha se a etiqueta de fecho cair na última coluna.
+    // One extra column beyond the padding: blessed wraps the line if a closing tag lands on the last column.
     this.suggest.width = Math.max(...lines.map(visibleWidth)) + 3
     this.suggest.height = lines.length
     this.suggest.top = `100%-${this.bottom + lines.length}`
@@ -1257,7 +1264,7 @@ export class Ui {
     this.suggest.show()
   }
 
-  /** O `:prefixo` dá lugar ao emoji escolhido, seguido de um espaço. */
+  /** The `:prefix` gives way to the chosen emoji, followed by a space. */
   private acceptSuggestion() {
     const o = this.suggestions[this.suggestIndex]!
     const chars = graphemes(this.inputValue)
@@ -1272,20 +1279,20 @@ export class Ui {
   }
 
   private drawInput() {
-    // Duas linhas no mínimo (cresce com o texto), prompt ">" na primeira, texto partido por palavras (nunca a meio de uma) e continuação indentada.
-    // Com mais de duas linhas mostram-se as duas à volta do cursor, que fica na de baixo sempre que possível. Com as
-    // "conversas" abertas, a mesma linha serve para escrever o filtro. A responder ou a reagir, a primeira
-    // linha diz a que mensagem, e sobra uma para o texto.
+    // Two lines at minimum (grows with the text), ">" prompt on the first, text wrapped by word (never mid-word) and indented continuation.
+    // With more than two lines, the two around the cursor are shown, with the cursor on the bottom one whenever possible. With
+    // "chats" open, the same line is used to type the filter. When replying or reacting, the first
+    // line says which message, leaving one for the text.
     const w = num(this.input.width) - num(this.input.iwidth) - 1
     const target = this.pickerOpen ? null : this.replyTo ?? this.reactTo ?? this.editing
     const header = !target ? null : this.editing
-      ? `✎ editar: ${this.snippet(target)} · Enter envia, Esc desiste`
+      ? t('editHeader', this.snippet(target))
       : this.replyTo
         ? `↩ ${target.chat_jid.endsWith('@g.us') && !target.from_me ? `${this.who(target)}: ` : ''}${this.snippet(target)}`
-        : `reagir a ${this.who(target)}: ${this.snippet(target)} · :código: ou emoji e Enter; Enter vazio retira`
-    // Sugestão do modelo, discreta, em itálico cinzento na sequência do texto: as letras que faltam à palavra a meio,
-    // coladas ao cursor (que pousa sobre a primeira), ou, duas células à frente, a palavra certa a seguir a "⇢", seja a palavra a meio
-    // corrigida ou uma palavra errada mais atrás. Tab aceita.
+        : t('reactHeader', this.who(target), this.snippet(target))
+    // Model suggestion, discreet, in gray italic right after the text: the letters missing from the word mid-typing,
+    // attached to the cursor (which sits on the first one), or, two cells ahead, the correct word after "⇢", whether
+    // it's the mid-typed word corrected or a wrong word further back. Tab accepts.
     const ghost = this.ghostShown()
     const view = ghost ? this.ghostView(ghost) : null
     this.inputHeader = header != null
@@ -1293,16 +1300,16 @@ export class Ui {
     const chars = graphemes(this.pickerOpen ? this.filter : this.inputValue)
     const cursor = Math.min(this.pickerOpen ? this.filterCursor : this.cursor, chars.length)
     const lines = wrapChars(chars, width)
-    // Linha e coluna do cursor: no fim do texto fica depois do último grafema, e passa a uma linha nova se não cabe.
+    // Cursor's line and column: at the end of the text it sits after the last grapheme, and moves to a new line if it doesn't fit.
     let row = 0, start = 0
     while (row < lines.length - 1 && cursor >= start + lines[row]!.length) start += lines[row++]!.length
     let col = cursor - start
     if (col >= lines[row]!.length && wrapWidth(esc(lines[row]!.join(''))) >= width) { lines.push([]); row++; col = 0 }
-    // O "\n" ou o espaço que fecham uma linha ficam nela, para o cursor contar, mas não se desenham: um espaço a mais
-    // que a largura faria o blessed partir a linha. Um espaço final que cabe desenha-se, para o cursor avançar com ele.
+    // The "\n" or the space that closes a line stay in it, so the cursor counts them, but aren't drawn: one space
+    // past the width would make blessed wrap the line. A trailing space that fits is drawn, so the cursor advances with it.
     const text = (l: string[]) => { const t = l.filter(c => c !== '\n').join(''); return strWidth(t) > width ? t.replace(/\s+$/, '') : t }
-    // A sugestão vai na linha do cursor se lá couber inteira: as letras que faltam coladas ao cursor, ou "⇢ palavra"
-    // duas células à frente. Senão vai numa linha só dela, por baixo, em vez de cortada.
+    // The suggestion goes on the cursor's line if it fits there whole: the missing letters attached to the cursor, or
+    // "⇢ word" two cells ahead. Otherwise it goes on its own line, below, instead of being cut off.
     const cursorLine = lines[row]!
     const avail = width - visibleWidth(esc(text(cursorLine))) - 1
     let ghostNext = '', ghostTail = '', ghostBelow = ''
@@ -1314,8 +1321,8 @@ export class Ui {
         else ghostBelow = truncate(word, width)
       }
     }
-    // A escrita cresce com o texto, até metade do ecrã; o cabeçalho (responder, reagir, editar) e a sugestão em linha
-    // própria ocupam cada um uma das linhas.
+    // The input grows with the text, up to half the screen; the header (reply, react, edit) and the suggestion on
+    // its own line each take up one of the lines.
     const extra = (header ? 1 : 0) + (ghostBelow ? 1 : 0)
     const rows = Math.max(2, Math.min(lines.length + extra, Math.floor(num(this.screen.height) / 2)))
     if (rows !== this.inputRows) this.resizeInput(rows)
@@ -1327,7 +1334,7 @@ export class Ui {
       if (!showCursor || r !== row) return esc(text(line))
       const before = esc(text(line.slice(0, col)))
       if (ghostNext) {
-        // O cursor fica sobre a primeira letra da sugestão, sem célula vazia pelo meio; o resto segue em itálico.
+        // The cursor sits on the suggestion's first letter, with no empty cell in between; the rest follows in italic.
         const g = graphemes(ghostNext)
         return before + dim(italic('{inverse}' + esc(g[0]!) + '{/inverse}' + esc(g.slice(1).join(''))))
       }
@@ -1335,7 +1342,7 @@ export class Ui {
       return before + '{inverse}' + esc(under) + '{/inverse}' + esc(text(line.slice(col + 1))) + (ghostTail ? dim(italic(esc(ghostTail))) : '')
     }
     const visible = lines.slice(this.inputTop, this.inputTop + rowsAvail)
-    // O prompt diz o que a linha faz: ">" escreve, "/" filtra as conversas.
+    // The prompt says what the line does: ">" types, "/" filters the chats.
     const prompt = this.pickerOpen ? '/ ' : '> '
     const out = visible.map((l, i) => (this.inputTop + i === 0 ? prompt : '  ') + render(l, this.inputTop + i))
     if (ghostBelow) out.push('  ' + dim(italic(esc(ghostBelow))))
@@ -1344,10 +1351,10 @@ export class Ui {
   }
 
   /**
-   * Lança a forma animada a partir do emoji da mensagem que `pick` identificar. A posição procura-se ao desenhar, quando
-   * a mensagem (ou a linha das reacções dela) já está no painel: a última linha dela em `lineMap`, passada a linha real
-   * pelo mapa do blessed e ao ecrã pelo scroll; a coluna é a do emoji nessa linha, sem os códigos de cor. Sem emoji na
-   * linha ainda não está desenhado: devolve-se nada e a animação volta a perguntar.
+   * Launches the animated shape from the emoji of the message `pick` identifies. The position is looked up at draw
+   * time, once the message (or its reactions line) is already in the panel: its last line in `lineMap`, converted
+   * to the real line by blessed's map and to the screen by the scroll; the column is the emoji's in that line,
+   * without the color codes. No emoji on the line yet drawn: nothing is returned and the animation asks again.
    */
   private heartFor(pick: (r: MessageRow) => boolean, text: string) {
     const what = reaction(text)
@@ -1367,7 +1374,7 @@ export class Ui {
     })
   }
 
-  /** Muda a altura da escrita e desloca o que depende dela: mensagens, barra flutuante, sugestões e escolhedor. */
+  /** Changes the input's height and shifts whatever depends on it: messages, floating bar, suggestions, and picker. */
   private resizeInput(rows: number) {
     this.inputRows = rows
     this.input.height = rows
@@ -1396,8 +1403,8 @@ export class Ui {
     const map: (MessageRow | null)[] = []
     const images: ImageSlot[] = []
     const selectedId = this.selected?.id
-    // A seleccionada leva o fundo a toda a largura, seja de quem for: as linhas chegam aqui já partidas à largura do
-    // painel, e completam-se com espaços até ao bordo.
+    // The selected message gets the background at full width, whoever it's from: the lines arrive here already
+    // wrapped to the panel's width, and get padded with spaces up to the edge.
     const push = (line: string, row: MessageRow | null) => {
       if (row && row.id === selectedId) line = `{${this.selectedBg}-bg}${line}${' '.repeat(Math.max(0, width - 1 - visibleWidth(line)))}{/${this.selectedBg}-bg}`
       lines.push(line)
@@ -1417,37 +1424,37 @@ export class Ui {
         const label = `── ${fmtDay(row.ts)} ──`
         push(dim(`${' '.repeat(Math.max(0, Math.floor((width - strWidth(label)) / 2)))}${label}`), null)
       }
-      // As minhas mensagens ficam encostadas à direita: parto eu as linhas (o blessed só parte pela esquerda) e
-      // encosto cada uma ao bordo; as dos outros ficam à esquerda, partidas da mesma forma.
+      // My own messages stay flush right: I wrap the lines myself (blessed only wraps from the left) and push each
+      // one to the edge; other people's stay on the left, wrapped the same way.
       const mine = row.from_me === 1
-      // Uma coluna de margem à direita: o blessed parte a linha se uma etiqueta de fecho cair na última coluna.
+      // One column of margin on the right: blessed wraps the line if a closing tag lands on the last column.
       const out = (line: string, r: MessageRow | null) => {
         for (const l of wrapTagged(line, width - 1)) push(mine ? alignRight(l, width - 1) : l, r)
       }
-      const name = mine ? 'eu' : isGroup ? contactName(row.sender_jid) : chatName(jid)
+      const name = mine ? t('me') : isGroup ? contactName(row.sender_jid) : chatName(jid)
       const color = mine ? 'green' : colorFor(row.sender_jid)
       const ticks = !mine ? '' : (row.status ?? 0) >= 4 ? '{cyan-fg}✓✓{/cyan-fg}' : (row.status ?? 0) >= 3 ? '✓✓' : (row.status ?? 0) >= 2 ? '✓' : dim('○')
-      // Nas minhas a hora vem antes do "eu"; nomes sem negrito, só a cor.
+      // In mine the time comes before "me"; names without bold, just the color.
       out(mine
         ? `${dim(fmtTime(row.ts))} {${color}-fg}${esc(name)}{/${color}-fg} ${ticks}`
         : `{${color}-fg}${esc(name)}{/${color}-fg} ${dim(fmtTime(row.ts))}`, row)
       if (row.quoted) {
         const [who, text] = row.quoted.split('\t')
-        // Só em grupos interessa de quem era; a dois a outra pessoa é óbvia, e as minhas também não levam nome.
+        // Who it was from only matters in groups; one-on-one the other person is obvious, and mine don't carry a name either.
         const author = who === this.wa.me || !row.chat_jid.endsWith('@g.us') ? '' : `${esc(contactName(who ?? ''))}: `
         out(dim(`│ ${author}${esc(truncate(text ?? '', width - 6))}`), row)
       }
 
       const type = row.type
-      const mediaHint = row.media_path ? dim('(clique para abrir)') : row.media_err ? dim('(indisponível)') : dim('(clique para descarregar)')
-      if (type === 'deleted') out(dim('⊘ mensagem apagada'), row)
+      const mediaHint = row.media_path ? dim(t('clickToOpen')) : row.media_err ? dim(t('unavailable')) : dim(t('clickToDownload'))
+      if (type === 'deleted') out(dim(`⊘ ${t('deleted')}`), row)
       else if (type === 'image' || type === 'sticker' || type === 'gif' || type === 'video') {
         this.pushImage(row, push, images, lines, width, mine)
-        if (type === 'video' || type === 'gif') out(`{magenta-fg}▶ ${type === 'gif' ? 'gif' : 'vídeo'}{/magenta-fg} ${mediaHint}`, row)
+        if (type === 'video' || type === 'gif') out(`{magenta-fg}▶ ${type === 'gif' ? t('gif') : t('video')}{/magenta-fg} ${mediaHint}`, row)
       } else if (type === 'document') {
-        out(`{yellow-fg}📎 ${esc(row.media_name ?? 'ficheiro')}{/yellow-fg} ${mediaHint}`, row)
+        out(`{yellow-fg}📎 ${esc(row.media_name ?? t('file'))}{/yellow-fg} ${mediaHint}`, row)
       } else if (type === 'audio' || type === 'voice') {
-        out(`{yellow-fg}${type === 'voice' ? '🎤' : '🎵'} ${type === 'voice' ? 'mensagem de voz' : 'áudio'} ${esc(row.text)}{/yellow-fg} ${row.media_path ? dim('(clique para ouvir)') : mediaHint}`, row)
+        out(`{yellow-fg}${type === 'voice' ? '🎤' : '🎵'} ${type === 'voice' ? t('voiceMessage') : t('audio')} ${esc(row.text)}{/yellow-fg} ${row.media_path ? dim(t('clickToListen')) : mediaHint}`, row)
       } else if (type === 'location') out(`{yellow-fg}📍 ${waMarkup(row.text)}{/yellow-fg}`, row)
       else if (type === 'contact') out(`{yellow-fg}👤 ${esc(row.text)}{/yellow-fg}`, row)
       else if (type === 'poll') for (const l of row.text.split('\n')) out(`{yellow-fg}${esc(l)}{/yellow-fg}`, row)
@@ -1456,12 +1463,12 @@ export class Ui {
       if (row.text && (type === 'text' || type === 'image' || type === 'video' || type === 'gif' || type === 'document')) {
         for (const l of waMarkup(row.text).split('\n')) out(l, row)
       }
-      // Reacções por baixo: cada emoji com quem reagiu, ou só a contagem quando foram vários.
+      // Reactions underneath: each emoji with who reacted, or just the count when there were several.
       const rs = reactions.get(row.id)
       if (rs?.length) {
         const byEmoji = new Map<string, string[]>()
-        // Só o primeiro nome, para a linha ficar curta.
-        for (const r of rs) byEmoji.set(r.emoji, [...(byEmoji.get(r.emoji) ?? []), r.sender_jid === this.wa.me ? 'eu' : contactName(r.sender_jid).split(' ')[0]!])
+        // Only the first name, to keep the line short.
+        for (const r of rs) byEmoji.set(r.emoji, [...(byEmoji.get(r.emoji) ?? []), r.sender_jid === this.wa.me ? t('me') : contactName(r.sender_jid).split(' ')[0]!])
         const parts = [...byEmoji].map(([emoji, who]) => `${emoji} ${who.length > 1 ? who.length : who[0]}`)
         out(dim(esc(parts.join('  '))), row)
       }
@@ -1475,19 +1482,19 @@ export class Ui {
   }
 
   /**
-   * Reserva o espaço da imagem e desenha-a se já estiver descodificada. A descarga e a descodificação só acontecem
-   * quando a imagem fica visível no painel (loadVisibleImages), nunca para as 300 mensagens de uma vez.
+   * Reserves the image's space and draws it if already decoded. The download and decoding only happen once the
+   * image becomes visible in the panel (loadVisibleImages), never for all 300 messages at once.
    */
   private pushImage(row: MessageRow, push: (l: string, r: MessageRow | null) => void, images: ImageSlot[], lines: string[], width: number, mine = false) {
     if (this.mode === 'none') { push(dim(`[${row.type}]`), row); return }
-    if (row.media_err && !this.imagePathFor(row)) { push(dim(`[${row.type} indisponível]`), row); return }
+    if (row.media_err && !this.imagePathFor(row)) { push(dim(t('mediaUnavailable', row.type)), row); return }
     const path = this.imagePathFor(row)
     const d = path ? cached(path) : undefined
-    if (d instanceof Error) { push(dim(`[${row.type} ilegível: ${esc(d.message)}]`), row); return }
-    // Tamanho: dos pixels se já os temos, senão das dimensões que a mensagem traz, senão um rectângulo por omissão.
+    if (d instanceof Error) { push(dim(t('mediaUnreadable', row.type, esc(d.message))), row); return }
+    // Size: from the pixels if we already have them, otherwise from the dimensions the message carries, otherwise a default rectangle.
     const w = d?.w ?? row.media_w ?? 4, h = d?.h ?? row.media_h ?? 3
-    // Em blocos a imagem ocupa a largura toda do painel, para se ver melhor com tão pouca resolução; em Kitty, com
-    // pixels a sério, chega o tamanho natural até 60 colunas. A altura nunca passa o painel.
+    // In block mode the image takes up the panel's full width, so it looks better with so little resolution; in
+    // Kitty, with real pixels, its natural size up to 60 columns is enough. The height never exceeds the panel.
     const maxRows = row.type === 'sticker' ? 8 : Math.max(4, this.innerHeight() - 2)
     const { cols, rows } = this.kitty
       ? cellSize(w, h, Math.min(width - 1, 60), Math.min(maxRows, 18))
@@ -1495,7 +1502,7 @@ export class Ui {
     const pad = mine ? Math.max(0, width - 1 - cols) : 0
     if (!d) {
       images.push({ row, origLine: lines.length, cols, rows, pad })
-      push(`${' '.repeat(pad)}${dim(`[${row.type}${path ? ' a carregar…' : row.media_path ? '' : ' a descarregar…'}]`)}`, row)
+      push(`${' '.repeat(pad)}${dim(`[${row.type}${path ? ` ${t('loading')}` : row.media_path ? '' : ` ${t('downloading')}`}]`)}`, row)
       for (let i = 1; i < rows; i++) push('', row)
       return
     }
@@ -1507,13 +1514,13 @@ export class Ui {
     }
   }
 
-  /** Linhas desenhadas [início, fim) de uma imagem, e a janela visível do painel. */
+  /** Drawn lines [start, end) of an image, and the panel's visible window. */
   private imageSpan(img: ImageSlot): { top: number; bottom: number } | null {
     const top = this.msgBox._clines?.ftor?.[img.origLine]?.[0]
     return top == null ? null : { top, bottom: top + img.rows }
   }
 
-  /** Depois de cada frame: descarrega e descodifica só as imagens que estão à vista. */
+  /** After each frame: downloads and decodes only the images that are in view. */
   private loadVisibleImages() {
     if (!this.current || this.pickerOpen) return
     const base = this.msgBox.childBase, innerH = this.innerHeight()
@@ -1524,15 +1531,15 @@ export class Ui {
       const row = store.getMessage(img.row.chat_jid, img.row.id) ?? img.row
       const path = this.imagePathFor(row)
       if (path && !cached(path)) {
-        uiLog.info({ id: row.id, path }, 'descodificar imagem visível')
+        uiLog.info({ id: row.id, path }, 'decode visible image')
         decode(path).then(() => { if (this.current === row.chat_jid) { this.dirtyMessages = true; this.scheduleRender() } })
       }
-      // Miniatura à mão enquanto o ficheiro completo não chega; vídeos e gifs ficam só pela miniatura.
+      // Thumbnail by hand while the full file hasn't arrived; videos and gifs stay with just the thumbnail.
       if (!row.media_path && !row.media_err && row.type !== 'video' && row.type !== 'gif') this.wa.ensureMedia(row)
     }
   }
 
-  /** Depois de cada frame do blessed: volta a colocar as imagens Kitty visíveis no painel de mensagens. */
+  /** After each blessed frame: re-places the visible Kitty images in the messages panel. */
   private placeImages() {
     if (!this.kitty) return
     this.kitty.clear()
@@ -1556,12 +1563,12 @@ export class Ui {
 
   private openMedia(row: MessageRow) {
     if (!row.media_path) {
-      if (row.media_err) return this.flash('anexo indisponível (expirou no WhatsApp)')
+      if (row.media_err) return this.flash(t('attachmentExpired'))
       this.wa.ensureMedia(row)
-      return this.flash('a descarregar…')
+      return this.flash(t('downloading'))
     }
     const child = spawn('xdg-open', [row.media_path], { detached: true, stdio: 'ignore' })
-    child.on('error', e => this.flash(`não consegui abrir (xdg-open): ${e.message}`))
+    child.on('error', e => this.flash(t('cannotOpen', e.message)))
     child.unref()
   }
 }

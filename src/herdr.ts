@@ -3,22 +3,22 @@ import { fileURLToPath } from 'node:url'
 import { logger } from './log.js'
 
 /**
- * Dentro do Herdr (o multiplexador de terminais para agentes) o wa apresenta-se como um agente chamado "wa" no pane em
- * que corre, para a barra lateral mostrar o estado: a escrever alguém → working, mensagens por ler → blocked (pede
- * atenção), nada → idle. O título do tab (ou do pane, se o tab estiver dividido) acompanha o título da janela, com o
- * nome da conversa activa. A ligação é a mesma dos hooks oficiais: uma linha JSON pelo socket Unix.
+ * Inside Herdr (the terminal multiplexer for agents) wa presents itself as an agent called "wa" in the pane it
+ * runs in, so the sidebar shows its state: someone typing → working, unread messages → blocked (asks for
+ * attention), nothing → idle. The tab's title (or the pane's, if the tab is split) follows the window title, with
+ * the name of the active conversation. The connection is the same as the official hooks: one JSON line over the Unix socket.
  */
 export type HerdrState = 'idle' | 'working' | 'blocked' | 'unknown'
 
 const env = process.env
 export const inHerdr = env.HERDR_ENV === '1' && !!env.HERDR_SOCKET_PATH && !!env.HERDR_PANE_ID && !!env.HERDR_TAB_ID
 
-// O Herdr ordena os pedidos da mesma origem por seq; dois no mesmo milissegundo não podem empatar.
+// Herdr orders requests from the same origin by seq; two in the same millisecond can't tie.
 let seq = Date.now()
 let lastState = ''
 let lastTitle = ''
 
-/** Um pedido; devolve o `result` da resposta, ou undefined se falhar ou não responder em meio segundo. */
+/** A request; returns the response's `result`, or undefined if it fails or doesn't respond within half a second. */
 function call(method: string, params: Record<string, unknown>): Promise<unknown> {
   const request = { id: `wa:${Date.now()}:${Math.floor(Math.random() * 1e6)}`, method, params }
   logger.info({ method, params }, 'herdr')
@@ -31,7 +31,7 @@ function call(method: string, params: Record<string, unknown>): Promise<unknown>
     sock.on('data', d => {
       buf += d.toString()
       if (!buf.includes('\n')) return
-      try { result = (JSON.parse(buf.slice(0, buf.indexOf('\n'))) as { result?: unknown }).result } catch { /* resposta estranha: fica undefined */ }
+      try { result = (JSON.parse(buf.slice(0, buf.indexOf('\n'))) as { result?: unknown }).result } catch { /* odd response: stays undefined */ }
       sock.end()
     })
     sock.on('close', () => resolve(result))
@@ -39,7 +39,7 @@ function call(method: string, params: Record<string, unknown>): Promise<unknown>
   })
 }
 
-/** Pedidos sobre o pane do agente levam sempre a origem e a sequência. */
+/** Requests about the agent's pane always carry the origin and the sequence. */
 function pane(method: string, params: Record<string, unknown>) {
   return call(method, { pane_id: env.HERDR_PANE_ID, source: 'wa', agent: 'wa', seq: ++seq, ...params })
 }
@@ -53,8 +53,8 @@ export function reportHerdr(state: HerdrState, message?: string) {
 }
 
 /**
- * O título do tab segue o da janela ("● Fulano") se o wa for o único pane do tab; num tab dividido é o pane que o leva.
- * Guarda-se o nome que lá estava para o repor à saída. Os pedidos seguem em fila para não se ultrapassarem.
+ * The tab's title follows the window's ("● Fulano") if wa is the tab's only pane; in a split tab it's the pane that
+ * carries it. The name that was there is saved to restore it on exit. Requests queue up so they don't overtake each other.
  */
 type Target = { kind: 'tab' | 'pane'; original: string | null }
 let target: Promise<Target | undefined> | undefined
@@ -81,28 +81,28 @@ export function titleHerdr(title: string) {
   titleQueue = titleQueue.then(async () => { const t = await target; if (t) await rename(t, title) })
 }
 
-/** O lançador `wa` na raiz do projecto, para abrir outra conversa noutro tab do Herdr. */
+/** The `wa` launcher at the project root, to open another conversation in another Herdr tab. */
 const waBin = fileURLToPath(new URL('../wa', import.meta.url))
 
 /**
- * Abre a conversa num tab novo do Herdr (com foco quando foi escolhida, sem ele quando é uma mensagem a chegar): a
- * shell do tab recebe `exec wa <jid>`, por isso quando a conversa se fecha o tab fecha com ela.
+ * Opens the conversation in a new Herdr tab (focused when it was chosen, unfocused when it's an incoming message):
+ * the tab's shell receives `exec wa <jid>`, so when the conversation closes the tab closes with it.
  */
 export async function openChatHerdr(jid: string, name: string, focus = true) {
   if (!inHerdr) return
   const created = await call('tab.create', { workspace_id: env.HERDR_WORKSPACE_ID ?? null, cwd: process.cwd(), focus, label: name }) as { root_pane?: { pane_id?: string } } | undefined
   const paneId = created?.root_pane?.pane_id
-  if (!paneId) return logger.warn({ jid }, 'herdr: tab.create sem pane')
+  if (!paneId) return logger.warn({ jid }, 'herdr: tab.create without pane')
   await call('pane.send_input', { pane_id: paneId, text: `exec '${waBin}' '${jid}'`, keys: ['enter'] })
 }
 
-/** Passa para o tab do Herdr onde a conversa já está aberta. */
+/** Switches to the Herdr tab where the conversation is already open. */
 export function focusTabHerdr(tabId: string) {
   if (!inHerdr) return
   void call('tab.focus', { tab_id: tabId })
 }
 
-/** Ao sair tira-se da lista e repõe-se o título; devolve quando os pedidos saíram, para o processo não terminar antes. */
+/** On exit, removes itself from the list and restores the title; resolves once the requests are sent, so the process doesn't end before that. */
 export async function releaseHerdr(): Promise<void> {
   if (!inHerdr) return
   const restore = titleQueue.then(async () => { const t = await target; if (t && lastTitle) await rename(t, null) })

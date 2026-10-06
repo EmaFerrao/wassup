@@ -3,8 +3,8 @@ import type { MessageRow } from './db.js'
 import type { ConnState, WaEvents } from './wa.js'
 
 /**
- * O que a interface precisa de quem fala com o WhatsApp. O `Wa` (ligação própria, no processo servidor) e o `RemoteWa`
- * (cliente de outro processo, pelo socket) implementam-no; a interface não sabe qual tem à frente.
+ * What the UI needs from whoever talks to WhatsApp. `Wa` (our own connection, in the server process) and
+ * `RemoteWa` (another process's client, over the socket) implement it; the UI doesn't know which one it has.
  */
 export interface Backend extends EventEmitter<WaEvents> {
   readonly me: string

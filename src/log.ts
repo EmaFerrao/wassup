@@ -1,10 +1,10 @@
 import pino from 'pino'
 import { dirs } from './config.js'
 
-// O terminal é da interface: tudo o que seria escrito no stdout (baileys, console.*) vai para o ficheiro de log.
+// The terminal belongs to the UI: everything that would be written to stdout (baileys, console.*) goes to the log file.
 export const logger = pino({ level: process.env.WA_LOG ?? 'warn' }, pino.destination({ dest: dirs.log, sync: true }))
 
-/** Interacções do utilizador (rato, teclas, foco): sempre registadas, para diagnosticar terminais, seja qual for o WA_LOG. */
+/** User interactions (mouse, keys, focus): always logged, to diagnose terminals, whatever WA_LOG is. */
 export const uiLog = logger.child({ mod: 'ui' }, { level: 'info' })
 
 export function silenceConsole() {

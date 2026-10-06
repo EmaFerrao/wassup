@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { silenceConsole, logger } from './log.js'
+import { t } from './i18n.js'
 import { Wa, type WaEvents } from './wa.js'
 import { Ui } from './ui.js'
 import { probeTerminal } from './term.js'
@@ -12,8 +13,9 @@ process.on('uncaughtException', e => logger.error({ e: e.stack ?? String(e) }, '
 process.on('unhandledRejection', e => logger.error({ e: e instanceof Error ? e.stack : String(e) }, 'unhandledRejection'))
 
 /**
- * A interface fala sempre com este proxy; por trás está ou a ligação própria (este processo é o servidor) ou o cliente
- * de outro processo. Quando o servidor desaparece, repete-se a eleição e troca-se o que está por trás sem a interface dar conta.
+ * The UI always talks to this proxy; behind it is either our own connection (this process is the server) or
+ * another process's client. When the server disappears, the election repeats and what's behind it swaps without
+ * the UI noticing.
  */
 class BackendProxy extends EventEmitter<WaEvents> implements Backend {
   private inner: Backend | undefined
@@ -21,8 +23,8 @@ class BackendProxy extends EventEmitter<WaEvents> implements Backend {
   get me() { return this.inner?.me ?? '' }
   get state() { return this.inner?.state ?? 'connecting' }
   get qr() { return this.inner?.qr }
-  // Antes da eleição acabar não há backend: as acções que não são possíveis falham com mensagem, as outras ignoram-se.
-  private ready(): Backend { if (!this.inner) throw new Error('ainda sem ligação'); return this.inner }
+  // Before the election finishes there's no backend: actions that aren't possible fail with a message, the others are ignored.
+  private ready(): Backend { if (!this.inner) throw new Error(t('notConnectedYet')); return this.inner }
   send(jid: string, text: string, replyTo?: string) { return this.ready().send(jid, text, replyTo) }
   react(jid: string, msgId: string, emoji: string) { return this.ready().react(jid, msgId, emoji) }
   edit(jid: string, msgId: string, text: string) { return this.ready().edit(jid, msgId, text) }
@@ -35,15 +37,15 @@ class BackendProxy extends EventEmitter<WaEvents> implements Backend {
   downloadAll(jid: string) { return this.ready().downloadAll(jid) }
   async stop() { this.server?.close(); await this.inner?.stop() }
 
-  /** Liga-se ao servidor que houver; se não houver, este processo passa a servidor. */
+  /** Connects to whatever server exists; if there's none, this process becomes the server. */
   async elect() {
     for (let attempt = 0; attempt < 5; attempt++) {
       const remote = await RemoteWa.connect()
       if (remote) {
         this.use(remote)
         remote.once('lost', () => {
-          logger.warn('ipc: servidor perdido, nova eleição')
-          this.emit('status', 'o processo servidor terminou; a assumir a ligação')
+          logger.warn('ipc: server lost, new election')
+          this.emit('status', t('serverGone'))
           this.elect().catch(e => logger.error({ e }, 'elect'))
         })
         return
@@ -53,9 +55,9 @@ class BackendProxy extends EventEmitter<WaEvents> implements Backend {
       try {
         await server.listen()
       } catch (e) {
-        // Outro processo abriu o socket neste instante: volta a tentar como cliente. Qualquer outro erro é definitivo.
+        // Another process opened the socket at this instant: try again as a client. Any other error is final.
         if ((e as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw e
-        logger.info('ipc: socket ocupado, a tentar como cliente')
+        logger.info('ipc: socket busy, trying as client')
         continue
       }
       this.server = server
@@ -63,7 +65,7 @@ class BackendProxy extends EventEmitter<WaEvents> implements Backend {
       wa.start().catch(e => logger.error({ e }, 'start'))
       return
     }
-    throw new Error('não consegui ligar-me ao servidor nem ser servidor')
+    throw new Error(t('noServer'))
   }
 
   private use(b: Backend) {

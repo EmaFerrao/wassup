@@ -43,7 +43,7 @@ export interface MessageRow {
   raw: string
 }
 
-// timeout: vários processos partilham a base (servidor escreve, clientes lêem e guardam os seus tabs); em vez de SQLITE_BUSY espera-se.
+// timeout: several processes share the database (server writes, clients read and save their tabs); instead of SQLITE_BUSY, it waits.
 const db = new DatabaseSync(dirs.db, { timeout: 3000 })
 db.exec(`
   PRAGMA journal_mode = WAL;
@@ -248,7 +248,7 @@ export const store = {
     q.setType.run(type, text, chat, id)
   },
 
-  /** Contactos com nome guardados pelo lid, sem número conhecido: candidatos a resolver junto do WhatsApp. */
+  /** Contacts with a name saved by lid, without a known number: candidates to resolve with WhatsApp. */
   lidContactsUnmapped(): ContactRow[] {
     return q.lidContactsUnmapped.all() as unknown as ContactRow[]
   },
@@ -256,7 +256,7 @@ export const store = {
     return q.lastMessage.get(chat) as unknown as MessageRow | undefined
   },
 
-  /** Reacção de alguém a uma mensagem; emoji vazio retira-a. A mais recente ganha, venha por que ordem vier. */
+  /** Someone's reaction to a message; empty emoji removes it. The most recent one wins, whatever order they arrive in. */
   setReaction(chat: string, msgId: string, sender: string, emoji: string, ts: number) {
     if (emoji) q.setReaction.run(chat, msgId, sender, emoji, ts)
     else q.clearReaction.run(chat, msgId, sender, ts)
@@ -265,7 +265,7 @@ export const store = {
     return q.listReactions.all(chat) as unknown as ReactionRow[]
   },
 
-  /** Estado da interface (tabs abertos, etc.), em JSON por chave. */
+  /** UI state (open tabs, etc.), as JSON per key. */
   getState<T>(key: string): T | undefined {
     const row = q.getState.get(key) as { value: string } | undefined
     if (!row) return undefined
@@ -277,11 +277,11 @@ export const store = {
   setState(key: string, value: unknown) {
     q.setState.run(key, JSON.stringify(value))
   },
-  /** Todos os registos cuja chave começa por `prefix`. */
+  /** All records whose key starts with `prefix`. */
   listState<T>(prefix: string): { key: string; value: T }[] {
     const rows = q.listState.all(prefix.replace(/[%_\\]/g, '\\$&') + '%') as unknown as { key: string; value: string }[]
     const out: { key: string; value: T }[] = []
-    for (const r of rows) { try { out.push({ key: r.key, value: JSON.parse(r.value) as T }) } catch { /* ignora */ } }
+    for (const r of rows) { try { out.push({ key: r.key, value: JSON.parse(r.value) as T }) } catch { /* ignore */ } }
     return out
   },
 

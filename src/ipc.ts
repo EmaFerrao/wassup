@@ -5,19 +5,20 @@ import os from 'node:os'
 import net from 'node:net'
 import path from 'node:path'
 import { dirs } from './config.js'
+import { t } from './i18n.js'
 import { logger } from './log.js'
 import { store, type MessageRow } from './db.js'
 import type { Backend } from './backend.js'
 import type { ConnState, WaEvents } from './wa.js'
 
 /**
- * Vários processos `wa`: o primeiro é o servidor (ligação ao WhatsApp, escrita na base) e abre este socket; os outros
- * ligam-se a ele como clientes. Pelo socket vão só as acções que precisam da ligação e os eventos que o servidor
- * difunde; as leituras (conversas, mensagens, nomes) cada processo faz directamente no SQLite, que em WAL aceita
- * vários leitores. Protocolo: uma linha JSON por mensagem.
+ * Several `wa` processes: the first one is the server (WhatsApp connection, database writes) and opens this
+ * socket; the others connect to it as clients. Only the actions that need the connection and the events the
+ * server broadcasts go over the socket; reads (chats, messages, names) are done by each process directly on
+ * SQLite, which accepts several readers in WAL mode. Protocol: one JSON line per message.
  */
-// O caminho de um socket Unix tem um limite de 108 bytes: fica no directório de execução do utilizador (ou no
-// temporário), com um sufixo derivado da pasta de dados para perfis diferentes (WA_HOME) não colidirem.
+// A Unix socket path has a 108-byte limit: it lives in the user's runtime directory (or the temp one), with a
+// suffix derived from the data folder so different profiles (WA_HOME) don't collide.
 export const sockPath = path.join(process.env.XDG_RUNTIME_DIR ?? os.tmpdir(), `wa-${createHash('sha1').update(dirs.base).digest('hex').slice(0, 8)}.sock`)
 
 type Request = { id: number; op: string; args: unknown[] }
@@ -35,14 +36,14 @@ function lines(socket: net.Socket, onLine: (obj: unknown) => void) {
     while ((i = buf.indexOf('\n')) >= 0) {
       const line = buf.slice(0, i); buf = buf.slice(i + 1)
       if (!line) continue
-      try { onLine(JSON.parse(line)) } catch (e) { logger.warn({ e: (e as Error).message }, 'ipc: linha inválida') }
+      try { onLine(JSON.parse(line)) } catch (e) { logger.warn({ e: (e as Error).message }, 'ipc: invalid line') }
     }
   })
 }
 
 const sendJson = (socket: net.Socket, obj: unknown) => { if (!socket.destroyed) socket.write(JSON.stringify(obj) + '\n') }
 
-// ---------- servidor ----------
+// ---------- server ----------
 
 export class IpcServer {
   private server: net.Server
@@ -51,28 +52,28 @@ export class IpcServer {
   constructor(private wa: Backend) {
     this.server = net.createServer(socket => this.accept(socket))
     const forward = (event: keyof WaEvents) => (...args: unknown[]) => {
-      // No 'connection' segue também o QR actual: o cliente não tem outra forma de o conhecer.
+      // The 'connection' event also carries the current QR: the client has no other way to know it.
       const payload: Event = { event, args: event === 'notify' ? [args[0], slimRow(args[1] as MessageRow)] : event === 'connection' ? [args[0], args[1], wa.qr] : args }
       for (const c of this.clients) sendJson(c, payload)
     }
     for (const ev of ['connection', 'chats', 'messages', 'notify', 'status', 'typing', 'reaction'] as const) wa.on(ev, forward(ev) as never)
   }
 
-  /** Abre o socket. Falha com EADDRINUSE se outro processo acabou de o abrir: quem chama deve então ligar-se como cliente. */
+  /** Opens the socket. Fails with EADDRINUSE if another process just opened it: the caller should then connect as a client. */
   listen(): Promise<void> {
     return new Promise((resolve, reject) => {
       this.server.once('error', reject)
-      this.server.listen(sockPath, () => { this.server.off('error', reject); logger.info({ sockPath }, 'ipc: servidor'); resolve() })
+      this.server.listen(sockPath, () => { this.server.off('error', reject); logger.info({ sockPath }, 'ipc: server'); resolve() })
     })
   }
 
   private accept(socket: net.Socket) {
     this.clients.add(socket)
-    logger.info({ clientes: this.clients.size }, 'ipc: cliente ligado')
+    logger.info({ clients: this.clients.size }, 'ipc: client connected')
     sendJson(socket, { event: 'hello', args: [{ me: this.wa.me, state: this.wa.state, qr: this.wa.qr }] } satisfies Event)
-    lines(socket, obj => { this.handle(socket, obj as Request).catch(e => logger.warn({ e }, 'ipc: pedido')) })
+    lines(socket, obj => { this.handle(socket, obj as Request).catch(e => logger.warn({ e }, 'ipc: request')) })
     socket.on('close', () => { this.clients.delete(socket) })
-    socket.on('error', e => logger.warn({ e: e.message }, 'ipc: socket cliente'))
+    socket.on('error', e => logger.warn({ e: e.message }, 'ipc: client socket'))
   }
 
   private async handle(socket: net.Socket, req: Request) {
@@ -90,7 +91,7 @@ export class IpcServer {
         case 'touchPresence': this.wa.touchPresence(); return reply({ ok: true })
         case 'ensureMedia': { const row = store.getMessage(a[0]!, a[1]!); if (row) this.wa.ensureMedia(row); return reply({ ok: true }) }
         case 'downloadAll': return reply({ ok: true, result: await this.wa.downloadAll(a[0]!) })
-        default: return reply({ ok: false, error: `operação desconhecida: ${req.op}` })
+        default: return reply({ ok: false, error: t('unknownOp', req.op) })
       }
     } catch (e) {
       reply({ ok: false, error: (e as Error).message })
@@ -100,11 +101,11 @@ export class IpcServer {
   close() {
     for (const c of this.clients) c.destroy()
     this.server.close()
-    try { fs.unlinkSync(sockPath) } catch { /* já não existe */ }
+    try { fs.unlinkSync(sockPath) } catch { /* no longer exists */ }
   }
 }
 
-// ---------- cliente ----------
+// ---------- client ----------
 
 export class RemoteWa extends EventEmitter<WaEvents> implements Backend {
   me = ''
@@ -117,20 +118,20 @@ export class RemoteWa extends EventEmitter<WaEvents> implements Backend {
     super()
     lines(socket, obj => this.receive(obj as Reply | Event))
     socket.on('close', () => {
-      for (const w of this.waiting.values()) w.reject(new Error('servidor terminou'))
+      for (const w of this.waiting.values()) w.reject(new Error(t('serverEnded')))
       this.waiting.clear()
       this.emit('lost')
     })
-    socket.on('error', e => logger.warn({ e: e.message }, 'ipc: socket servidor'))
+    socket.on('error', e => logger.warn({ e: e.message }, 'ipc: server socket'))
   }
 
-  /** Liga-se ao servidor; null se não houver nenhum a escutar (socket inexistente ou morto). */
+  /** Connects to the server; null if none is listening (socket missing or dead). */
   static connect(): Promise<RemoteWa | null> {
     return new Promise(resolve => {
       const socket = net.connect(sockPath)
       socket.once('connect', () => resolve(new RemoteWa(socket)))
       socket.once('error', (e: NodeJS.ErrnoException) => {
-        if (e.code === 'ECONNREFUSED') { try { fs.unlinkSync(sockPath) } catch { /* já não existe */ } }
+        if (e.code === 'ECONNREFUSED') { try { fs.unlinkSync(sockPath) } catch { /* no longer exists */ } }
         resolve(null)
       })
     })
@@ -157,7 +158,7 @@ export class RemoteWa extends EventEmitter<WaEvents> implements Backend {
     const w = this.waiting.get(msg.id)
     if (!w) return
     this.waiting.delete(msg.id)
-    msg.ok ? w.resolve(msg.result) : w.reject(new Error(msg.error ?? 'erro no servidor'))
+    msg.ok ? w.resolve(msg.result) : w.reject(new Error(msg.error ?? t('serverError')))
   }
 
   private call<T>(op: string, ...args: unknown[]): Promise<T> {

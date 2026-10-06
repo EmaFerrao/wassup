@@ -1,9 +1,11 @@
 /**
- * Códigos :nome: aceites na linha de escrita, convertidos ao enviar. Nomes em português de Portugal (sem acentos,
- * para se escreverem depressa) e em inglês, por emoji: [emoji, nomes pt, nomes en].
+ * :name: codes accepted in the compose line, converted on send. Names in European Portuguese (without accents,
+ * so they can be typed quickly) and in English, per emoji: [emoji, pt names, en names].
  */
+import { lang } from './i18n.js'
+
 const EMOJI: [string, string[], string[]][] = [
-  // caras
+  // faces
   ['😊', ['sorriso'], ['smile', 'blush']],
   ['😄', ['riso', 'risota'], ['grin', 'smiley']],
   ['😂', ['gargalhada', 'lol'], ['joy', 'lol']],
@@ -36,7 +38,7 @@ const EMOJI: [string, string[], string[]][] = [
   ['💩', ['coco', 'trampa'], ['poop', 'hankey']],
   ['👻', ['fantasma'], ['ghost']],
   ['🤖', ['robo'], ['robot']],
-  // mãos
+  // hands
   ['👍', ['fixe', 'gosto', 'polegar', '+1'], ['thumbsup', '+1', 'like']],
   ['👎', ['nao', 'nao_gosto', '-1'], ['thumbsdown', '-1', 'dislike']],
   ['👌', ['ok', 'perfeito'], ['ok_hand', 'ok']],
@@ -53,7 +55,7 @@ const EMOJI: [string, string[], string[]][] = [
   ['👈', ['esquerda_mao'], ['point_left']],
   ['👀', ['olhos', 'a_ver'], ['eyes']],
   ['🧠', ['cerebro'], ['brain']],
-  // corações e símbolos
+  // hearts and symbols
   ['❤️', ['coracao', 'amor'], ['heart', 'love']],
   ['💋', ['beijo'], ['kiss', 'lips']],
   ['💔', ['coracao_partido', 'desgosto'], ['broken_heart']],
@@ -90,7 +92,7 @@ const EMOJI: [string, string[], string[]][] = [
   ['➡️', ['direita', 'seta_direita'], ['right', 'arrow_right']],
   ['♻️', ['reciclar', 'reciclagem'], ['recycle']],
   ['♾️', ['infinito'], ['infinity']],
-  // tempo e natureza
+  // weather and nature
   ['☀️', ['sol'], ['sun', 'sunny']],
   ['🌙', ['lua'], ['moon']],
   ['🌧️', ['chuva'], ['rain']],
@@ -105,7 +107,7 @@ const EMOJI: [string, string[], string[]][] = [
   ['🌹', ['rosa'], ['rose']],
   ['🌻', ['girassol'], ['sunflower']],
   ['🌵', ['cacto'], ['cactus']],
-  // animais
+  // animals
   ['🐶', ['cao', 'cachorro'], ['dog']],
   ['🐱', ['gato'], ['cat']],
   ['🐭', ['rato'], ['mouse']],
@@ -129,7 +131,7 @@ const EMOJI: [string, string[], string[]][] = [
   ['🐴', ['cavalo'], ['horse']],
   ['🦄', ['unicornio'], ['unicorn']],
   ['🐌', ['caracol'], ['snail']],
-  // comida e bebida
+  // food and drink
   ['🍕', ['pizza'], ['pizza']],
   ['🍔', ['hamburguer'], ['burger', 'hamburger']],
   ['🍟', ['batatas_fritas'], ['fries']],
@@ -151,7 +153,7 @@ const EMOJI: [string, string[], string[]][] = [
   ['🥚', ['ovo'], ['egg']],
   ['🍦', ['gelado'], ['icecream', 'ice_cream']],
   ['🍫', ['chocolate'], ['chocolate']],
-  // transportes e sítios
+  // transport and places
   ['🚗', ['carro'], ['car']],
   ['🚌', ['autocarro'], ['bus']],
   ['🚆', ['comboio'], ['train']],
@@ -163,7 +165,7 @@ const EMOJI: [string, string[], string[]][] = [
   ['🏠', ['casa'], ['house', 'home']],
   ['🏢', ['escritorio', 'predio'], ['office']],
   ['🏖️', ['praia'], ['beach']],
-  // objectos e trabalho
+  // objects and work
   ['📞', ['telefone'], ['phone', 'telephone']],
   ['📱', ['telemovel'], ['iphone', 'mobile']],
   ['💻', ['computador', 'portatil'], ['computer', 'laptop']],
@@ -185,7 +187,7 @@ const EMOJI: [string, string[], string[]][] = [
   ['🔨', ['martelo'], ['hammer']],
   ['⚙️', ['engrenagem', 'definicoes'], ['gear', 'settings']],
   ['🧱', ['tijolo'], ['brick']],
-  // desporto e lazer
+  // sports and leisure
   ['⚽', ['bola', 'futebol'], ['soccer', 'football']],
   ['🏀', ['basquetebol'], ['basketball']],
   ['🎾', ['tenis'], ['tennis']],
@@ -196,11 +198,11 @@ const EMOJI: [string, string[], string[]][] = [
   ['🎬', ['filme', 'cinema'], ['movie', 'clapper']],
   ['🎮', ['jogo', 'consola'], ['game', 'video_game']],
   ['🎲', ['dado'], ['dice', 'game_die']],
-  // pessoas
+  // people
   ['👶', ['bebe'], ['baby']],
   ['👨‍👩‍👧', ['familia'], ['family']],
   ['💑', ['casal', 'namorados'], ['couple']],
-  // bandeiras
+  // flags
   ['🇵🇹', ['portugal', 'pt'], ['portugal', 'pt']],
   ['🇧🇷', ['brasil', 'br'], ['brazil', 'br']],
   ['🇪🇸', ['espanha', 'es'], ['spain', 'es']],
@@ -215,7 +217,7 @@ for (const [emoji, pt, en] of EMOJI) for (const name of [...pt, ...en]) TABLE[na
 
 const CODE_RE = /(^|[^\w:]):([a-z0-9_+-]+):(?=[^\w:]|$)/gi
 
-/** Smileys clássicos, só quando isolados por espaços (ou início/fim), para não tocar em "http://" e afins. */
+/** Classic smileys, only when isolated by spaces (or start/end), so as not to touch "http://" and the like. */
 const EMOTICONS: [string[], string][] = [
   [[':)', ':-)', '=)'], '🙂'],
   [[':D', ':-D', '=D'], '😁'],
@@ -246,12 +248,12 @@ for (const [faces, emoji] of EMOTICONS) for (const f of faces) EMOTICON_MAP.set(
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const EMOTICON_RE = new RegExp(`(^|\\s)(${[...EMOTICON_MAP.keys()].sort((a, b) => b.length - a.length).map(escapeRe).join('|')})(?=\\s|$|[.,!?])`, 'g')
 
-/** Troca os smileys clássicos (":)", ":-P", ":*") pelo emoji correspondente; o resto fica como está. */
+/** Replaces classic smileys (":)", ":-P", ":*") with the corresponding emoji; everything else stays as is. */
 export function emoticonify(text: string): string {
   return text.replace(EMOTICON_RE, (_m, pre: string, face: string) => `${pre}${EMOTICON_MAP.get(face)}`)
 }
 
-/** Troca :nome: e os smileys clássicos pelo emoji correspondente; o resto fica como está. */
+/** Replaces :name: codes and classic smileys with the corresponding emoji; everything else stays as is. */
 export function emojify(text: string): string {
   return emoticonify(text.replace(CODE_RE, (m, pre: string, code: string) => {
     const e = TABLE[code.toLowerCase()]
@@ -262,14 +264,15 @@ export function emojify(text: string): string {
 export const emojiCodes = Object.keys(TABLE)
 
 /**
- * Emojis cujo nome começa por `prefix`, sem repetir o emoji; cada um vem com o primeiro nome que casa, para se
- * mostrar. Nomes mais curtos primeiro, para o exacto ("fixe") vir antes de um mais longo; empate pela ordem da tabela.
+ * Emojis whose name starts with `prefix`, without repeating the emoji; each comes with the first matching name, to
+ * display. Shorter names first, so an exact match ("fixe") comes before a longer one; ties keep the table order.
  */
 export function completeEmoji(prefix: string): { emoji: string; name: string }[] {
   const p = prefix.toLowerCase()
   const out: { emoji: string; name: string }[] = []
   for (const [emoji, pt, en] of EMOJI) {
-    const name = [...pt, ...en].find(n => n.startsWith(p))
+    // Only the names in the user's language are suggested; `emojify` still accepts both.
+    const name = (lang === 'pt' ? pt : en).find(n => n.startsWith(p))
     if (name && !out.some(o => o.emoji === emoji)) out.push({ emoji, name })
   }
   return out.map((o, i) => ({ o, i })).sort((a, b) => a.o.name.length - b.o.name.length || a.i - b.i).map(x => x.o)

@@ -1,10 +1,10 @@
 /**
- * Itálico no blessed, que só conhece negrito, sublinhado, piscar, inverso e invisível. Os atributos de cada célula
- * vivem numa máscara de bits com espaço livre: aqui o bit 32 passa a ser o itálico. Remendam-se as três funções do
- * ecrã que tocam nos atributos: a que lê sequências ANSI do conteúdo, a que as volta a escrever, e o desenho, que é
- * reconstruído a partir do próprio código fonte com a linha do itálico acrescentada (usa só duas variáveis de
- * módulo, que se injectam). Se o código fonte do blessed não for o esperado, o itálico fica sem efeito e nada mais
- * se perde. No conteúdo escreve-se ESC[3m … ESC[23m, como o chalk.
+ * Italic in blessed, which only knows bold, underline, blink, inverse and invisible. Each cell's attributes live
+ * in a bitmask with free space: here bit 32 becomes italic. Three of the screen's functions that touch attributes
+ * are patched: the one that reads ANSI sequences from content, the one that writes them back, and the renderer,
+ * which is rebuilt from its own source code with the italic line added (it only uses two module-level variables,
+ * which get injected). If blessed's source code isn't in the expected shape, italic simply has no effect and
+ * nothing else is lost. In content, ESC[3m … ESC[23m is written, just like chalk does.
  */
 import blessed from 'blessed'
 import { logger } from './log.js'
@@ -18,7 +18,7 @@ interface ScreenProto {
   _italicPatched?: boolean
 }
 
-/** Caracteres de caixa que o desenho do blessed trata de modo especial a seguir a um carácter largo. */
+/** Box-drawing characters that blessed's renderer treats specially right after a wide character. */
 const ANGLES: Record<string, boolean> = Object.fromEntries([...'┘┐┌└┼├┤┴┬│─'].map(c => [c, true]))
 
 export function patchBlessedItalic(screen: blessed.Widgets.Screen) {
@@ -28,8 +28,8 @@ export function patchBlessedItalic(screen: blessed.Widgets.Screen) {
 
   const attrCode = proto.attrCode
   proto.attrCode = function (this: unknown, code: string, cur: number, def: number) {
-    // Separar o 3/23 do resto: 3 liga, 23 desliga, e os códigos que no blessed repõem os atributos também desligam.
-    // Um "3" como parâmetro de cor (38;5;3) não conta.
+    // Separate 3/23 from the rest: 3 turns it on, 23 turns it off, and the codes that reset attributes in blessed
+    // also turn it off. A "3" used as a color parameter (38;5;3) doesn't count.
     const parts = code.slice(2, -1).split(';')
     if (!parts[0]) parts[0] = '0'
     let italic = (cur & ITALIC) !== 0
@@ -57,7 +57,7 @@ export function patchBlessedItalic(screen: blessed.Widgets.Screen) {
 
   const src = proto.draw.toString()
   const anchor = "if (flags & 16) {\n            out += '8;';\n          }"
-  if (!src.includes(anchor)) { logger.warn('blessed: desenho sem a forma esperada; sem itálico'); return }
+  if (!src.includes(anchor)) { logger.warn('blessed: renderer not in the expected shape; italic disabled'); return }
   const patched = src.replace(anchor, `${anchor}\n          if (flags & 32) {\n            out += '3;';\n          }`)
   const unicode = (blessed as unknown as { unicode: unknown }).unicode
   proto.draw = new Function('unicode', 'angles', `return ${patched}`)(unicode, ANGLES) as ScreenProto['draw']

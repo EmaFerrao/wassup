@@ -9,6 +9,7 @@ import makeWASocket, {
 } from 'baileys'
 import type { Boom } from '@hapi/boom'
 import { dirs } from './config.js'
+import { t } from './i18n.js'
 import { logger } from './log.js'
 import { store, type MessageRow } from './db.js'
 
@@ -20,15 +21,15 @@ export interface WaEvents {
   messages: [chatJid: string]
   notify: [chatJid: string, row: MessageRow]
   status: [text: string]
-  /** Quem está a escrever ou a gravar numa conversa (jids canónicos); lista vazia quando ninguém. */
+  /** Who is typing or recording in a chat (canonical jids); empty list when nobody. */
   typing: [chatJid: string, who: string[]]
-  /** Uma reacção acabada de chegar ou de enviar (emoji vazio: retirada). */
+  /** A reaction just received or sent (empty emoji: removed). */
   reaction: [chatJid: string, msgId: string, senderJid: string, emoji: string]
-  /** Só do cliente remoto: o processo servidor desapareceu. */
+  /** Only from the remote client: the server process disappeared. */
   lost: []
 }
 
-/** Jid canónico: número em vez de lid sempre que o conhecemos, sem sufixo de dispositivo. */
+/** Canonical jid: number instead of lid whenever we know it, without device suffix. */
 export function canonicalJid(jid?: string | null, alt?: string | null): string {
   if (!jid) return ''
   if (isJidGroup(jid) || isJidBroadcast(jid) || isJidNewsletter(jid)) return jid
@@ -49,7 +50,7 @@ export function jidUser(jid: string): string {
   return jid.split('@')[0] ?? jid
 }
 
-/** O WhatsApp manda como `name` o número mascarado ("+351∙∙∙∙∙∙∙35") quando o contacto não está guardado: não é nome. */
+/** WhatsApp sends the masked number ("+351∙∙∙∙∙∙∙35") as `name` when the contact isn't saved: that's not a name. */
 const looksLikeNumber = (s: string) => /^[+\d\s∙·.()-]+$/.test(s)
 
 export function contactName(jid: string): string {
@@ -64,7 +65,7 @@ export function contactName(jid: string): string {
 export function chatName(jid: string): string {
   const chat = store.getChat(jid)
   if (chat?.name) return chat.name
-  if (isJidGroup(jid)) return `grupo ${jidUser(jid)}`
+  if (isJidGroup(jid)) return t('group', jidUser(jid))
   return contactName(jid)
 }
 
@@ -116,26 +117,26 @@ export interface Parsed {
 function quotedSnippet(msg: proto.IMessage | null | undefined): string {
   const c = normalizeMessageContent(msg ?? undefined)
   if (!c) return ''
-  const t = getContentType(c)
-  switch (t) {
+  const kind = getContentType(c)
+  switch (kind) {
     case 'conversation': return c.conversation ?? ''
     case 'extendedTextMessage': return c.extendedTextMessage?.text ?? ''
-    case 'imageMessage': return `[imagem] ${c.imageMessage?.caption ?? ''}`.trim()
-    case 'videoMessage': return `[vídeo] ${c.videoMessage?.caption ?? ''}`.trim()
-    case 'stickerMessage': return '[sticker]'
-    case 'audioMessage': return '[áudio]'
-    case 'documentMessage': return `[ficheiro] ${c.documentMessage?.fileName ?? ''}`.trim()
-    case 'locationMessage': return '[localização]'
-    case 'contactMessage': return `[contacto] ${c.contactMessage?.displayName ?? ''}`.trim()
-    default: return t ? `[${t.replace(/Message$/, '')}]` : ''
+    case 'imageMessage': return `[${t('image')}] ${c.imageMessage?.caption ?? ''}`.trim()
+    case 'videoMessage': return `[${t('video')}] ${c.videoMessage?.caption ?? ''}`.trim()
+    case 'stickerMessage': return `[${t('sticker')}]`
+    case 'audioMessage': return `[${t('audio')}]`
+    case 'documentMessage': return `[${t('file')}] ${c.documentMessage?.fileName ?? ''}`.trim()
+    case 'locationMessage': return `[${t('location')}]`
+    case 'contactMessage': return `[${t('contact')}] ${c.contactMessage?.displayName ?? ''}`.trim()
+    default: return kind ? `[${kind.replace(/Message$/, '')}]` : ''
   }
 }
 
 export interface Reaction { chatJid: string; msgId: string; senderJid: string; emoji: string }
 
 /**
- * Uma reacção (emoji sobre uma mensagem anterior) não é uma mensagem: guarda-se na tabela própria. Devolve o que foi
- * guardado, para a interface redesenhar e animar, ou null se a WAMessage não é uma reacção.
+ * A reaction (emoji on a previous message) is not a message: it's stored in its own table. Returns what was
+ * stored, for the UI to redraw and animate, or null if the WAMessage isn't a reaction.
  */
 export function storeReaction(m: WAMessage, meJid: string): Reaction | null {
   const r = normalizeMessageContent(m.message ?? undefined)?.reactionMessage
@@ -150,7 +151,7 @@ export function storeReaction(m: WAMessage, meJid: string): Reaction | null {
   return { chatJid, msgId: r.key.id, senderJid, emoji }
 }
 
-/** Traduz uma WAMessage do baileys para a linha que guardamos. Devolve null para o que não é uma mensagem visível. */
+/** Translates a WAMessage from baileys into the row we store. Returns null for what isn't a visible message. */
 export function parseMessage(m: WAMessage, meJid: string): Parsed | null {
   const key = m.key
   if (!key?.id || !key.remoteJid) return null
@@ -239,7 +240,7 @@ export function parseMessage(m: WAMessage, meJid: string): Parsed | null {
         if (store.getMessage(chatJid, targetId)) store.setType(chatJid, targetId, 'deleted', '')
       } else if (targetId && pm.type === 14) {
         const edited = parseMessage({ key: { ...key, id: targetId }, message: pm.editedMessage, messageTimestamp: m.messageTimestamp } as WAMessage, meJid)
-        if (edited && store.getMessage(chatJid, targetId)) store.setType(chatJid, targetId, edited.type, `${edited.text}\n(editada)`)
+        if (edited && store.getMessage(chatJid, targetId)) store.setType(chatJid, targetId, edited.type, `${edited.text}\n${t('edited')}`)
       }
       return null
     }
@@ -260,9 +261,9 @@ export function parseMessage(m: WAMessage, meJid: string): Parsed | null {
 
 export class Wa extends EventEmitter<WaEvents> {
   sock: WASocket | undefined
-  /** Quem está a escrever em cada conversa, e o temporizador que o esquece se o "parou" nunca chegar. */
+  /** Who is typing in each chat, and the timer that forgets it if the "stopped" signal never arrives. */
   private typing = new Map<string, { who: Set<string>; timer: NodeJS.Timeout }>()
-  /** Se este dispositivo se anunciou "disponível" ao WhatsApp, e o temporizador que o volta a pôr indisponível. */
+  /** Whether this device announced itself "available" to WhatsApp, and the timer that sets it back to unavailable. */
   private available = false
   private presenceTimer: NodeJS.Timeout | undefined
   me = ''
@@ -314,7 +315,7 @@ export class Wa extends EventEmitter<WaEvents> {
 
     sock.ev.on('creds.update', saveCreds)
     sock.ev.on('presence.update', ({ id, presences }) => {
-      logger.info({ id, presences }, 'presença')
+      logger.info({ id, presences }, 'presence')
       const chatJid = canonicalJid(id)
       for (const [participant, p] of Object.entries(presences)) {
         const who = canonicalJid(participant)
@@ -333,7 +334,7 @@ export class Wa extends EventEmitter<WaEvents> {
         this.qr = undefined
         this.me = jidNormalizedUser(sock.user?.id ?? '')
         if (sock.user?.lid) store.setLid(jidNormalizedUser(sock.user.lid), this.me)
-        // O Baileys anuncia "indisponível" ao ligar; é a actividade no terminal que volta a pôr disponível.
+        // Baileys announces "unavailable" on connect; it's activity in the terminal that sets it back to available.
         this.available = false
         this.setState('open', this.me)
         this.refreshGroups().catch(e => logger.warn({ e }, 'refreshGroups'))
@@ -341,19 +342,19 @@ export class Wa extends EventEmitter<WaEvents> {
       } else if (connection === 'close') {
         const code = (lastDisconnect?.error as Boom | undefined)?.output?.statusCode
         const loggedOut = code === DisconnectReason.loggedOut
-        logger.warn({ code, err: lastDisconnect?.error?.message }, 'ligação fechada')
+        logger.warn({ code, err: lastDisconnect?.error?.message }, 'connection closed')
         if (this.stopped) return
         if (code === DisconnectReason.connectionReplaced) {
-          // Outra instância ligou-se com estas credenciais. Religar aqui só a expulsaria a ela e voltaria a ser expulso.
-          this.setState('closed', 'outra instância do wa ligou-se com esta conta; fecha-a e reinicia este')
+          // Another instance connected with these credentials. Reconnecting here would just kick it out and get kicked out again.
+          this.setState('closed', t('anotherInstance'))
           return
         }
         if (loggedOut) {
           fs.rmSync(dirs.auth, { recursive: true, force: true })
           fs.mkdirSync(dirs.auth, { recursive: true })
-          this.setState('closed', 'sessão terminada no telemóvel; novo QR a caminho')
+          this.setState('closed', t('loggedOut'))
         } else {
-          this.setState('closed', `ligação fechada (${code ?? '?'}), a religar`)
+          this.setState('closed', t('closedReconnecting', code ?? '?'))
         }
         setTimeout(() => this.connect().catch(e => logger.error({ e }, 'reconnect')), loggedOut ? 500 : 2000)
       }
@@ -368,11 +369,11 @@ export class Wa extends EventEmitter<WaEvents> {
       })
       this.emit('chats')
       this.emit('messages', '*')
-      this.emit('status', `histórico: ${messages.length} mensagens, ${chats.length} conversas${progress != null ? ` (${progress}%)` : ''}`)
+      this.emit('status', t('historyProgress', messages.length, chats.length, progress != null ? ` (${progress}%)` : ''))
     })
 
     sock.ev.on('messaging-history.status', ({ status }) => {
-      if (status === 'complete') this.emit('status', 'histórico sincronizado')
+      if (status === 'complete') this.emit('status', t('historyDone'))
     })
 
     sock.ev.on('contacts.upsert', cs => { store.transaction(() => cs.forEach(c => this.upsertContact(c))); this.emit('chats') })
@@ -447,8 +448,8 @@ export class Wa extends EventEmitter<WaEvents> {
   }
 
   /**
-   * Contactos com nome que o WhatsApp entregou só pelo lid: pergunta-se ao repositório de mapeamentos do baileys o
-   * número de cada um e guarda-se o nome também sob o número, que é como as conversas estão chavadas.
+   * Contacts with a name that WhatsApp delivered only by lid: we ask baileys' mapping repository for each one's
+   * number and also store the name under the number, which is how chats are keyed.
    */
   private async resolveLidContacts() {
     const pending = store.lidContactsUnmapped()
@@ -465,7 +466,7 @@ export class Wa extends EventEmitter<WaEvents> {
         resolved++
       }
     })
-    logger.info({ pending: pending.length, resolved }, 'contactos por lid resolvidos')
+    logger.info({ pending: pending.length, resolved }, 'lid contacts resolved')
     if (resolved) this.emit('chats')
   }
 
@@ -494,7 +495,7 @@ export class Wa extends EventEmitter<WaEvents> {
     })
   }
 
-  /** Guarda a mensagem (e a miniatura, se vier) e devolve a linha; `live` marca mensagens novas como não lidas. */
+  /** Stores the message (and the thumbnail, if any) and returns the row; `live` marks new messages as unread. */
   private storeMessage(m: WAMessage, live: boolean): MessageRow | null {
     const p = parseMessage(m, this.me)
     if (!p) return null
@@ -518,28 +519,28 @@ export class Wa extends EventEmitter<WaEvents> {
     return store.getMessage(p.chatJid, p.id)!
   }
 
-  /** Envia texto; com `replyTo` (id de uma mensagem desta conversa) vai como resposta, com a citação. */
+  /** Sends text; with `replyTo` (id of a message in this chat) it goes as a reply, with the quote. */
   async send(chatJid: string, text: string, replyTo?: string) {
     const quoted = replyTo ? this.rawMessage(chatJid, replyTo) : undefined
     const sent = await this.sock!.sendMessage(chatJid, { text }, quoted ? { quoted } : undefined)
     if (sent) { store.transaction(() => this.storeMessage(sent, false)); this.emit('messages', chatJid); this.emit('chats') }
   }
 
-  /** Reage a uma mensagem com um emoji; vazio retira a reacção anterior. */
+  /** Reacts to a message with an emoji; empty removes the previous reaction. */
   async react(chatJid: string, msgId: string, emoji: string) {
     const target = this.rawMessage(chatJid, msgId)
-    if (!target) throw new Error('mensagem desconhecida')
+    if (!target) throw new Error(t('unknownMessage'))
     const sent = await this.sock!.sendMessage(chatJid, { react: { text: emoji, key: target.key } })
     const stored = sent && storeReaction(sent, this.me)
     if (stored) { this.emit('messages', chatJid); this.emit('reaction', stored.chatJid, stored.msgId, stored.senderJid, stored.emoji) }
   }
 
-  /** Substitui o texto de uma mensagem minha; na base fica marcada como as edições que chegam dos outros. */
+  /** Replaces the text of one of my messages; in the database it's marked like edits that arrive from others. */
   async edit(chatJid: string, msgId: string, text: string) {
     const target = this.rawMessage(chatJid, msgId)
-    if (!target?.key.fromMe) throw new Error('só podes editar mensagens tuas')
+    if (!target?.key.fromMe) throw new Error(t('onlyOwnEdit'))
     await this.sock!.sendMessage(chatJid, { text, edit: target.key })
-    store.setType(chatJid, msgId, 'text', `${text}\n(editada)`)
+    store.setType(chatJid, msgId, 'text', `${text}\n${t('edited')}`)
     this.emit('messages', chatJid)
     this.emit('chats')
   }
@@ -567,7 +568,7 @@ export class Wa extends EventEmitter<WaEvents> {
     }
   }
 
-  /** Regista (ou apaga) quem está a escrever numa conversa e avisa se a lista mudou. */
+  /** Registers (or removes) who's typing in a chat and notifies if the list changed. */
   private setTyping(chatJid: string, who: string, active: boolean) {
     const cur = this.typing.get(chatJid)
     const had = cur?.who.has(who) ?? false
@@ -576,16 +577,16 @@ export class Wa extends EventEmitter<WaEvents> {
     const set = cur?.who ?? new Set<string>()
     if (active) set.add(who); else set.delete(who)
     if (set.size) {
-      // Se o "parou" se perder, esquece-se ao fim de 15 segundos sem novidades.
+      // If the "stopped" signal gets lost, forget it after 15 seconds without updates.
       this.typing.set(chatJid, { who: set, timer: setTimeout(() => { this.typing.delete(chatJid); this.emit('typing', chatJid, []) }, 15000) })
     } else this.typing.delete(chatJid)
     if (active !== had) this.emit('typing', chatJid, [...set])
   }
 
   /**
-   * Há alguém a usar um terminal: anuncia este dispositivo como disponível, que é a condição para o WhatsApp mandar
-   * quem está a escrever, e volta a indisponível ao fim de 2 minutos sem actividade, para o telemóvel voltar a
-   * notificar. Qualquer terminal ligado prolonga o prazo.
+   * Someone is using a terminal: announces this device as available, which is the condition for WhatsApp to send
+   * who's typing, and goes back to unavailable after 2 minutes without activity, so the phone starts notifying
+   * again. Any connected terminal extends the deadline.
    */
   touchPresence() {
     if (this.presenceTimer) clearTimeout(this.presenceTimer)
@@ -599,12 +600,12 @@ export class Wa extends EventEmitter<WaEvents> {
     this.sock.sendPresenceUpdate(on ? 'available' : 'unavailable').catch(e => logger.warn({ e }, 'sendPresenceUpdate'))
   }
 
-  /** Diz à conversa que estamos a escrever (ou que parámos): é o "a escrever…" que a outra pessoa vê. */
+  /** Tells the chat that we're typing (or that we stopped): it's the "typing…" that the other person sees. */
   setComposing(chatJid: string, on: boolean) {
     this.sock?.sendPresenceUpdate(on ? 'composing' : 'paused', chatJid).catch(e => logger.warn({ e, chatJid }, 'setComposing'))
   }
 
-  /** Pede ao WhatsApp a presença (a escrever, a gravar) de uma conversa; sem isso nada chega. */
+  /** Asks WhatsApp for a chat's presence (typing, recording); without this nothing arrives. */
   subscribePresence(chatJid: string) {
     this.sock?.presenceSubscribe(chatJid).catch(e => logger.warn({ e, chatJid }, 'presenceSubscribe'))
   }
@@ -620,8 +621,8 @@ export class Wa extends EventEmitter<WaEvents> {
   }
 
   /**
-   * Descarrega o anexo em segundo plano se ainda não o tivermos; avisa por 'messages' quando estiver em disco. Uma
-   * descarga de cada vez: abrir um chat antigo pedia dezenas ao mesmo tempo e entupia a ligação e o processador.
+   * Downloads the attachment in the background if we don't have it yet; notifies via 'messages' once it's on disk.
+   * One download at a time: opening an old chat used to request dozens at once and clogged the connection and CPU.
    */
   ensureMedia(row: MessageRow) {
     if (!row.media_mime || row.media_path || row.media_err || !this.sock) return
@@ -645,7 +646,7 @@ export class Wa extends EventEmitter<WaEvents> {
       fs.writeFileSync(file, buf as Buffer)
       store.setMedia(row.chat_jid, row.id, file, row.media_w, row.media_h)
     } catch (e) {
-      logger.warn({ e: (e as Error)?.message, id: row.id }, 'download falhou')
+      logger.warn({ e: (e as Error)?.message, id: row.id }, 'download failed')
       store.setMediaErr(row.chat_jid, row.id)
     } finally {
       this.downloading.delete(k)
@@ -653,7 +654,7 @@ export class Wa extends EventEmitter<WaEvents> {
     }
   }
 
-  /** Copia todos os anexos da conversa para ~/Downloads/wa/<conversa>/, descarregando o que faltar. */
+  /** Copies all the chat's attachments to ~/Downloads/wa/<chat>/, downloading whatever is missing. */
   async downloadAll(chatJid: string): Promise<{ copied: number; pending: number }> {
     const out = path.join(dirs.downloads, chatName(chatJid).replace(/[^\p{L}\p{N} _.-]/gu, '_'))
     fs.mkdirSync(out, { recursive: true })

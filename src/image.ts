@@ -8,7 +8,7 @@ export interface Decoded {
   w: number
   h: number
   png: Buffer
-  /** pixels RGBA da imagem já reduzida (máx. 400 px de largura), para os meios-blocos */
+  /** RGBA pixels of the already-downscaled image (max. 400 px wide), for the half-blocks */
   rgba: Buffer
   rw: number
   rh: number
@@ -16,8 +16,8 @@ export interface Decoded {
 
 const cache = new Map<string, Decoded | Error>()
 const pending = new Map<string, Promise<Decoded | Error>>()
-// Cada imagem descodificada ocupa perto de 1 MB (PNG para o Kitty mais os pixels para os blocos): a cache fica limitada
-// às últimas usadas.
+// Each decoded image takes up close to 1 MB (PNG for Kitty plus the pixels for the blocks): the cache is limited
+// to the most recently used.
 const CACHE_MAX = 40
 
 export function cached(path: string): Decoded | Error | undefined {
@@ -32,8 +32,8 @@ function remember(path: string, d: Decoded | Error) {
 }
 
 /**
- * Descodifica com o sharp (nativo, fora da thread principal: uma foto de 9 Mpx em dezenas de ms) e só sem ele com o
- * jimp (JavaScript puro, centenas de ms a bloquear a interface). Nunca mais de duas em simultâneo.
+ * Decodes with sharp (native, off the main thread: a 9 Mpx photo in tens of ms), falling back to jimp (pure
+ * JavaScript, hundreds of ms blocking the UI) only when sharp isn't available. Never more than two at once.
  */
 type SharpFn = typeof import('sharp').default
 let sharpMod: SharpFn | null | undefined
@@ -90,8 +90,9 @@ export function decode(path: string): Promise<Decoded | Error> {
 }
 
 /**
- * Tamanho em células para uma imagem de w×h px, assumindo células com o dobro da altura da largura. Com `fill`
- * ocupa toda a largura disponível (reduzida só se a altura não chegar); sem `fill` não cresce além do tamanho natural.
+ * Size in cells for a w×h px image, assuming cells twice as tall as they are wide. With `fill` it occupies the
+ * whole available width (shrunk only if the height doesn't fit); without `fill` it never grows past its natural
+ * size.
  */
 export function cellSize(w: number, h: number, maxCols: number, maxRows: number, fill = false): { cols: number; rows: number } {
   let cols = Math.max(1, fill ? maxCols : Math.min(maxCols, Math.round(w / 8)))
@@ -103,7 +104,7 @@ export function cellSize(w: number, h: number, maxCols: number, maxRows: number,
   return { cols, rows }
 }
 
-/** Linhas de meios-blocos ▀ com cor de 24 bits (o blessed reduz a 256 cores): duas filas de pixels por linha. */
+/** Rows of ▀ half-blocks in 24-bit color (blessed reduces it to 256 colors): two pixel rows per line. */
 export function halfBlocks(d: Decoded, cols: number, rows: number): string[] {
   const out: string[] = []
   const sx = d.rw / cols, sy = d.rh / (rows * 2)
@@ -129,7 +130,7 @@ export function halfBlocks(d: Decoded, cols: number, rows: number): string[] {
 
 export type ImageMode = 'kitty' | 'blocks' | 'none'
 
-/** `WA_IMAGES` força o modo; senão vale o que o terminal respondeu à sondagem. */
+/** `WA_IMAGES` forces the mode; otherwise what the terminal answered during probing is used. */
 export function detectImageMode(kittyGraphics: boolean): ImageMode {
   const forced = process.env.WA_IMAGES
   if (forced === 'kitty' || forced === 'blocks' || forced === 'none') return forced
@@ -137,8 +138,8 @@ export function detectImageMode(kittyGraphics: boolean): ImageMode {
 }
 
 /**
- * Protocolo gráfico do Kitty (Ghostty, Kitty, WezTerm): a imagem é transmitida uma vez por id e depois colocada
- * em células do ecrã em cada frame. Com q=2 o terminal não responde, para não misturar bytes no stdin do blessed.
+ * Kitty graphics protocol (Ghostty, Kitty, WezTerm): the image is transmitted once per id and then placed in
+ * screen cells on every frame. With q=2 the terminal doesn't reply, so as not to mix bytes into blessed's stdin.
  */
 export class KittyImages {
   private ids = new Map<string, number>()
@@ -166,14 +167,14 @@ export class KittyImages {
     return id
   }
 
-  /** Apaga todas as colocações no ecrã (os dados ficam no terminal). Chamar no início de cada frame. */
+  /** Clears every placement on screen (the data stays in the terminal). Call at the start of each frame. */
   clear() {
     this.write('\x1b_Ga=d,d=a,q=2\x1b\\')
   }
 
   /**
-   * Coloca a imagem com o canto superior esquerdo na célula (col,row), 1-based, ocupando cols×rows células.
-   * `crop` é a fracção vertical visível [top,bottom) de 0 a 1, para imagens meio fora do painel.
+   * Places the image with its top-left corner at cell (col,row), 1-based, occupying cols×rows cells.
+   * `crop` is the visible vertical fraction [top,bottom) from 0 to 1, for images partly outside the panel.
    */
   place(path: string, d: Decoded, col: number, row: number, cols: number, rows: number, cropTop = 0, cropBottom = 1) {
     const id = this.ids.get(path) ?? this.transmit(path, d.png)
@@ -182,7 +183,7 @@ export class KittyImages {
     this.write(`\x1b7\x1b[${row};${col}H\x1b_Ga=p,i=${id},c=${cols},r=${rows},x=0,y=${y},w=${pw},h=${h},C=1,q=2\x1b\\\x1b8`)
   }
 
-  /** Liberta tudo, ao sair. */
+  /** Releases everything, on exit. */
   dispose() {
     this.write('\x1b_Ga=d,d=A,q=2\x1b\\')
     this.ids.clear()

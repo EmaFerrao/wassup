@@ -2,31 +2,32 @@ import type blessed from 'blessed'
 import { mix, nearest256, type Rgb } from './rainbow.js'
 
 /**
- * Um coração (ou um beijo) sozinho, enviado ou recebido, faz subir pelo painel de mensagens um coração grande (ou uns
- * lábios), da cor do emoji, que nasce sobre a própria mensagem, cresce e sobe, como o Instagram fazia no chat.
- * Desenha-se por cima de tudo, só nas células do desenho, escrevendo directamente no buffer do ecrã do blessed a partir
- * de um elemento vazio que é o último a renderizar.
+ * A heart (or a kiss) sent or received alone makes a big heart (or lips), in the emoji's color, rise through the
+ * message panel: it's born over the message itself, grows and rises, like Instagram used to do in chat.
+ * It draws over everything, only on the cells of the shape, writing directly into blessed's screen buffer from
+ * an empty element that is the last to render.
  */
 export type Kind = 'heart' | 'kiss'
 /**
- * A forma vem de uma função implícita de coração, amostrada a meia célula: cada célula do terminal tem dois "pixels",
- * o de cima e o de baixo, desenhados com ▀ e ▄ (a cor de cima no texto, a de baixo no fundo quando ambos estão dentro).
- * A cobertura de cada pixel, por 4×2 subpontos, mistura a cor com o fundo e suaviza as bordas; uma luz de cima à
- * esquerda dá o volume. Uma célula é cerca de duas vezes mais alta que larga, por isso os pixels saem quadrados.
+ * The shape comes from an implicit heart function, sampled at half-cell resolution: each terminal cell has two
+ * "pixels", top and bottom, drawn with ▀ and ▄ (top color in the foreground, bottom in the background when both
+ * are filled). Each pixel's coverage, via 4×2 subpoints, blends the color with the background and softens the
+ * edges; a light from the upper left gives it volume. A cell is about twice as tall as it is wide, so the pixels
+ * come out square.
  */
 interface Px { cover: number; light: number }
-/** Cada forma: largura em colunas para `h` linhas, se (x, y) normalizados estão dentro, e a janela de (x, y) a amostrar. */
+/** Each shape: width in columns for `h` lines, whether normalized (x, y) is inside, and the (x, y) window to sample. */
 interface Form { width: (h: number) => number; inside: (x: number, y: number) => boolean; xr: [number, number]; yr: [number, number]; shade?: (x: number, y: number) => number }
 const FORMS: Record<Kind, Form> = {
-  // Coração implícito: os lóbulos chegam a y≈1.15 e a ponta a y≈-1; a largura máxima é x≈±1.15. Pixels quadrados.
+  // Implicit heart: the lobes reach y≈1.15 and the tip y≈-1; max width is x≈±1.15. Square pixels.
   heart: {
     width: h => 2 * h - 1,
     inside: (x, y) => { const a = x * x + y * y - 1; return a * a * a - x * x * y * y * y <= 0 },
     xr: [-1.2, 1.2], yr: [1.2, -1.05],
   },
-  // Lábios como a marca de beijo 💋: duas vezes mais largos que altos e inclinados uns 30°, com o canto esquerdo em
-  // baixo; o lábio de cima com o arco de cupido ao meio, o de baixo mais cheio, e a boca entreaberta entre eles, uma
-  // fenda que se fecha nos cantos.
+  // Lips like the kiss mark 💋: twice as wide as tall and tilted about 30°, with the left corner down; the upper
+  // lip with the cupid's bow in the middle, the lower one fuller, and the mouth slightly open between them, a
+  // slit that closes at the corners.
   kiss: {
     width: h => Math.round(2.25 * h),
     inside: (x, y) => {
@@ -40,17 +41,17 @@ const FORMS: Record<Kind, Form> = {
     xr: [-1.12, 1.12], yr: [1.0, -1.0],
   },
 }
-/** Do espaço do desenho para o dos lábios deitados: roda 30° no sentido contrário ao dos ponteiros. */
+/** From drawing space to the tilted-lips space: rotates 30° counterclockwise. */
 const TILT = Math.PI / 6
 function lipSpace(x: number, y: number): [number, number] {
   return [x * Math.cos(TILT) + y * Math.sin(TILT), -x * Math.sin(TILT) + y * Math.cos(TILT)]
 }
 /**
- * Pixels por célula: oitavos na vertical e quartos na horizontal, que numa célula com o dobro da altura dá pixels
- * quadrados; é o que os blocos de oitavos (▁▂▃▄▅▆▇) e os de quartos (▎▌▊) permitem desenhar.
+ * Pixels per cell: eighths vertically and quarters horizontally, which in a cell twice as tall as it is wide gives
+ * square pixels; that's what the eighth blocks (▁▂▃▄▅▆▇) and quarter blocks (▎▌▊) let you draw.
  */
 const PW = 4, PH = 8
-/** A forma com `H` pixels de altura (a largura segue a proporção da forma); uma por altura, para o crescimento ser pixel a pixel. */
+/** The shape with `H` pixels of height (width follows the shape's proportion); one per height, so growth is pixel by pixel. */
 const shapeCache = new Map<string, (Px | null)[][]>()
 function makeShape(kind: Kind, H: number): (Px | null)[][] {
   const key = `${kind}:${H}`
@@ -82,8 +83,8 @@ function makeShape(kind: Kind, H: number): (Px | null)[][] {
   return rows
 }
 /**
- * Blocos com que se aproxima uma célula de 4×4 pixels: a máscara diz que pixels o carácter pinta com a cor do texto
- * (bit r·4+c, linha r de cima para baixo, coluna c da esquerda para a direita). Metades, oitavos verticais, quartos horizontais e quadrantes.
+ * Blocks used to approximate a 4×4-pixel cell: the mask says which pixels the character paints in the foreground
+ * color (bit r·4+c, row r top to bottom, column c left to right). Halves, vertical eighths, horizontal quarters and quadrants.
  */
 const BLOCKS: { ch: string; mask: number }[] = (() => {
   const m = (f: (r: number, c: number) => boolean) => { let v = 0; for (let r = 0; r < PH; r++) for (let c = 0; c < PW; c++) if (f(r, c)) v |= 1 << (r * PW + c); return v >>> 0 }
@@ -104,22 +105,22 @@ const FULL = 0xffffffff
 const TOP_HALF = BLOCKS.find(b => b.ch === '▀')!.mask
 const bits = (v: number) => { v >>>= 0; let n = 0; while (v) { n += v & 1; v >>>= 1 } return n }
 
-/** Altura máxima em linhas: os lábios são mais baixos, porque são o dobro de largos. */
+/** Max height in lines: lips are shorter, because they're twice as wide. */
 const MAX_H: Record<Kind, number> = { heart: 8, kiss: 10 }
 const LIFE_MS = 4200
 const FRAME_MS = 20
 
-/** Só um coração ou um beijo, de qualquer cor ou feitio, sem mais nada: a forma e a cor a animar, ou nada. */
+/** Only a heart or a kiss, any color or shape, with nothing else: the shape and color to animate, or nothing. */
 export function reaction(text: string): { kind: Kind; color: Rgb } | null {
   const t = text.trim()
-  if (/^(?:<3|[♥♡❣💟❤🧡💛💚💙💜🖤🤍🤎🩷🩵🩶💖💗💓💞💕💘💝]\uFE0F?(?:\u200D[🔥🩹]\uFE0F?)?)$/u.test(t)) return { kind: 'heart', color: heartColor(t) }
-  // Caras a beijar, a marca do beijo, o casal (💏, ou as sequências 👩‍❤️‍💋‍👨 com a marca no meio) e o ":*".
-  const oneEmoji = /^\p{Extended_Pictographic}(?:\uFE0F|\p{Emoji_Modifier}|\u200D\p{Extended_Pictographic})*$/u.test(t)
+  if (/^(?:<3|[♥♡❣💟❤🧡💛💚💙💜🖤🤍🤎🩷🩵🩶💖💗💓💞💕💘💝]️?(?:‍[🔥🩹]️?)?)$/u.test(t)) return { kind: 'heart', color: heartColor(t) }
+  // Kissing faces, the kiss mark, the couple (💏, or the 👩‍❤️‍💋‍👨 sequences with the mark in the middle) and ":*".
+  const oneEmoji = /^\p{Extended_Pictographic}(?:️|\p{Emoji_Modifier}|‍\p{Extended_Pictographic})*$/u.test(t)
   if (/^:-?\*$/.test(t) || (oneEmoji && /[😘😗😙😚💋💏]/u.test(t))) return { kind: 'kiss', color: [225, 30, 70] }
   return null
 }
 
-/** A cor do coração usado: vermelho por omissão (❤ ♥ ♡ ❣ 💟 <3, e o ❤️‍🔥 e ❤️‍🩹), e cada um dos outros com a sua. */
+/** The color of the heart used: red by default (❤ ♥ ♡ ❣ 💟 <3, and ❤️‍🔥 and ❤️‍🩹), and each of the others with its own. */
 function heartColor(t: string): Rgb {
   if (/🧡/u.test(t)) return [255, 140, 0]
   if (/💛/u.test(t)) return [255, 215, 0]
@@ -136,7 +137,7 @@ function heartColor(t: string): Rgb {
   return [255, 30, 60]
 }
 
-/** Onde nasce resolve-se no primeiro desenho, já com a mensagem no ecrã: `at` devolve a célula do emoji, ou nada. */
+/** Where it's born is resolved on the first draw, once the message is on screen: `at` returns the emoji's cell, or nothing. */
 interface Heart { born: number; kind: Kind; color: Rgb; at: () => { x: number; y: number } | null; x?: number; y?: number }
 
 type Cell = [number, string]
@@ -148,12 +149,12 @@ export class Hearts {
   private layer: blessed.Widgets.BoxElement
 
   constructor(private screen: blessed.Widgets.Screen, private over: blessed.Widgets.BoxElement, private bg: Rgb, make: typeof blessed.box) {
-    // Elemento sem conteúdo nem tamanho: só serve para desenhar na sua vez, por cima dos irmãos criados antes.
+    // Element with no content or size: it only exists to draw in its turn, over the siblings created before it.
     this.layer = make({ parent: screen, top: 0, left: 0, width: 1, height: 1, hidden: true })
     this.layer.render = (() => { this.draw(); return undefined }) as unknown as typeof this.layer.render
   }
 
-  /** Lança a forma, da cor dada, a partir da célula que `at` indicar (a do emoji na mensagem). */
+  /** Launches the shape, in the given color, from the cell that `at` reports (the emoji's, in the message). */
   launch(kind: Kind, color: Rgb, at: () => { x: number; y: number } | null) {
     this.hearts.push({ born: Date.now(), kind, color, at })
     if (!this.timer) this.timer = setInterval(() => this.tick(), FRAME_MS)
@@ -166,7 +167,7 @@ export class Hearts {
     this.screen.render()
   }
 
-  /** Para cada coração vivo: sobe com o tempo, cresce em três tamanhos e funde-se com o fundo no último terço. */
+  /** For each live heart: rises over time, grows through three sizes and blends into the background in the last third. */
   private draw() {
     if (!this.hearts.length) return
     const now = Date.now()
@@ -177,29 +178,29 @@ export class Hearts {
       const p = (now - h.born) / LIFE_MS
       if (p < 0) continue
       if (h.x == null || h.y == null) {
-        // A mensagem pode ainda não estar desenhada: espera-se até meio segundo; depois nasce ao fundo, ao meio.
+        // The message may not be drawn yet: wait up to half a second; after that it's born at the bottom, centered.
         const pos = h.at()
         if (!pos && now - h.born < 500) continue
         const { x, y } = pos ?? { x: left + Math.floor(width / 2), y: top + height - 1 }
         h.x = x; h.y = y; h.born = now
       }
-      // Cresce continuamente até metade do caminho e depois fica no tamanho máximo.
+      // Grows continuously until halfway, then stays at max size.
       const maxH = MAX_H[h.kind]
       const fullH = PH * maxH
       const shape = makeShape(h.kind, Math.max(2, Math.min(fullH, Math.round(p * 2 * fullH))))
-      // Cor cheia do princípio ao fim: surge, sobe e desaparece ao chegar ao topo, sem escurecer.
+      // Full color from start to finish: appears, rises and disappears on reaching the top, without darkening.
       const fade = 0
-      // Sobe desde a linha da mensagem, a ponta de baixo a começar sobre o emoji, até sair toda pelo topo do painel,
-      // a deslizar entretanto para o centro; nunca sai pelos lados nem por baixo. O movimento é em quartos de célula
-      // nas duas direcções: a forma empacota-se em células a partir de qualquer pixel.
+      // Rises from the message's line, bottom tip starting over the emoji, until it's entirely off the top of the
+      // panel, sliding meanwhile toward the center; it never goes off the sides or the bottom. Movement is in
+      // quarter-cells in both directions: the shape packs into cells starting from any pixel.
       const H = shape.length, W = shape[0]!.length
       const travelPx = (h.y - top + maxH + 1) * PH
       const topPx = Math.min((top + height) * PH - H, (h.y + 1) * PH - H - Math.round(p * travelPx))
       const ease = 1 - (1 - p) * (1 - p)
       const cxPx = (h.x + 0.5 + (left + width / 2 - h.x - 0.5) * ease) * PW
       const leftPx = Math.max(left * PW, Math.min((left + width) * PW - W, Math.round(cxPx - W / 2)))
-      // Volume: o lado oposto à luz tende para a cor de fundo do terminal (não para preto), brilho quase branco perto
-      // dela; a cobertura parcial nas bordas mistura com o mesmo fundo.
+      // Volume: the side opposite the light tends toward the terminal's background color (not black), near-white
+      // brightness close to it; partial coverage at the edges blends with that same background.
       const color = (qs: Px[]): number => {
         const q = { cover: qs.reduce((a, b) => a + b.cover, 0) / qs.length, light: qs.reduce((a, b) => a + b.light, 0) / qs.length }
         const shaded = mix(mix(h.color, this.bg, 0.5 * (1 - q.light)), [255, 255, 255], 0.45 * Math.max(0, q.light - 0.55) / 0.45)
@@ -213,7 +214,7 @@ export class Hearts {
         for (let x = Math.max(left, firstCol); x <= Math.min(left + width - 1, lastCol); x++) {
           const cell = row[x]
           if (!cell) continue
-          // Os 32 pixels da célula e a máscara dos presentes.
+          // The cell's 32 pixels and the mask of those present.
           const q: (Px | null)[] = []
           let mask = 0
           for (let r = 0; r < PH; r++) for (let c = 0; c < PW; c++) {
@@ -225,11 +226,12 @@ export class Hearts {
           if (!mask) continue
           const keep = cell[0] & 0x1ff
           const pick = (m: number) => q.filter((v, i): v is Px => !!v && !!((m >>> i) & 1))
-          // Célula cheia: ▀ com a metade de cima no texto e a de baixo no fundo, para o sombreado ter meia célula.
+          // Full cell: ▀ with the top half in the foreground and the bottom in the background, so shading gets half-cell resolution.
           if (mask === FULL) { cell[0] = (color(pick(TOP_HALF)) << 9) | color(pick(~TOP_HALF >>> 0)); cell[1] = '▀'; row.dirty = true; continue }
-          // Senão o bloco que erra menos pixels. Os presentes fora do bloco pintam-se no fundo da célula (tapando o
-          // que lá estava); sem nenhum, o fundo fica. Pixels ausentes dentro do bloco, ou fora dele quando o fundo é
-          // pintado, contam como erro. Em empate, o bloco que cobre mais presentes.
+          // Otherwise the block that misses the fewest pixels. Pixels present outside the block are painted in the
+          // cell's background (covering what was there); with none, the background stays. Missing pixels inside the
+          // block, or outside it when the background gets painted, count as errors. Ties go to the block covering
+          // more present pixels.
           let best = BLOCKS[0]!, bestErr = Infinity, bestHit = -1
           for (const b of BLOCKS) {
             const outside = (mask & ~b.mask) >>> 0

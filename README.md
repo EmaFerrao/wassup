@@ -1,105 +1,109 @@
 # wa
 
-Cliente WhatsApp em modo terminal, inspirado no [wechit](https://github.com/LingDong-/wechit). Liga-se como
-"dispositivo associado" através da biblioteca [baileys](https://github.com/WhiskeySockets/Baileys), guarda tudo em
-SQLite local e desenha a interface com painéis, rato e imagens no próprio terminal.
+A WhatsApp client for the terminal, inspired by [wechit](https://github.com/LingDong-/wechit). It connects as a
+"linked device" through the [baileys](https://github.com/WhiskeySockets/Baileys) library, keeps everything in a local
+SQLite database and draws the interface with panels, mouse and images right in the terminal.
 
-## Arrancar
+## Running
 
 ```sh
 npm install
-./wa            # ou: npm start
-./wa ema        # abre logo a conversa cujo nome ou número contém "ema"
+./wa            # or: npm start
+./wa emma       # opens straight into the chat whose name or number contains "emma"
 ```
 
-Na primeira vez aparece um código QR: no telemóvel, WhatsApp › Definições › Dispositivos associados › Associar
-dispositivo. A sessão fica guardada e nas vezes seguintes liga directamente.
+The first time, a QR code appears: on the phone, WhatsApp › Settings › Linked devices › Link a device. The session is
+saved and later runs connect directly.
 
-Enquanto se usa o terminal o cliente anuncia-se "disponível" ao WhatsApp, por isso o telemóvel não notifica, tal
-como com o WhatsApp Web aberto. Ao fim de 2 minutos parado volta a "indisponível".
+While the terminal is in use the client announces itself "available" to WhatsApp, so the phone does not notify, just
+as with WhatsApp Web open. After 2 minutes idle it goes back to "unavailable".
 
-Requisitos: Node 22.13 ou mais recente (usa o SQLite embutido no Node).
+Requirements: Node 22.13 or newer (it uses the SQLite built into Node).
+
+Language: Portuguese or English, from `WA_LANG` or the locale (`LC_ALL`, `LC_MESSAGES`, `LANG`). It sets the interface
+texts, the emoji names and the language of the writing suggestions.
 
 ## Interface
 
-Mensagens a toda a largura, a escrita em baixo com o prompt `>`, e no fundo a barra de tabs com o estado da ligação
-à direita. Sem molduras nem fundos próprios: as cores são as do tema do terminal, e no arranque pergunta-se ao
-terminal a cor real do fundo para escolher tons claros ou escuros.
+Messages across the full width, the input at the bottom with the `>` prompt, and under it the tab bar with the
+connection state on the right. No frames or backgrounds of its own: the colours are the terminal theme's, and on
+startup the terminal is asked for its real background colour to pick light or dark shades.
 
-- **Tabs**: um por conversa aberta, com as não lidas a vermelho e um `×` para fechar. Tab circula pelos abertos;
-  o que ficou por enviar fica guardado em cada conversa. Enquanto alguém escreve, um arco-íris corre pelo nome.
-  Mensagens novas numa conversa sem tab abrem-no sem o activar, com um aviso passageiro sobre ele e a campainha.
-- **Conversas**: `/` abre a lista, com as mais recentes em baixo e um excerto da última mensagem; o que se escreve
-  filtra, sem acentos nem maiúsculas; Enter ou clique abrem.
-- **Mensagens**: as tuas à direita. Roda do rato ou PgUp/PgDn. Clique num anexo abre-o com `xdg-open`,
-  descarregando-o se preciso. Clique ou ↑ selecciona uma mensagem: escrever responde-lhe, `:` reage, Delete abre
-  uma tua para a corrigir. Arrastar uma mensagem para a direita, ou → com ela seleccionada, também começa a resposta.
-- **Escrita**: cresce com o texto até metade do ecrã; Enter envia, Shift+Enter ou Ctrl+J começam uma linha nova e
-  colar várias linhas mantém-nas. Ctrl-U limpa, Shift-Backspace apaga a palavra (com o protocolo de teclado do
-  Kitty). `:` e duas letras abrem a lista de emojis; ↑/↓, Enter, Tab, → ou um clique escolhem.
-- Esc fecha, por ordem: o filtro, a lista, o tab activo. Fechar o último tab sai. Ctrl-C sai logo.
-- **Vários terminais**: o primeiro processo é o servidor com a ligação ao WhatsApp; os seguintes ligam-se a ele por um
-  socket e são só interface, cada um com os seus tabs. Se o servidor terminar, outro assume a ligação.
-- **Conversa única**: `wa <nome>` abre só essa conversa, sem barra de tabs nem avisos das outras; a lista `/` troca-a.
-  Um coração ou um beijo sozinhos, em mensagem ou reacção, fazem subir pelo painel um coração ou uns lábios da cor
-  do emoji, desenhados em blocos.
+- **Tabs**: one per open chat, with the unread count in red and an `×` to close. Tab cycles through them; whatever
+  is left unsent stays with each chat. While someone is typing, a rainbow runs along the name. New messages in a chat
+  without a tab open one without activating it, with a passing notice over it and the bell.
+- **Chats**: `/` opens the list, most recent at the bottom, with an excerpt of the last message; typing filters it,
+  ignoring accents and case; Enter or a click opens.
+- **Messages**: yours on the right. Mouse wheel or PgUp/PgDn. Clicking an attachment opens it with `xdg-open`,
+  downloading it first if needed. Click or ↑ selects a message: typing replies to it, `:` reacts, Delete opens one of
+  yours for editing. Dragging a message to the right, or → with it selected, also starts a reply.
+- **Input**: grows with the text up to half the screen; Enter sends, Shift+Enter or Ctrl+J start a new line, and
+  pasting several lines keeps them. Ctrl-U clears, Shift-Backspace deletes a word (with the Kitty keyboard protocol).
+  `:` and two letters open the emoji list; ↑/↓, Enter, Tab, → or a click pick one.
+- Esc closes, in order: the filter, the list, the active tab. Closing the last tab quits. Ctrl-C quits at once.
+- **Several terminals**: the first process is the server with the WhatsApp connection; the next ones connect to it
+  through a socket and are interface only, each with its own tabs. If the server ends, another one takes over.
+- **Single chat**: `wa <name>` opens only that chat, without the tab bar or notices from others; the `/` list swaps
+  it. A heart or a kiss on its own, as a message or a reaction, sends a heart or a pair of lips in the emoji's colour
+  floating up the panel, drawn in block characters.
 
 ### Herdr
 
-Dentro do [Herdr](https://herdr.dev) o `wa` arranca em conversa única e cada conversa é um tab dele: escolher uma na
-lista abre um tab novo (ou foca o que já a tem), e uma mensagem de uma conversa sem tab abre um em segundo plano. O
-título do tab segue a conversa, com `●` quando há por ler, e o `wa` aparece na lista de agentes do Herdr: `working`
-enquanto a pessoa escreve, `blocked` com mensagens por ler, `idle` caso contrário. Fora do Herdr, o título da janela
-do terminal faz o mesmo.
+Inside [Herdr](https://herdr.dev) `wa` starts in single-chat mode and each chat is a Herdr tab: picking one from the
+list opens a new tab (or focuses the one that already has it), and a message from a chat without a tab opens one in
+the background. The tab title follows the chat, with `●` when there is something unread, and `wa` shows up in Herdr's
+agent list: `working` while the other person types, `blocked` with unread messages, `idle` otherwise. Outside Herdr
+the terminal window title does the same.
 
-### Formatação e emojis
+### Formatting and emoji
 
-A marcação do WhatsApp é mostrada com atributos do terminal: `*negrito*`, `_itálico_`, `~riscado~`, `` `código` ``,
-`> citação`. Ao enviar, escreve-se a marcação tal como no telemóvel. Códigos `:nome:` são trocados pelo emoji ao
-fechar o segundo `:`, com nomes em português e em inglês (`:fixe:` 👍, `:beijinho:` 😘, `:bica:` ☕ …; lista em
-`src/emoji.ts`), e os smileys clássicos isolados por espaços também (`:)`, `;)`, `<3` …).
+WhatsApp markup is shown with terminal attributes: `*bold*`, `_italic_`, `~strikethrough~`, `` `code` ``, `> quote`.
+When sending, write the markup as on the phone. `:name:` codes are replaced by the emoji as soon as the second `:` is
+typed, with names in Portuguese and in English (`:thumbsup:` 👍, `:kissing_heart:` 😘, `:coffee:` ☕ …; the list is in
+`src/emoji.ts`), and classic smileys surrounded by spaces too (`:)`, `;)`, `<3` …). The suggestion list only shows the
+names in the user's language.
 
-### Imagens
+### Images
 
-No arranque o cliente pergunta ao terminal o que sabe fazer, sem assumir nada pelo `TERM`. Em terminais com o
-protocolo gráfico do Kitty (Ghostty, Kitty, WezTerm, Konsole) as imagens, stickers e miniaturas aparecem a sério no
-painel; nos restantes são desenhadas com meios-blocos coloridos. `WA_IMAGES=kitty|blocks|none` força o modo.
+On startup the client asks the terminal what it can do, assuming nothing from `TERM`. In terminals with the Kitty
+graphics protocol (Ghostty, Kitty, WezTerm, Konsole) images, stickers and thumbnails are shown for real inside the
+panel; elsewhere they are drawn with coloured half-blocks. `WA_IMAGES=kitty|blocks|none` forces the mode.
 
-## Sugestões de escrita
+## Writing suggestions
 
-Com um `llama-server` local em `http://127.0.0.1:8080` (ou `WA_LLM`), modelo `gemma4-26b` (ou `WA_LLM_MODEL`), a
-escrita pede uma sugestão pouco depois da última tecla, com as últimas mensagens como contexto: as letras que faltam à
-palavra a meio, coladas ao cursor, ou a palavra certa a seguir a `⇢`, seja a palavra a meio corrigida ou um erro mais
-atrás (ortografia, acentos, palavras coladas, expressão ou gramática). Tab ou → aceitam; várias setas seguidas aceitam
-as correcções em cadeia. `WA_LLM=off` desliga.
+With a local `llama-server` at `http://127.0.0.1:8080` (or `WA_LLM`), model `gemma4-26b` (or `WA_LLM_MODEL`), the
+input asks for a suggestion shortly after the last key, with the latest messages as context: the letters missing from
+the word being typed, right at the cursor, or the right word after `⇢`, be it the current word corrected or an error
+further back (spelling, accents, words run together, phrasing or grammar). Tab or → accept; several arrows in a row
+accept the corrections one after another. The prompt is in the user's language. `WA_LLM=off` disables it.
 
-## Dados
+## Data
 
-Tudo em `~/.config/wa` (ou `WA_HOME`):
+Everything lives in `~/.config/wa` (or `WA_HOME`):
 
-| Caminho | Conteúdo |
+| Path | Contents |
 |---|---|
-| `auth/` | Credenciais da sessão (apagar para associar de novo) |
-| `wa.db` | SQLite com conversas, contactos, mensagens e reacções |
-| `media/<conversa>/` | Anexos descarregados e miniaturas |
-| `wa.log` | Log (nível com `WA_LOG=info|debug`) |
+| `auth/` | Session credentials (delete to link again) |
+| `wa.db` | SQLite with chats, contacts, messages and reactions |
+| `media/<chat>/` | Downloaded attachments and thumbnails |
+| `wa.log` | Log (level with `WA_LOG=info|debug`) |
 
-O histórico começa com o que o WhatsApp envia aos dispositivos novos. `WA_FULL_HISTORY=1` pede o histórico completo
-na associação.
+History starts with what WhatsApp sends to new devices. `WA_FULL_HISTORY=1` asks for the full history when linking.
 
-## Estrutura
+## Layout
 
-| Ficheiro | Papel |
+| File | Role |
 |---|---|
-| `src/wa.ts` | Ligação ao WhatsApp: QR, reconexão, mensagens, reacções, envio, anexos |
-| `src/ipc.ts` | Servidor e cliente por socket Unix, para vários processos partilharem uma ligação |
-| `src/db.ts` | Esquema e consultas SQLite (`node:sqlite`) |
-| `src/ui.ts` | Interface blessed: painéis, teclado, rato, desenho das mensagens |
-| `src/format.ts` | Marcação do WhatsApp, datas, cores, quebra de linhas |
-| `src/image.ts` | Descodificação, meios-blocos, protocolo gráfico do Kitty |
-| `src/term.ts` | Sondagem das capacidades do terminal |
-| `src/kittykeys.ts`, `src/paste.ts` | Protocolo de teclado do Kitty e colagem com parênteses, lidos antes do blessed |
-| `src/herdr.ts` | Estado de agente, títulos e tabs no Herdr |
-| `src/hearts.ts` | Animação do coração e do beijo |
-| `src/llm.ts` | Sugestões de escrita pelo `llama-server` local |
-| `src/emoji.ts`, `src/italic.ts`, `src/rainbow.ts` | Tabela `:nome:`, itálico no blessed, cores |
+| `src/wa.ts` | WhatsApp connection: QR, reconnection, messages, reactions, sending, attachments |
+| `src/ipc.ts` | Server and client over a Unix socket, so several processes share one connection |
+| `src/db.ts` | SQLite schema and queries (`node:sqlite`) |
+| `src/ui.ts` | blessed interface: panels, keyboard, mouse, message rendering |
+| `src/format.ts` | WhatsApp markup, dates, colours, line wrapping |
+| `src/image.ts` | Decoding, half-blocks, Kitty graphics protocol |
+| `src/term.ts` | Probing the terminal's capabilities |
+| `src/kittykeys.ts`, `src/paste.ts` | Kitty keyboard protocol and bracketed paste, read before blessed |
+| `src/herdr.ts` | Agent state, titles and tabs in Herdr |
+| `src/hearts.ts` | Heart and kiss animation |
+| `src/i18n.ts` | Interface strings in Portuguese and English |
+| `src/llm.ts` | Writing suggestions from the local `llama-server` |
+| `src/emoji.ts`, `src/italic.ts`, `src/rainbow.ts` | `:name:` table, italics in blessed, colours |
