@@ -74,9 +74,8 @@ half-blocks. `YAP_IMAGES=kitty|blocks|none` forces the mode.
 
 With a local `llama-server` at `http://127.0.0.1:8080` (or `YAP_LLM`), model `gemma4-26b` (or `YAP_LLM_MODEL`), the
 input asks for a suggestion shortly after the last key, with the latest messages as context: the letters missing from
-the word being typed, right at the cursor, or the right word after `⇢`, be it the current word corrected or an error
-further back (spelling, accents, words run together, phrasing or grammar). Tab or → accept; several arrows in a row
-accept the corrections one after another. The prompt is in the user's language. `YAP_LLM=off` disables it.
+the word being typed, right at the cursor, or the right word above the wrong one. Tab or → accept. The prompt is in
+the user's language. `YAP_LLM=off` disables it.
 
 ## Data
 

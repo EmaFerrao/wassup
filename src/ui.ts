@@ -124,6 +124,8 @@ export class Ui {
   private suggestStart = 0
   /** Local model suggestion for the text `text` (continuation or correction), requested 150 ms after the last keystroke and shown for 4 s. */
   private ghost: { text: string; s: Suggestion } | undefined
+  /** The correction floating right above the word it replaces. */
+  private ghostBox!: blessed.Widgets.BoxElement
   private ghostTimer: NodeJS.Timeout | undefined
   private ghostAbort: AbortController | undefined
   /** Right-arrow presses with the next suggestion still on the way: accepted on arrival, one per arrow, so → → → correct in a chain. */
@@ -279,6 +281,11 @@ export class Ui {
     // Emoji suggestions, above the input and over the messages, with the highlight background to stand out.
     this.suggest = blessed.box({
       parent: this.screen, top: '100%-4', left: 0, width: 1, height: 1, tags: true, hidden: true, padding: { left: 1 }, wrap: false, mouse: true,
+      style: { bg: this.selectedBg } as unknown as blessed.Widgets.Types.TStyle,
+    })
+    // The model's correction, floating one line above the word it replaces, with the same background.
+    this.ghostBox = blessed.box({
+      parent: this.screen, top: 0, left: 0, width: 1, height: 1, tags: true, hidden: true, wrap: false,
       style: { bg: this.selectedBg } as unknown as blessed.Widgets.Types.TStyle,
     })
     // A click on a line of the emoji list selects that one.
@@ -1488,7 +1495,7 @@ export class Ui {
    * Asks the model for a suggestion for the current text, `delay` ms after the last keystroke (150 while typing; 0
    * right after accepting one, which is when it's idle waiting for the next one), and only with the cursor at the
    * end, with no reaction in progress nor emoji suggestions open. A new request cancels the previous one; the
-   * response is only used if the text is still the same when it arrives, and it stays in view for 4 s.
+   * response is only used if the text is still the same when it arrives, and it stays in view for 10 s.
    */
   private scheduleGhost(delay = 150) {
     if (this.ghost && this.ghost.text !== this.inputValue) this.clearGhost()
@@ -1512,7 +1519,7 @@ export class Ui {
         this.ghost = { text, s }
         if (this.acceptOnArrival > 0) { this.acceptOnArrival--; return void this.acceptGhost() }
         if (this.ghostHide) clearTimeout(this.ghostHide)
-        this.ghostHide = setTimeout(() => { if (this.ghost?.text === text) { this.clearGhost(); this.drawInput(); this.screen.render() } }, 4000)
+        this.ghostHide = setTimeout(() => { if (this.ghost?.text === text) { this.clearGhost(); this.drawInput(); this.screen.render() } }, 10000)
         this.drawInput()
         this.screen.render()
       }, e => { this.acceptOnArrival = 0; if (!abort.signal.aborted) logger.debug({ e }, 'llm') })
@@ -1521,6 +1528,7 @@ export class Ui {
 
   private clearGhost() {
     this.ghost = undefined
+    this.ghostBox.hide()
     if (this.ghostHide) { clearTimeout(this.ghostHide); this.ghostHide = undefined }
   }
 
@@ -1592,9 +1600,9 @@ export class Ui {
       : this.replyTo
         ? `↩ ${target.chat_jid.endsWith('@g.us') && !target.from_me ? `${this.who(target)}: ` : ''}${this.snippet(target)}`
         : t('reactHeader', this.who(target), this.snippet(target))
-    // Model suggestion, discreet, in gray italic right after the text: the letters missing from the word mid-typing,
-    // attached to the cursor (which sits on the first one), or, two cells ahead, the correct word after "⇢", whether
-    // it's the mid-typed word corrected or a wrong word further back. Tab accepts.
+    // Model suggestion, discreet, in gray italic: the letters missing from the word mid-typing, attached to the cursor
+    // (which sits on the first one); a correction, whether of the mid-typed word or of a wrong word further back,
+    // floating on the line above the word, starting on its column. Tab accepts.
     const ghost = this.ghostShown()
     const view = ghost ? this.ghostView(ghost) : null
     this.inputHeader = header != null
@@ -1610,22 +1618,26 @@ export class Ui {
     // The "\n" or the space that closes a line stay in it, so the cursor counts them, but aren't drawn: one space
     // past the width would make blessed wrap the line. A trailing space that fits is drawn, so the cursor advances with it.
     const text = (l: string[]) => { const t = l.filter(c => c !== '\n').join(''); return strWidth(t) > width ? t.replace(/\s+$/, '') : t }
-    // The suggestion goes on the cursor's line if it fits there whole: the missing letters attached to the cursor, or
-    // "⇢ word" two cells ahead. Otherwise it goes on its own line, below, instead of being cut off.
+    // The missing letters go right at the cursor when they fit on its line. Any other suggestion is the whole word
+    // as it should be, floating right above the word it replaces, starting on the word's column (pulled left when it
+    // would run past the edge).
     const cursorLine = lines[row]!
     const avail = width - visibleWidth(esc(text(cursorLine))) - 1
-    let ghostNext = '', ghostTail = '', ghostBelow = ''
+    let ghostNext = '', ghostAbove = '', ghostLine = -1, ghostCol = 0
     if (view && col >= cursorLine.length) {
       if (view.kind === 'suffix' && strWidth(view.text) <= avail + 1) ghostNext = view.text
       else {
-        const word = `⇢ ${view.kind === 'suffix' ? ghost!.word!.to : view.text}`
-        if (strWidth(word) + 2 <= avail) ghostTail = `  ${word}`
-        else ghostBelow = truncate(word, width)
+        const word = view.kind === 'fix' ? ghost!.fix!.to : ghost!.word!.to
+        const startUnit = view.kind === 'fix' ? ghost!.fix!.start : this.inputValue.length - ghost!.word!.from.length
+        let at = graphemes(this.inputValue.slice(0, startUnit)).length, wl = 0
+        while (wl < lines.length - 1 && at >= lines[wl]!.length) at -= lines[wl++]!.length
+        ghostAbove = truncate(word, width)
+        ghostLine = wl
+        ghostCol = Math.max(0, Math.min(strWidth(lines[wl]!.slice(0, at).join('')), width - strWidth(ghostAbove)))
       }
     }
-    // The input grows with the text, up to half the screen; the header (reply, react, edit) and the suggestion on
-    // its own line each take up one of the lines.
-    const extra = (header ? 1 : 0) + (ghostBelow ? 1 : 0)
+    // The input grows with the text, up to half the screen; the header (reply, react, edit) takes up one of the lines.
+    const extra = header ? 1 : 0
     const rows = Math.max(1, Math.min(lines.length + extra, Math.floor(num(this.screen.height) / 2)))
     if (rows !== this.inputRows) this.resizeInput(rows)
     const rowsAvail = Math.max(1, rows - extra)
@@ -1641,15 +1653,23 @@ export class Ui {
         return before + dim(italic('{inverse}' + esc(g[0]!) + '{/inverse}' + esc(g.slice(1).join(''))))
       }
       const under = line[col] == null || line[col] === '\n' ? ' ' : line[col]!
-      return before + '{inverse}' + esc(under) + '{/inverse}' + esc(text(line.slice(col + 1))) + (ghostTail ? dim(italic(esc(ghostTail))) : '')
+      return before + '{inverse}' + esc(under) + '{/inverse}' + esc(text(line.slice(col + 1)))
     }
     const visible = lines.slice(this.inputTop, this.inputTop + rowsAvail)
     // The prompt says what the line does: ">" types, "/" filters the chats.
     const prompt = this.pickerOpen ? '/ ' : '> '
     const out = visible.map((l, i) => (this.inputTop + i === 0 ? prompt : '  ') + render(l, this.inputTop + i))
-    if (ghostBelow) out.push('  ' + dim(italic(esc(ghostBelow))))
     if (header) out.unshift(dim(esc(truncate(header, w))))
     this.input.setContent(out.join('\n'))
+    // The correction floats one line above its word's line, when that line is in view: the input starts `rows` from
+    // the bottom, the header (if any) takes its first row, the prompt its first two columns, after the padding.
+    if (ghostAbove && ghostLine >= this.inputTop && ghostLine < this.inputTop + rowsAvail) {
+      this.ghostBox.top = num(this.screen.height) - rows + extra + (ghostLine - this.inputTop) - 1
+      this.ghostBox.left = num(this.input.ileft) + 2 + ghostCol
+      this.ghostBox.width = strWidth(ghostAbove) + 1
+      this.ghostBox.setContent(dim(italic(esc(ghostAbove))))
+      this.ghostBox.show()
+    } else this.ghostBox.hide()
   }
 
   /**
