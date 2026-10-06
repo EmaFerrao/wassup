@@ -210,9 +210,11 @@ export class Ui {
     this.fgRgb = parseHex(caps.fg) ?? (this.dark ? [192, 192, 192] : [48, 48, 48])
     this.bgRgb = parseHex(caps.bg) ?? (this.dark ? [0, 0, 0] : [255, 255, 255])
     setTheme(this.dark)
-    patchBlessedUnicode(); patchBlessedDraw()
+    patchBlessedUnicode()
     this.screen = blessed.screen({ smartCSR: true, fullUnicode: caps.utf8, title: 'wa', warnings: false })
-    patchBlessedItalic(this.screen)
+    // Each patch rebuilds `draw` from the source of the one before, so the italic one, which only knows blessed's own
+    // variables, goes first; the wide-emoji one then adds its own on top.
+    patchBlessedItalic(this.screen); patchBlessedDraw()
     // With a UTF-8 locale, frames come out in Unicode box-drawing characters (─│┌). Without this, blessed switches to
     // the DEC line-drawing set, which SSH apps on phones don't know and show as q, x, l, k.
     if (caps.utf8) (this.screen.program as unknown as { tput: { brokenACS: boolean } }).tput.brokenACS = true
