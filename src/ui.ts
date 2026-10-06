@@ -156,6 +156,14 @@ export class Ui {
   /** Chats whose Herdr tab was requested recently and may not be registered yet. */
   private spawning = new Set<string>()
   private lineMap: (MessageRow | null)[] = []
+  /** Content lines (indices in `lineMap`) holding a message's name and time: the only ones a drag replies from. */
+  private headerLines = new Set<number>()
+  /**
+   * Text being selected with the mouse: the cell pressed (`ax`, `ay`) and the one the pointer is at (`hx`, `hy`),
+   * swept in reading order within the columns of the panel it started in (`xi`..`xl`). Copied to the clipboard on
+   * release and kept highlighted until the next click or key.
+   */
+  private textSel: { ax: number; ay: number; hx: number; hy: number; xi: number; xl: number } | undefined
   /** Drawn messages, in order; the selected one (click or arrows in the panel) and the one being replied to or reacted to. */
   private rows: MessageRow[] = []
   private selected: MessageRow | null = null
@@ -263,6 +271,9 @@ export class Ui {
 
     // Above everything, the hearts rising when a heart-only message is sent or received.
     this.hearts = new Hearts(this.screen, this.msgBox, this.bgRgb, blessed.box)
+    // Topmost of all: in its turn, inverts the cells of the text selection, whatever panel drew them.
+    const selLayer = blessed.box({ parent: this.screen, top: 0, left: 0, width: 1, height: 1, hidden: true })
+    selLayer.render = (() => { this.drawTextSel(); return undefined }) as unknown as typeof selLayer.render
 
     // Mouse with clicks, wheel and motion while a button is held (1000+1002) in SGR encoding (1006), instead of the
     // set blessed enables for xterm (1000/1002/1003/1005): any-motion reporting (1003) and UTF-8 encoding (1005)
@@ -333,39 +344,43 @@ export class Ui {
       this.activateTab(seg.index)
     })
     // Clicking a message selects it (and opens the attachment if the click lands on one); outside messages it
-    // returns focus to the input. Dragging a message to the right (press and release on the same line, 4 or more
-    // columns ahead) starts a reply to it, like on WhatsApp mobile. The terminal only gives the press and release,
-    // not the movement.
+    // returns focus to the input. Dragging a message's name and time line to the right (press and release on
+    // that line, 4 or more columns ahead) starts a reply to it, like on WhatsApp mobile; dragging over any other
+    // line selects text (below).
     // While the button is held the message's lines slide right with the pointer, like WhatsApp Web; letting go
     // 4 or more columns to the right starts the reply, less snaps back. In SGR the motion reports carry bit 32 of
     // the button byte, which blessed hands over as repeated 'mousedown's: the raw byte tells them apart.
-    const rowAt = (y: number) => {
+    const lineAt = (y: number) => {
       const line = this.msgBox.childBase + (y - num(this.msgBox.atop) - num(this.msgBox.itop))
       const orig = this.msgBox._clines?.rtof?.[line]
-      return orig != null ? this.lineMap[orig] ?? null : null
+      return orig != null ? { row: this.lineMap[orig] ?? null, header: this.headerLines.has(orig) } : null
     }
-    let pressed: { x: number; y: number; row: MessageRow | null } | undefined
+    const rowAt = (y: number) => lineAt(y)?.row ?? null
+    let pressed: { x: number; y: number; row: MessageRow | null; header: boolean } | undefined
     this.msgBox.on('mouse', (data: { action: string; x: number; y: number; raw?: number[] }) => {
       const motion = !!((data.raw?.[0] ?? 0) & 32)
-      if (data.action === 'mousedown' && !motion) { pressed = { x: data.x, y: data.y, row: rowAt(data.y) }; return }
-      if (!motion || !pressed?.row) return
+      if (data.action === 'mousedown' && !motion) { const l = lineAt(data.y); pressed = { x: data.x, y: data.y, row: l?.row ?? null, header: !!l?.header }; return }
+      if (!motion || !pressed?.row || !pressed.header) return
       const dx = pressed.y === data.y ? Math.max(0, Math.min(8, data.x - pressed.x)) : 0
       if (this.drag?.id === pressed.row.id && this.drag.dx === dx) return
       this.drag = { id: pressed.row.id, dx }
       this.dirtyMessages = true
       this.renderNow()
     })
-    // A double click (two clicks on the same message within 400 ms) also starts the reply.
+    // A double click (two clicks on the same message within 400 ms) also starts the reply, undoing the selection
+    // the first click made.
     let lastClick: { y: number; at: number; id: string } | undefined
     this.msgBox.on('click', (data: { x: number; y: number }) => {
       const row = rowAt(data.y)
-      const dragged = pressed && pressed.y === data.y && data.x - pressed.x >= 4
+      const dragged = pressed?.header && pressed.y === data.y && data.x - pressed.x >= 4
       pressed = undefined
       if (this.drag) { this.drag = undefined; this.dirtyMessages = true }
+      if (this.textSelected()) return
       const now = Date.now()
       const double = !!row && lastClick?.id === row.id && now - lastClick.at < 400
       lastClick = row ? { y: data.y, at: now, id: row.id } : undefined
       if (row && (dragged || double)) {
+        if (double) this.select(null)
         this.replyTo = row; this.reactTo = null
         this.setFocus('input')
         this.drawInput()
@@ -376,9 +391,10 @@ export class Ui {
       if (row?.media_mime) this.openMedia(row)
       this.renderNow()
     })
-    this.msgBox.on('scroll', () => this.updateAtBottom())
+    this.msgBox.on('scroll', () => { this.updateAtBottom(); if (this.textSel) { this.textSel = undefined; this.screen.render() } })
     // Clicking the input places the cursor at the clicked position (or at the end of the line, if the click lands past the text).
     this.input.on('click', (data: { x: number; y: number }) => {
+      if (this.textSelected()) return
       if (!this.pickerOpen) this.setFocus('input')
       {
         const x = data.x - num(this.input.aleft) - num(this.input.ileft) - 2
@@ -395,6 +411,38 @@ export class Ui {
         this.drawInput()
       }
       this.screen.render()
+    })
+    // Text selection, like in a terminal: pressing on text (any line of the messages but a name and time one, or
+    // the input) and dragging highlights the cells swept, in reading order, within that panel; letting go copies
+    // the text to the clipboard (OSC 52) and leaves it highlighted until the next click or key. The screen gets the
+    // events after the panels, so the panels' click handlers already see the selection and stay out of its way.
+    const inside = (box: blessed.Widgets.BoxElement, x: number, y: number) => {
+      const xi = num(box.aleft) + num(box.ileft), xl = num(box.aleft) + num(box.width) - (num(box.iwidth) - num(box.ileft))
+      const yi = num(box.atop) + num(box.itop), yl = num(box.atop) + num(box.height) - (num(box.iheight) - num(box.itop))
+      return x >= xi && x < xl && y >= yi && y < yl ? { xi, xl, yi, yl } : null
+    }
+    let selPress: { x: number; y: number; xi: number; xl: number; yi: number; yl: number } | undefined
+    this.screen.on('mouse', (d: { action: string; x: number; y: number; raw?: number[] }) => {
+      const motion = !!((d.raw?.[0] ?? 0) & 32)
+      if (d.action === 'mousedown' && !motion) {
+        if (this.textSel) { this.textSel = undefined; this.screen.render() }
+        const box = (this.pickerOpen || lineAt(d.y)?.header ? null : inside(this.msgBox, d.x, d.y)) ?? inside(this.input, d.x, d.y)
+        selPress = box ? { x: d.x, y: d.y, ...box } : undefined
+        return
+      }
+      if (motion && selPress) {
+        const { xi, xl, yi, yl } = selPress
+        const hx = Math.max(xi, Math.min(xl - 1, d.x)), hy = Math.max(yi, Math.min(yl - 1, d.y))
+        if (this.textSel?.hx === hx && this.textSel.hy === hy) return
+        this.textSel = { ax: selPress.x, ay: selPress.y, hx, hy, xi, xl }
+        return this.screen.render()
+      }
+      if (d.action === 'mouseup' && selPress) {
+        selPress = undefined
+        if (!this.textSel) return
+        if (!this.textSelected()) { this.textSel = undefined; return this.screen.render() }
+        this.copyTextSel()
+      }
     })
 
     this.wa.on('connection', (state, detail) => this.onConnection(state, detail))
@@ -532,6 +580,7 @@ export class Ui {
 
   private onKey(ch: string, key: blessed.Widgets.Events.IKeyEventArg) {
     this.touchActivity()
+    if (this.textSel) { this.textSel = undefined; this.screen.render() }
     const k = key.full
     if (k !== 'right') this.acceptOnArrival = 0
     // blessed emits each Enter twice: a synthetic "enter" and right after the real "return". Only the second counts;
@@ -640,6 +689,57 @@ export class Ui {
         return this.renderNow()
       }
     }
+  }
+
+  // ---------- text selection ----------
+
+  /** Whether the mouse selection covers more than the cell it started on. */
+  private textSelected(): boolean {
+    const s = this.textSel
+    return !!s && (s.ax !== s.hx || s.ay !== s.hy)
+  }
+
+  /** The selection's first and last cells, in reading order. */
+  private textSelRange(): { x0: number; y0: number; x1: number; y1: number } | null {
+    const s = this.textSel
+    if (!s) return null
+    const back = s.hy < s.ay || (s.hy === s.ay && s.hx < s.ax)
+    return back ? { x0: s.hx, y0: s.hy, x1: s.ax, y1: s.ay } : { x0: s.ax, y0: s.ay, x1: s.hx, y1: s.hy }
+  }
+
+  /** Inverts the selected cells in the screen buffer, right before blessed writes it out. */
+  private drawTextSel() {
+    const r = this.textSelRange()
+    if (!r || !this.textSel) return
+    const lines = (this.screen as unknown as { lines: ([number, string][] & { dirty?: boolean })[] }).lines
+    for (let y = r.y0; y <= r.y1; y++) {
+      const line = lines[y]
+      if (!line) continue
+      for (let x = y === r.y0 ? r.x0 : this.textSel.xi; x <= (y === r.y1 ? r.x1 : this.textSel.xl - 1); x++) {
+        const cell = line[x]
+        if (cell) cell[0] ^= 8 << 18
+      }
+      line.dirty = true
+    }
+  }
+
+  /** Copies the selected cells' text to the clipboard, one line per screen row, without the spaces around each. */
+  private copyTextSel() {
+    const r = this.textSelRange()
+    if (!r || !this.textSel) return
+    const lines = (this.screen as unknown as { lines: [number, string][][] }).lines
+    const out: string[] = []
+    for (let y = r.y0; y <= r.y1; y++) {
+      let text = ''
+      for (let x = y === r.y0 ? r.x0 : this.textSel.xi; x <= (y === r.y1 ? r.x1 : this.textSel.xl - 1); x++) {
+        const ch = lines[y]?.[x]?.[1]
+        // The cell after a wide character holds blessed's marker, not text.
+        if (ch && ch !== '\x03') text += ch
+      }
+      out.push(text.trim())
+    }
+    ;(this.screen.program as unknown as { _write: (s: string) => void })._write(`\x1b]52;c;${Buffer.from(out.join('\n')).toString('base64')}\x1b\\`)
+    this.flash(t('copied'))
   }
 
   // ---------- message selection ----------
@@ -1444,6 +1544,9 @@ export class Ui {
     const rows = store.listMessages(jid)
     this.rows = rows
     this.selected = rows.find(r => r.id === selectedId) ?? null
+    const headers = new Set<number>()
+    // The text under the highlight is about to change.
+    this.textSel = undefined
     let lastDay = ''
 
     for (const row of rows) {
@@ -1464,9 +1567,11 @@ export class Ui {
       const color = mine ? 'green' : colorFor(row.sender_jid)
       const ticks = !mine ? '' : (row.status ?? 0) >= 4 ? '{cyan-fg}✓✓{/cyan-fg}' : (row.status ?? 0) >= 3 ? '✓✓' : (row.status ?? 0) >= 2 ? '✓' : dim('○')
       // In mine the time comes before "me"; names without bold, just the color.
+      const headerAt = map.length
       out(mine
         ? `${dim(fmtTime(row.ts))} {${color}-fg}${esc(name)}{/${color}-fg} ${ticks}`
         : `{${color}-fg}${esc(name)}{/${color}-fg} ${dim(fmtTime(row.ts))}`, row)
+      for (let i = headerAt; i < map.length; i++) headers.add(i)
       if (row.quoted) {
         const [who, text] = row.quoted.split('\t')
         // Who it was from only matters in groups; one-on-one the other person is obvious, and mine don't carry a name either.
@@ -1505,6 +1610,7 @@ export class Ui {
     }
 
     this.lineMap = map
+    this.headerLines = headers
     this.images = images
     this.msgBox.setContent(lines.join('\n'))
     if (this.atBottom) this.msgBox.setScrollPerc(100)

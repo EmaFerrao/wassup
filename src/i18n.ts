@@ -24,6 +24,7 @@ const STRINGS = {
   unknownMessage: { pt: 'mensagem desconhecida', en: 'unknown message' },
   noConnection: { pt: 'sem ligação ao WhatsApp; espera pelo ● verde', en: 'no WhatsApp connection; wait for the green ●' },
   reactionRemoved: { pt: 'reacção retirada', en: 'reaction removed' },
+  copied: { pt: 'copiado', en: 'copied' },
   error: { pt: 'erro', en: 'error' },
   openFirst: { pt: 'abre primeiro uma conversa ("/")', en: 'open a chat first ("/")' },
   unknownCommand: { pt: 'comando desconhecido', en: 'unknown command' },
