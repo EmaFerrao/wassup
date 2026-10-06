@@ -1737,11 +1737,17 @@ export class Ui {
       // My own messages stay flush right: I wrap the lines myself (blessed only wraps from the left) and push each
       // one to the edge; other people's stay on the left, wrapped the same way.
       const mine = row.from_me === 1
-      // One column of margin on the right: blessed wraps the line if a closing tag lands on the last column.
+      // The ticks always take two cells, so the time sits in the same column whatever the message's state.
+      const ticks = !mine ? '' : (row.status ?? 0) >= 4 ? '{cyan-fg}✓✓{/cyan-fg}' : (row.status ?? 0) >= 3 ? '✓✓' : (row.status ?? 0) >= 2 ? '✓ ' : `${dim('○')} `
+      const stamp = mine ? `${faint(fmtTime(row.ts))} ${ticks}` : faint(fmtTime(row.ts))
+      // One column of margin on the right: blessed wraps the line if a closing tag lands on the last column. Mine
+      // stop short of the columns the time and ticks take, with two cells of gap, so no line of theirs (text,
+      // quote, reactions) runs into them; the line that carries the time is the only one reaching the edge.
+      const textWidth = mine ? Math.max(1, width - 1 - 2 - visibleWidth(stamp)) : width - 1
       // The last line `out` wrote for this message, as given, so the time can be appended to it afterwards.
       let last: { at: number; line: string } | null = null
       const out = (line: string, r: MessageRow | null) => {
-        for (const l of wrapTagged(line, width - 1)) { last = { at: map.length, line: l }; push(mine ? alignRight(l, width - 1) : l, r) }
+        for (const l of wrapTagged(line, textWidth)) { last = { at: map.length, line: l }; push(mine ? alignRight(l, textWidth) : l, r) }
       }
       // No names: mine are on the right, the other side's text is green one-on-one. Only in groups does the
       // sender's name open the message, in their color, and the text stays in the default color. The time closes it (below), so the text lines of
@@ -1772,25 +1778,20 @@ export class Ui {
       else if (type === 'poll') for (const l of row.text.split('\n')) out(`{yellow-fg}${esc(l)}{/yellow-fg}`, row)
       else if (type !== 'text') out(dim(esc(row.text || `[${type}]`)), row)
 
-      // The ticks always take two cells, so the time sits in the same column whatever the message's state.
-      const ticks = !mine ? '' : (row.status ?? 0) >= 4 ? '{cyan-fg}✓✓{/cyan-fg}' : (row.status ?? 0) >= 3 ? '✓✓' : (row.status ?? 0) >= 2 ? '✓ ' : `${dim('○')} `
-      const stamp = mine ? `${faint(fmtTime(row.ts))} ${ticks}` : faint(fmtTime(row.ts))
       // The time goes at the end of the message's last line, like in a WhatsApp bubble, when it fits there with
       // two cells of gap: the last text line, or, with no text, the note that stands for it (deleted, audio, file…),
       // never an image. Otherwise it gets its own line.
       let stamped = false
       if (row.text && (type === 'text' || type === 'image' || type === 'video' || type === 'gif' || type === 'document')) {
-        // Mine wrap short of the columns the time and ticks take, so no line of text runs into them and the time
-        // always fits on the last one, however narrow the panel.
-        const textWidth = mine ? Math.max(1, width - 1 - 2 - visibleWidth(stamp)) : width - 1
         const wrapped = waMarkup(row.text).split('\n').flatMap(l => wrapTagged(!mine && !isGroup ? `{green-fg}${l}{/green-fg}` : l, textWidth))
         wrapped.forEach((l, i) => {
           const tw = visibleWidth(l)
           const withStamp = i === wrapped.length - 1 && tw + 2 + visibleWidth(stamp) <= width - 1
           const line = withStamp ? `${l}  ${stamp}` : l
+          const edge = withStamp ? width - 1 : textWidth
           const at = map.length
-          push(mine ? alignRight(line, width - 1) : line, row)
-          const start = mine ? padding(line, width - 1) : 0
+          push(mine ? alignRight(line, edge) : line, row)
+          const start = mine ? padding(line, edge) : 0
           texts.set(at, { start, end: start + tw })
           if (withStamp) { headers.add(at); stamped = true }
         })
