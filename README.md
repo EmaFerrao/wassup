@@ -52,9 +52,10 @@ or dark shades.
 
 ### Herdr
 
-Inside [Herdr](https://herdr.dev) `wa` starts in single-chat mode and each chat is a Herdr tab or pane: picking one
-from the list opens a new tab, or a new pane beside `wa` when its tab is already split (or focuses the one that already
-has it), and a message from a chat without one opens it in the background. `wa` shows up in Herdr's agent list under
+Inside [Herdr](https://herdr.dev) `wa` starts in single-chat mode and each chat is a Herdr tab or pane: in the list,
+Enter puts the chat in this pane, → opens it in a new pane beside `wa` and Tab in a new tab (all three focus the one
+that already has it), and a message from a chat without one opens it in the background, in a pane when `wa`'s tab is
+already split and in a tab otherwise. `wa` shows up in Herdr's agent list under
 the chat's name, with `●` when there is something unread: `working` while the other person types, `blocked` with
 unread messages, `idle` otherwise; alone in its tab, the tab takes the contact's first name. Outside Herdr the
 terminal window title carries the name.

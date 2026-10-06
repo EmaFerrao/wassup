@@ -693,6 +693,11 @@ export class Ui {
       this.acceptOnArrival++
       return
     }
+    // In the chat list, in Herdr: Enter (below, from the list) puts the chat in this pane, → (at the end of the
+    // filter) opens it in a new pane, Tab in a new tab.
+    if (this.pickerOpen && inHerdr && (k === 'tab' || (k === 'right' && this.filterCursor >= graphemes(this.filter).length))) {
+      return this.pickChat((this.picker as unknown as { selected: number }).selected, k === 'tab' ? 'tab' : 'pane')
+    }
     if (k === 'tab') {
       if (!this.tabs.length) return
       return this.activateTab(this.pickerOpen ? this.active : (this.active + 1) % this.tabs.length)
@@ -1329,17 +1334,18 @@ export class Ui {
     return store.listChats().find(c => fold(chatName(c.jid)).includes(f) || jidUser(c.jid).includes(f))?.jid ?? null
   }
 
-  private pickChat(index: number) {
+  /**
+   * The chat chosen in the list. `how` only matters in Herdr: 'here' (Enter) replaces this pane's chat, 'pane' (→)
+   * and 'tab' (Tab) open it in a new pane or tab; all three move the focus to where it already is, if it is.
+   */
+  private pickChat(index: number, how: 'here' | 'pane' | 'tab' = 'here') {
     const jid = this.filtered[index]?.jid
-    uiLog.info({ index, jid }, 'pick chat')
+    uiLog.info({ index, jid, how }, 'pick chat')
     if (!jid) return
-    // In Herdr each chat is one of its panes or tabs: the chosen one opens in a new one, or the focus goes to where it already is.
     if (inHerdr && jid !== this.current) {
-      this.closePicker()
       const other = this.otherTerminals().find(t => t.herdrTab && t.tabs.includes(jid))
-      if (other?.herdrTab) focusHerdr(other.herdrTab, other.herdrPane)
-      else openChatHerdr(jid).catch(e => logger.warn({ e }, 'herdr: open chat'))
-      return
+      if (other?.herdrTab) { this.closePicker(); return focusHerdr(other.herdrTab, other.herdrPane) }
+      if (how !== 'here') { this.closePicker(); return void openChatHerdr(jid, true, how).catch(e => logger.warn({ e }, 'herdr: open chat')) }
     }
     // In single-chat mode the picker switches the chat instead of adding a tab; the previous one's draft stays saved.
     const prev = this.fixed ? this.current : null

@@ -85,15 +85,19 @@ const waBin = fileURLToPath(new URL('../wa', import.meta.url))
 
 /**
  * Opens the conversation in a new Herdr pane or tab (focused when it was chosen, unfocused when it's an incoming
- * message): when wa's tab is already split, a new pane beside this one, to the right if the pane is wide enough for
- * two conversations (100 columns), below otherwise; when wa is alone in its tab, a new tab. The new shell receives
- * `exec wa <jid>`, so when the conversation closes the pane or tab closes with it.
+ * message). `how` says which; left open, it follows the layout: when wa's tab is already split, a new pane, when wa
+ * is alone in its tab, a new tab. A pane goes beside this one, to the right if the pane is wide enough for two
+ * conversations (100 columns), below otherwise. The new shell receives `exec wa <jid>`, so when the conversation
+ * closes the pane or tab closes with it.
  */
-export async function openChatHerdr(jid: string, focus = true) {
+export async function openChatHerdr(jid: string, focus = true, how?: 'pane' | 'tab') {
   if (!inHerdr) return
-  const tab = (await call('tab.get', { tab_id: env.HERDR_TAB_ID }) as { tab?: { pane_count?: number } } | undefined)?.tab
+  if (!how) {
+    const tab = (await call('tab.get', { tab_id: env.HERDR_TAB_ID }) as { tab?: { pane_count?: number } } | undefined)?.tab
+    how = (tab?.pane_count ?? 1) > 1 ? 'pane' : 'tab'
+  }
   let paneId: string | undefined
-  if ((tab?.pane_count ?? 1) > 1) {
+  if (how === 'pane') {
     const layout = (await call('pane.layout', { pane_id: env.HERDR_PANE_ID }) as { layout?: { panes?: { pane_id: string; rect: { width: number } }[] } } | undefined)?.layout
     const width = layout?.panes?.find(p => p.pane_id === env.HERDR_PANE_ID)?.rect.width ?? 0
     const created = await call('pane.split', { pane_id: env.HERDR_PANE_ID, direction: width >= 100 ? 'right' : 'down', focus, cwd: process.cwd() }) as { pane?: { pane_id?: string } } | undefined
