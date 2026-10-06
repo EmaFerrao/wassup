@@ -36,8 +36,8 @@ startup the terminal is asked for its real background colour to pick light or da
   ignoring accents and case; Enter or a click opens.
 - **Messages**: yours on the right. Mouse wheel or PgUp/PgDn. Clicking an attachment opens it with `xdg-open`,
   downloading it first if needed. ↑ selects a message: typing replies to it, `:` reacts, Delete opens one of yours
-  for editing. A click opens a message's quick reactions; a double click, dragging it to the right, or → with it
-  selected, starts a reply.
+  for editing. The `☺` next to a message under the pointer opens its quick reactions; a double click, dragging it to
+  the right, or → with it selected, starts a reply.
 - **Input**: grows with the text up to half the screen; Enter sends, Shift+Enter or Ctrl+J start a new line, and
   pasting several lines keeps them. Ctrl-U clears, Shift-Backspace deletes a word (with the Kitty keyboard protocol).
   `:` and two letters open the emoji list; ↑/↓, Enter, Tab, → or a click pick one.

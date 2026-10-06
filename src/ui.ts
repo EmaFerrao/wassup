@@ -373,7 +373,7 @@ export class Ui {
       if (x >= seg.closeX0 && x < seg.closeX1) return this.closeTab(seg.index)
       this.activateTab(seg.index)
     })
-    // Clicking a message opens its quick reactions (or the attachment, if it has one); outside messages it
+    // Clicking a message's "☺" opens its quick reactions, clicking an attachment opens it; outside messages a click
     // returns focus to the input. Selecting is for the keyboard. Dragging a message's name and time line to the right (press and release on
     // that line, 4 or more columns ahead) starts a reply to it, like on WhatsApp mobile; dragging over any other
     // line selects text (below).
@@ -438,12 +438,12 @@ export class Ui {
       // A click on a link copies it, whole.
       if (!dragged) { const url = this.linkAt(data.x, data.y); if (url) return this.copyToClipboard(url) }
       if (!row) { this.setFocus('input'); return this.renderNow() }
-      // An attachment opens, except on its "☺", and an image only when the click lands on the image itself; any
-      // other click on the message opens its quick reactions.
+      // The "☺" opens the message's quick reactions; an attachment opens, an image only when the click lands on the
+      // image itself. A click anywhere else on the message does nothing.
       const onIcon = hit?.icon != null && data.y === hit.y && Math.abs(data.x - hit.icon) <= 1
       const hasImage = this.images.some(i => i.row.id === row.id)
-      if (row.media_mime && !onIcon && (!hasImage || this.imageAt(data.x, data.y)?.row.id === row.id)) this.openMedia(row)
-      else this.quickFor = row
+      if (onIcon) this.quickFor = row
+      else if (row.media_mime && (!hasImage || this.imageAt(data.x, data.y)?.row.id === row.id)) this.openMedia(row)
       this.renderNow()
     })
     this.msgBox.on('scroll', () => { this.updateAtBottom(); if (this.textSel) { this.textSel = undefined; this.screen.render() } })
