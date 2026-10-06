@@ -1806,9 +1806,12 @@ export class Ui {
 
       const type = row.type
       const mediaHint = row.media_path ? dim(t('clickToOpen')) : row.media_err ? dim(t('unavailable')) : dim(t('clickToDownload'))
+      let stamped = false
       if (type === 'deleted') out(dim(`⊘ ${t('deleted')}`), row)
       else if (type === 'image' || type === 'sticker' || type === 'gif' || type === 'video') {
-        this.pushImage(row, push, images, lines, width, mine)
+        // An image or sticker with no caption carries the time to the right of its last row.
+        const bare = (type === 'image' || type === 'sticker') && !row.text
+        if (this.pushImage(row, push, images, lines, width, mine, bare ? stamp : undefined)) { headers.add(map.length - 1); stamped = true }
         last = null
         if (type === 'video' || type === 'gif') out(`{magenta-fg}▶ ${type === 'gif' ? t('gif') : t('video')}{/magenta-fg} ${mediaHint}`, row)
       } else if (type === 'document') {
@@ -1822,8 +1825,7 @@ export class Ui {
 
       // The time goes at the end of the message's last line, like in a WhatsApp bubble, when it fits there with
       // two cells of gap: the last text line, or, with no text, the note that stands for it (deleted, audio, file…),
-      // never an image. Otherwise it gets its own line.
-      let stamped = false
+      // or beside an image's last row (above). Otherwise it gets its own line.
       if (row.text && (type === 'text' || type === 'image' || type === 'video' || type === 'gif' || type === 'document')) {
         const wrapped = waMarkup(row.text).split('\n').flatMap(l => wrapTagged(l, textWidth))
         wrapped.forEach((l, i) => {
@@ -1871,36 +1873,47 @@ export class Ui {
    * Reserves the image's space and draws it if already decoded. The download and decoding only happen once the
    * image becomes visible in the panel (loadVisibleImages), never for all 300 messages at once.
    */
-  private pushImage(row: MessageRow, push: (l: string, r: MessageRow | null) => void, images: ImageSlot[], lines: string[], width: number, mine = false) {
-    if (this.mode === 'none') { push(dim(`[${row.type}]`), row); return }
-    if (row.media_err && !this.imagePathFor(row)) { push(dim(t('mediaUnavailable', row.type)), row); return }
+  /**
+   * Pushes the message's image (or its placeholder while it loads). With `stamp`, the time goes two cells to the
+   * right of the image's last row: mine stop short of the time's columns, like the text does, so the row reaches the
+   * edge; the other side's are flush left and the time follows. Returns whether the stamp was placed.
+   */
+  private pushImage(row: MessageRow, push: (l: string, r: MessageRow | null) => void, images: ImageSlot[], lines: string[], width: number, mine = false, stamp?: string): boolean {
+    if (this.mode === 'none') { push(dim(`[${row.type}]`), row); return false }
+    if (row.media_err && !this.imagePathFor(row)) { push(dim(t('mediaUnavailable', row.type)), row); return false }
     const path = this.imagePathFor(row)
     const d = path ? cached(path) : undefined
-    if (d instanceof Error) { push(dim(t('mediaUnreadable', row.type, esc(d.message))), row); return }
+    if (d instanceof Error) { push(dim(t('mediaUnreadable', row.type, esc(d.message))), row); return false }
     // Size: from the pixels if we already have them, otherwise from the dimensions the message carries, otherwise a default rectangle.
     const w = d?.w ?? row.media_w ?? 4, h = d?.h ?? row.media_h ?? 3
     // In block mode the image takes up to 40 columns: each cell is a color pair the terminal (and a multiplexer
     // in between) has to paint, and a chat full of photos scrolls at the cost of those cells. In Kitty, with
     // real pixels, its natural size up to 60 columns is enough. The height never exceeds the panel.
     const maxRows = row.type === 'sticker' ? 8 : Math.max(4, this.innerHeight() - 2)
+    const limit = mine && stamp ? Math.max(1, width - 1 - 2 - visibleWidth(stamp)) : width - 1
     const { cols, rows } = this.kitty
-      ? cellSize(w, h, Math.min(width - 1, 60), Math.min(maxRows, 18))
-      : cellSize(w, h, Math.min(width - 1, 40), maxRows, true)
-    const pad = mine ? Math.max(0, width - 1 - cols) : 0
+      ? cellSize(w, h, Math.min(limit, 60), Math.min(maxRows, 18))
+      : cellSize(w, h, Math.min(limit, 40), maxRows, true)
+    const pad = mine ? Math.max(0, limit - cols) : 0
+    const tail = stamp && pad + cols + 2 + visibleWidth(stamp) <= width - 1 ? `  ${stamp}` : ''
+    // The image's rows, the last one followed by the time; a blank row is only spaces up to where the time starts.
+    const blank = tail ? ' '.repeat(pad + cols) : ''
     if (!d) {
       images.push({ row, origLine: lines.length, cols, rows, pad })
-      push(`${' '.repeat(pad)}${dim(`[${row.type}${path ? ` ${t('loading')}` : row.media_path ? '' : ` ${t('downloading')}`}]`)}`, row)
-      for (let i = 1; i < rows; i++) push('', row)
-      return
+      const label = `${' '.repeat(pad)}${dim(`[${row.type}${path ? ` ${t('loading')}` : row.media_path ? '' : ` ${t('downloading')}`}]`)}`
+      push(rows === 1 ? label + tail : label, row)
+      for (let i = 1; i < rows; i++) push(i === rows - 1 ? blank + tail : '', row)
+      return !!tail
     }
     if (this.kitty) {
       images.push({ row, origLine: lines.length, cols, rows, d, pad, path: path! })
-      for (let i = 0; i < rows; i++) push('', row)
+      for (let i = 0; i < rows; i++) push(i === rows - 1 ? blank + tail : '', row)
     } else {
       // The slot is kept for the click, which has to land on the image's own cells; without a path, placeImages skips it.
       images.push({ row, origLine: lines.length, cols, rows, d, pad })
-      for (const l of halfBlocks(d, cols, rows)) push(' '.repeat(pad) + l, row)
+      halfBlocks(d, cols, rows).forEach((l, i, all) => push(' '.repeat(pad) + l + (i === all.length - 1 ? tail : ''), row))
     }
+    return !!tail
   }
 
   /** Drawn lines [start, end) of an image, and the panel's visible window. */
