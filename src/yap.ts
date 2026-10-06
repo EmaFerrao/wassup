@@ -15,7 +15,7 @@ import { store, type MessageRow } from './db.js'
 
 export type ConnState = 'connecting' | 'qr' | 'open' | 'closed'
 
-export interface WaEvents {
+export interface YapEvents {
   connection: [state: ConnState, detail?: string]
   chats: []
   messages: [chatJid: string]
@@ -259,7 +259,7 @@ export function parseMessage(m: WAMessage, meJid: string): Parsed | null {
   return p
 }
 
-export class Wa extends EventEmitter<WaEvents> {
+export class Yap extends EventEmitter<YapEvents> {
   sock: WASocket | undefined
   /** Who is typing in each chat, and the timer that forgets it if the "stopped" signal never arrives. */
   private typing = new Map<string, { who: Set<string>; timer: NodeJS.Timeout }>()
@@ -300,7 +300,7 @@ export class Wa extends EventEmitter<WaEvents> {
       auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, logger) },
       browser: Browsers.ubuntu('Chrome'),
       markOnlineOnConnect: false,
-      syncFullHistory: process.env.WA_FULL_HISTORY === '1',
+      syncFullHistory: process.env.YAP_FULL_HISTORY === '1',
       shouldIgnoreJid: jid => isJidBroadcast(jid) || isJidStatusBroadcast(jid) || isJidNewsletter(jid),
       getMessage: async (key: WAMessageKey) => {
         const row = key.id ? store.findMessage(key.id) : undefined
@@ -654,7 +654,7 @@ export class Wa extends EventEmitter<WaEvents> {
     }
   }
 
-  /** Copies all the chat's attachments to ~/Downloads/wa/<chat>/, downloading whatever is missing. */
+  /** Copies all the chat's attachments to ~/Downloads/yap/<chat>/, downloading whatever is missing. */
   async downloadAll(chatJid: string): Promise<{ copied: number; pending: number }> {
     const out = path.join(dirs.downloads, chatName(chatJid).replace(/[^\p{L}\p{N} _.-]/gu, '_'))
     fs.mkdirSync(out, { recursive: true })

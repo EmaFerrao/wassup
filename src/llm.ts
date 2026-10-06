@@ -2,14 +2,14 @@
  * Writing suggestions from a local model (llama-server, an OpenAI-compatible API), of only two kinds: the word
  * that's half-typed at the cursor, completed or corrected, and the correction of a wrong word already written in
  * the sentence (spelling, words stuck together, a word swapped in an expression, grammar).
- * Turned off with WA_LLM=off; with no server responding, suggestions simply don't appear.
+ * Turned off with YAP_LLM=off; with no server responding, suggestions simply don't appear.
  */
 import { logger } from './log.js'
 import { fold } from './format.js'
 import { lang } from './i18n.js'
 
-const URL = process.env.WA_LLM ?? 'http://127.0.0.1:8080'
-const MODEL = process.env.WA_LLM_MODEL ?? 'gemma4-26b'
+const URL = process.env.YAP_LLM ?? 'http://127.0.0.1:8080'
+const MODEL = process.env.YAP_LLM_MODEL ?? 'gemma4-26b'
 export const llmEnabled = URL !== 'off' && URL !== ''
 
 export interface Suggestion {
