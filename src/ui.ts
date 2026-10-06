@@ -1487,18 +1487,33 @@ export class Ui {
 
   /** The stored suggestion still applies to what's typed and the cursor is at the end: it's the one shown and accepted. */
   private ghostShown(): Suggestion | null {
+    return this.ghostValid() && !this.pickerOpen && this.cursorAtEnd() ? this.ghost!.s : null
+  }
+
+  /**
+   * Whether the suggestion still applies to the text: as is, for the text it was asked for; a correction of a word
+   * behind the cursor also survives further typing, as long as the text up to that word is untouched and the word
+   * hasn't been extended into another.
+   */
+  private ghostValid(): boolean {
     const g = this.ghost
-    return g && g.text === this.inputValue && !this.pickerOpen && this.cursorAtEnd() ? g.s : null
+    if (!g) return false
+    if (g.text === this.inputValue) return true
+    if (g.s.word || !g.s.fix) return false
+    const { end } = g.s.fix
+    const next = this.inputValue[end]
+    return this.inputValue.startsWith(g.text.slice(0, end)) && (next == null || !/[\p{L}\p{M}\p{N}'-]/u.test(next))
   }
 
   /**
    * Asks the model for a suggestion for the current text, `delay` ms after the last keystroke (150 while typing; 0
    * right after accepting one, which is when it's idle waiting for the next one), and only with the cursor at the
    * end, with no reaction in progress nor emoji suggestions open. A new request cancels the previous one; the
-   * response is only used if the text is still the same when it arrives, and it stays in view for 10 s.
+   * response is only used if the text is still the same when it arrives, and it stays in view for 10 s. The one
+   * shown goes away when it no longer applies (`ghostValid`), or when a new one arrives.
    */
   private scheduleGhost(delay = 150) {
-    if (this.ghost && this.ghost.text !== this.inputValue) this.clearGhost()
+    if (this.ghost && !this.ghostValid()) this.clearGhost()
     if (this.ghostTimer) { clearTimeout(this.ghostTimer); this.ghostTimer = undefined }
     this.ghostAbort?.abort()
     this.ghostAbort = undefined
