@@ -26,12 +26,12 @@ export interface Suggestion {
 const SYSTEM_PT = `Ajudas a escrever mensagens de WhatsApp em português de Portugal (ortografia europeia). Recebes a conversa recente e o texto em curso, que termina onde está o cursor.
 Responde só com JSON: {"word": "...", "wrong": "...", "fix": "..."}.
 - "word": se o texto em curso acabar a meio de uma palavra, essa palavra inteira, como deve ficar escrita (completa-a; se o que está escrito tiver erro, dá a forma certa; se forem duas palavras coladas, separa-as); senão "". Escolhe pelo tom e assunto da conversa.
-- "wrong" e "fix": se alguma palavra já terminada do texto em curso tiver erro ortográfico ou acento em falta ("amanha" → "amanhã", "as 8" → "às 8", "nao" → "não"), forem duas palavras coladas sem espaço ("vamosjantar"), for uma palavra trocada por outra parecida que não faz sentido ali ("de vem em quando" → "de vez em quando"), ou houver um erro gramatical (concordância, conjugação, regência: "a gente vamos" → "a gente vai", "houveram problemas" → "houve problemas", "fazem dois anos" → "faz dois anos"), o trecho exactamente como está escrito (o mais curto possível, só as palavras precisas) e a sua correcção; senão ambas "". Um erro de cada vez, o mais à direita. Não mudes nomes próprios, estrangeirismos, abreviaturas correntes, a linguagem informal nem o estilo de quem escreve.`
+- "wrong" e "fix": se alguma palavra já terminada do texto em curso tiver erro ortográfico ou acento em falta ("amanha" → "amanhã", "as 8" → "às 8", "nao" → "não"), forem duas palavras coladas sem espaço ("vamosjantar"), for uma palavra trocada por outra parecida que não faz sentido ali ("de vem em quando" → "de vez em quando"), ou houver um erro gramatical (concordância, conjugação, regência: "a gente vamos" → "a gente vai", "houveram problemas" → "houve problemas", "fazem dois anos" → "faz dois anos"), ou faltar uma vírgula a seguir a uma saudação ou antes de um vocativo ("Olá gostas de mim?" → "Olá, gostas de mim?", "obrigado Marta" → "obrigado, Marta"), o trecho exactamente como está escrito (o mais curto possível, só as palavras precisas) e a sua correcção; senão ambas "". Um erro de cada vez, o mais à direita. Não mudes nomes próprios, estrangeirismos, abreviaturas correntes, a linguagem informal nem o estilo de quem escreve.`
 
 const SYSTEM_EN = `You help write WhatsApp messages in English. You get the recent conversation and the text being typed, which ends where the cursor is.
 Answer only with JSON: {"word": "...", "wrong": "...", "fix": "..."}.
 - "word": if the text ends in the middle of a word, that whole word as it should be written (complete it; if what is written has a typo, give the right form; if two words are stuck together, separate them); otherwise "". Choose by the tone and topic of the conversation.
-- "wrong" and "fix": if some finished word of the text has a spelling error ("tomorow" → "tomorrow", "recieve" → "receive"), two words are stuck together without a space ("letsgo"), a word was swapped for a similar one that makes no sense there ("could of" → "could have", "their going" → "they're going"), or there is a grammar error (agreement, tense: "he don't" → "he doesn't", "we was" → "we were"), give the passage exactly as written (as short as possible, only the words needed) and its correction; otherwise both "". One error at a time, the rightmost. Do not change proper names, slang, common abbreviations, informal language or the writer's style.`
+- "wrong" and "fix": if some finished word of the text has a spelling error ("tomorow" → "tomorrow", "recieve" → "receive"), two words are stuck together without a space ("letsgo"), a word was swapped for a similar one that makes no sense there ("could of" → "could have", "their going" → "they're going"), or there is a grammar error (agreement, tense: "he don't" → "he doesn't", "we was" → "we were"), or a comma is missing after a greeting or before a name being addressed ("Hi how are you?" → "Hi, how are you?", "thanks John" → "thanks, John"), give the passage exactly as written (as short as possible, only the words needed) and its correction; otherwise both "". One error at a time, the rightmost. Do not change proper names, slang, common abbreviations, informal language or the writer's style.`
 
 const SYSTEM = lang === 'pt' ? SYSTEM_PT : SYSTEM_EN
 const LABELS = lang === 'pt'
@@ -151,12 +151,17 @@ export async function suggest(context: { who: string; text: string }[], text: st
   let parsed: { word?: unknown; wrong?: unknown; fix?: unknown }
   try { parsed = JSON.parse(content) } catch { logger.warn({ content }, 'llm: response is not JSON'); return null }
   // Only words made of letters or digits, up to four separated by a space (words stuck together to split, expressions): the
-  // model sometimes returns quotes, punctuation or the end of the text stuck on.
-  const str = (v: unknown) => (typeof v === 'string' && /^[\p{L}\p{M}\p{N}'-]+( [\p{L}\p{M}\p{N}'-]+){0,3}$/u.test(v.trim()) ? v.trim() : '')
+  // model sometimes returns quotes, punctuation or the end of the text stuck on. A wrong passage and its fix may also
+  // end a word with a comma or another punctuation mark, since a missing comma is one of the errors asked for.
+  const str = (v: unknown, punct = false) => {
+    if (typeof v !== 'string') return ''
+    const t = v.trim()
+    return (punct ? /^[\p{L}\p{M}\p{N}'-]+[,;:!?.]?( [\p{L}\p{M}\p{N}'-]+[,;:!?.]?){0,3}$/u : /^[\p{L}\p{M}\p{N}'-]+( [\p{L}\p{M}\p{N}'-]+){0,3}$/u).test(t) ? t : ''
+  }
   const partial = partialWord(text)
   const wordTo = str(parsed.word)
   const word = partial && wordTo && wordTo !== partial && plausibleWord(partial, wordTo) ? { from: partial, to: wordTo } : null
-  const wrong = str(parsed.wrong), fixTo = str(parsed.fix)
+  const wrong = str(parsed.wrong, true), fixTo = str(parsed.fix, true)
   const fix = wrong && fixTo && fixTo !== wrong ? narrowFix(text, wrong, fixTo) ?? (word ? null : fixAtEnd(text, wrong, fixTo)) : null
   return word || fix ? { word, fix } : null
 }
