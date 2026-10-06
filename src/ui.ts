@@ -194,6 +194,8 @@ export class Ui {
   private drafts = new Map<string, { value: string; cursor: number }>()
   private reactTo: MessageRow | null = null
   private inputHeader = false
+  /** Columns the prompt takes on the input's first line ("Ema > "), and the continuation lines' indent. */
+  private promptWidth = 2
   private images: ImageSlot[] = []
   private mode: ImageMode
   private kitty: KittyImages | undefined
@@ -274,7 +276,7 @@ export class Ui {
       // The selected chat is marked as the active tab: bold and the theme's strongest color, without inverting.
       style: { selected: { bold: true, fg: this.dark ? 'bright-white' : 'black' } } as unknown as blessed.Widgets.ListElementStyle,
     })
-    // Floating over the messages (status at the top right, "typing…" above the input); created last so it stays on top.
+    // Floating over the messages (status at the top right); created last so it stays on top.
     this.toast = blessed.box({ parent: this.screen, top: 0, left: 0, width: 1, height: 1, tags: true, hidden: true })
     // In single-chat mode the bar is gone and messages gain the line; status goes to the floating box, on the right.
     if (this.fixed) this.tabsBar.hide()
@@ -452,7 +454,7 @@ export class Ui {
       if (this.textSelected()) return
       if (!this.pickerOpen) this.setFocus('input')
       {
-        const x = data.x - num(this.input.aleft) - num(this.input.ileft) - 2
+        const x = data.x - num(this.input.aleft) - num(this.input.ileft) - this.promptWidth
         const row = this.inputTop + data.y - num(this.input.atop) - num(this.input.itop) - (this.inputHeader ? 1 : 0)
         let pos = 0
         for (let r = 0; r < Math.min(row, this.inputLines.length); r++) pos += this.inputLines[r]!.length
@@ -592,18 +594,22 @@ export class Ui {
     this.screen.render()
   }
 
-  /** Someone started or stopped typing: the rainbow runs across the tab's name and, once they stop, fades out. */
+  /**
+   * Someone started or stopped typing: the rainbow runs across the chat's name, in its tab and in the prompt when
+   * it's the active chat, and once they stop, fades out.
+   */
   private onTyping(jid: string, active: boolean) {
     if (active) this.typing.set(jid, null)
     else if (this.typing.has(jid)) this.typing.set(jid, Date.now())
+    const frame = () => { this.drawTabs(); if (this.current && this.typing.has(this.current)) this.drawInput(); this.screen.render() }
     if (this.typing.size && !this.typingTimer) {
       this.typingTimer = setInterval(() => {
         for (const [j, stopped] of this.typing) if (stopped != null && Date.now() - stopped > FADE_MS) this.typing.delete(j)
         if (!this.typing.size && this.typingTimer) { clearInterval(this.typingTimer); this.typingTimer = undefined }
-        this.drawTabs(); this.screen.render()
+        frame()
       }, 40)
     }
-    this.drawTabs()
+    frame()
     this.updateTitle()
     this.screen.render()
   }
@@ -1236,15 +1242,11 @@ export class Ui {
     const avail = width - x - 2
     let text = this.transient ? dim(esc(truncate(this.transient, avail))) : this.connText
     if (this.fixed) {
-      // With no tab for the rainbow to run across, "typing…" runs here while the other person is typing.
-      const jid = this.current
-      const typing = !text && !!jid && this.typing.has(jid)
-      if (typing) text = this.rainbow(t('typing'), this.typing.get(jid)!)
       if (!text) return this.toast.hide()
       const w = Math.min(width, visibleWidth(text) + 2)
-      // Status sticks to the top right, where the tab bar would carry it; "typing…" stays on the left, on the line above the input.
-      this.toast.left = typing ? 0 : width - w; this.toast.width = w
-      this.toast.top = typing ? `100%-${this.bottom + 1}` : 0
+      // Status sticks to the top right, where the tab bar would carry it.
+      this.toast.left = width - w; this.toast.width = w
+      this.toast.top = 0
       this.toast.setContent(` ${text} `)
       return this.toast.show()
     }
@@ -1612,11 +1614,16 @@ export class Ui {
   }
 
   private drawInput() {
-    // One line at minimum (grows with the text), ">" prompt on the first, text wrapped by word (never mid-word) and indented continuation.
+    // One line at minimum (grows with the text), the prompt on the first ("Ema > ": the chat's first name, with the
+    // rainbow across it while they type, or just "> " for a chat known only by a number), text wrapped by word
+    // (never mid-word) and continuation indented under the text.
     // When the text has more lines than fit, the ones around the cursor are shown, with the cursor on the bottom one whenever possible. With
     // "chats" open, the same line is used to type the filter. When replying or reacting, the first
     // line says which message, leaving one for the text.
     const w = num(this.input.width) - num(this.input.iwidth) - 1
+    const name = this.pickerOpen || !this.current ? null : shortName(this.current)
+    const promptPlain = this.pickerOpen ? '/ ' : name ? `${name} > ` : '> '
+    const pw = this.promptWidth = strWidth(promptPlain)
     const target = this.pickerOpen ? null : this.replyTo ?? this.reactTo ?? this.editing
     const header = !target ? null : this.editing
       ? t('editHeader', this.snippet(target))
@@ -1629,7 +1636,7 @@ export class Ui {
     const ghost = this.ghostShown()
     const view = ghost ? this.ghostView(ghost) : null
     this.inputHeader = header != null
-    const width = Math.max(4, w - 2)
+    const width = Math.max(4, w - pw)
     const chars = graphemes(this.pickerOpen ? this.filter : this.inputValue)
     const cursor = Math.min(this.pickerOpen ? this.filterCursor : this.cursor, chars.length)
     const lines = wrapChars(chars, width)
@@ -1679,16 +1686,17 @@ export class Ui {
       return before + '{inverse}' + esc(under) + '{/inverse}' + esc(text(line.slice(col + 1)))
     }
     const visible = lines.slice(this.inputTop, this.inputTop + rowsAvail)
-    // The prompt says what the line does: ">" types, "/" filters the chats.
-    const prompt = this.pickerOpen ? '/ ' : '> '
-    const out = visible.map((l, i) => (this.inputTop + i === 0 ? prompt : '  ') + render(l, this.inputTop + i))
+    // The prompt says what the line does: the name and ">" type, "/" filters the chats.
+    const typing = name && this.current ? this.typing.get(this.current) : undefined
+    const prompt = this.pickerOpen ? '/ ' : name ? `${typing !== undefined ? this.rainbow(name, typing) : esc(name)} > ` : '> '
+    const out = visible.map((l, i) => (this.inputTop + i === 0 ? prompt : ' '.repeat(pw)) + render(l, this.inputTop + i))
     if (header) out.unshift(dim(esc(truncate(header, w))))
     this.input.setContent(out.join('\n'))
     // The correction floats one line above its word's line, when that line is in view: the input starts `rows` from
     // the bottom, the header (if any) takes its first row, the prompt its first two columns, after the padding.
     if (ghostAbove && ghostLine >= this.inputTop && ghostLine < this.inputTop + rowsAvail) {
       this.ghostBox.top = num(this.screen.height) - rows + extra + (ghostLine - this.inputTop) - 1
-      this.ghostBox.left = num(this.input.ileft) + 1 + ghostCol
+      this.ghostBox.left = num(this.input.ileft) + pw - 1 + ghostCol
       this.ghostBox.width = strWidth(ghostAbove) + 1
       this.ghostBox.setContent(dim(italic(esc(ghostAbove))))
       this.ghostBox.show()

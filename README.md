@@ -26,12 +26,14 @@ texts, the emoji names and the language of the writing suggestions.
 ## Interface
 
 The tab bar at the top with the connection state on the right, messages across the full width under it, and the
-input at the bottom with the `>` prompt. No frames or backgrounds of its own: the colours are the terminal theme's, and on
-startup the terminal is asked for its real background colour to pick light or dark shades.
+input at the bottom, with the chat's first name as the prompt (`Ema > `). No frames or backgrounds of its own: the
+colours are the terminal theme's, and on startup the terminal is asked for its real background colour to pick light
+or dark shades.
 
 - **Tabs**: one per open chat, with the unread count in red and an `×` to close. Tab cycles through them; whatever
-  is left unsent stays with each chat. While someone is typing, a rainbow runs along the name. New messages in a chat
-  without a tab open one without activating it, with a passing notice over it and the bell.
+  is left unsent stays with each chat. While someone is typing, a rainbow runs along their name, in the tab and in
+  the prompt. New messages in a chat without a tab open one without activating it, with a passing notice over it
+  and the bell.
 - **Chats**: `/` opens the list, most recent at the bottom, with an excerpt of the last message; typing filters it,
   ignoring accents and case; Enter or a click opens.
 - **Messages**: yours on the right. Mouse wheel or PgUp/PgDn. Clicking an attachment opens it with `xdg-open`,

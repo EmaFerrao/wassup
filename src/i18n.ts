@@ -28,7 +28,6 @@ const STRINGS = {
   error: { pt: 'erro', en: 'error' },
   openFirst: { pt: 'abre primeiro uma conversa ("/")', en: 'open a chat first ("/")' },
   unknownCommand: { pt: 'comando desconhecido', en: 'unknown command' },
-  typing: { pt: 'a escrever…', en: 'typing…' },
   typingWho: { pt: '{0} a escrever', en: '{0} typing' },
   noChatWith: { pt: 'nenhuma conversa com "{0}"', en: 'no chat matching "{0}"' },
   deleted: { pt: 'mensagem apagada', en: 'message deleted' },
