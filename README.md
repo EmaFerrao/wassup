@@ -26,7 +26,7 @@ texts, the emoji names and the language of the writing suggestions.
 ## Interface
 
 The tab bar at the top with the connection state on the right, messages across the full width under it, and the
-input at the bottom, with the chat's first name as the prompt (`Ema > `). No frames or backgrounds of its own: the
+input at the bottom, with the chat's first name as the prompt (`Ema ❯ `). No frames or backgrounds of its own: the
 colours are the terminal theme's, and on startup the terminal is asked for its real background colour to pick light
 or dark shades.
 

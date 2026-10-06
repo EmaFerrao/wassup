@@ -194,7 +194,7 @@ export class Ui {
   private drafts = new Map<string, { value: string; cursor: number }>()
   private reactTo: MessageRow | null = null
   private inputHeader = false
-  /** Columns the prompt takes on the input's first line ("Ema > "), and the continuation lines' indent. */
+  /** Columns the prompt takes on the input's first line ("Ema ❯ "), and the continuation lines' indent. */
   private promptWidth = 2
   private images: ImageSlot[] = []
   private mode: ImageMode
@@ -1622,7 +1622,7 @@ export class Ui {
   }
 
   private drawInput() {
-    // One line at minimum (grows with the text), the prompt on the first ("Ema > ": the chat's first name, with the
+    // One line at minimum (grows with the text), the prompt on the first ("Ema ❯ ": the chat's first name, with the
     // rainbow across it while they type, or just "> " for a chat known only by a number), text wrapped by word
     // (never mid-word) and continuation indented under the text.
     // When the text has more lines than fit, the ones around the cursor are shown, with the cursor on the bottom one whenever possible. With
@@ -1630,7 +1630,7 @@ export class Ui {
     // line says which message, leaving one for the text.
     const w = num(this.input.width) - num(this.input.iwidth) - 1
     const name = this.pickerOpen || !this.current ? null : shortName(this.current)
-    const promptPlain = this.pickerOpen ? '/ ' : name ? `${name} > ` : '> '
+    const promptPlain = this.pickerOpen ? '/ ' : name ? `${name} ❯ ` : '❯ '
     const pw = this.promptWidth = strWidth(promptPlain)
     const target = this.pickerOpen ? null : this.replyTo ?? this.reactTo ?? this.editing
     const header = !target ? null : this.editing
@@ -1694,9 +1694,9 @@ export class Ui {
       return before + '{inverse}' + esc(under) + '{/inverse}' + esc(text(line.slice(col + 1)))
     }
     const visible = lines.slice(this.inputTop, this.inputTop + rowsAvail)
-    // The prompt says what the line does: the name and ">" type, "/" filters the chats.
+    // The prompt says what the line does: the name and "❯" type, "/" filters the chats.
     const typing = name && this.current ? this.typing.get(this.current) : undefined
-    const prompt = this.pickerOpen ? '/ ' : name ? `${typing !== undefined ? this.rainbow(name, typing) : esc(name)} > ` : '> '
+    const prompt = this.pickerOpen ? '/ ' : name ? `${typing !== undefined ? this.rainbow(name, typing) : esc(name)} ❯ ` : '❯ '
     const out = visible.map((l, i) => (this.inputTop + i === 0 ? prompt : ' '.repeat(pw)) + render(l, this.inputTop + i))
     if (header) out.unshift(dim(esc(truncate(header, w))))
     this.input.setContent(out.join('\n'))
