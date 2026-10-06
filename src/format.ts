@@ -54,7 +54,7 @@ let palette = PALETTE_DARK_BG
 // to be almost invisible on a dark background.
 let DIM = 247
 /** A step fainter than DIM, for the time of each message. */
-let FAINT = 243
+let FAINT = 241
 /** Links: a blue that reads on the theme's background (plain ANSI blue is too dark on a dark one). */
 let LINK = 75
 
@@ -62,7 +62,7 @@ let LINK = 75
 export function setTheme(darkBg: boolean): void {
   palette = darkBg ? PALETTE_DARK_BG : PALETTE_LIGHT_BG
   DIM = darkBg ? 247 : 242
-  FAINT = darkBg ? 243 : 246
+  FAINT = darkBg ? 241 : 248
   LINK = darkBg ? 75 : 26
 }
 
