@@ -69,6 +69,17 @@ export function chatName(jid: string): string {
   return contactName(jid)
 }
 
+/**
+ * A short name for the chat, for a tab's label: a contact's first name, a group's whole name, and nothing when all
+ * we have is a number or a lid.
+ */
+export function shortName(jid: string): string | null {
+  const name = chatName(jid)
+  if (isJidGroup(jid)) return store.getChat(jid)?.name ?? null
+  if (looksLikeNumber(name) || name.startsWith('lid:')) return null
+  return name.split(' ')[0] || null
+}
+
 const EXT_BY_MIME: Record<string, string> = {
   'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif',
   'video/mp4': 'mp4', 'video/3gpp': '3gp',

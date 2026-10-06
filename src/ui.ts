@@ -3,8 +3,8 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import QRCode from 'qrcode'
 import { store, type ChatRow, type MessageRow, type ReactionRow } from './db.js'
-import { chatName, contactName, thumbPath, mediaFile, jidUser, type ConnState } from './wa.js'
-import { inHerdr, reportHerdr, titleHerdr, releaseHerdr, openChatHerdr, focusTabHerdr } from './herdr.js'
+import { chatName, contactName, shortName, thumbPath, mediaFile, jidUser, type ConnState } from './wa.js'
+import { inHerdr, reportHerdr, titleHerdr, tabNameHerdr, releaseHerdr, openChatHerdr, focusHerdr } from './herdr.js'
 import type { Backend } from './backend.js'
 import { waMarkup, clipTagged, esc, colorFor, setTheme, dim, faint, italic, padding, urlsIn, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, wrapWidth, fold, graphemes, wrapChars } from './format.js'
 import { decode, cached, cellSize, halfBlocks, detectImageMode, KittyImages, type Decoded, type ImageMode } from './image.js'
@@ -29,7 +29,7 @@ type Focus = 'picker' | 'messages' | 'input'
 interface ImageSlot { row: MessageRow; origLine: number; cols: number; rows: number; pad: number; path?: string; d?: Decoded }
 
 /** What each terminal keeps in `state`: its tabs, the process that holds them, and the last interaction. */
-interface TerminalState { tabs: string[]; active: number; pid?: number; lastActive?: number; herdrTab?: string }
+interface TerminalState { tabs: string[]; active: number; pid?: number; lastActive?: number; herdrTab?: string; herdrPane?: string }
 
 function pidAlive(pid: number): boolean {
   try {
@@ -521,14 +521,14 @@ export class Ui {
         if (row.type === 'text' && reaction(row.text)) this.heartFor(r => r.id === row.id, row.text)
         return
       }
-      // In Herdr the new chat opens in one of its tabs, in the background, by the same rule as a new tab: only the
-      // most recently used terminal, and never if it's already open in another. Until the new tab registers, the
+      // In Herdr the new chat opens in a pane or tab of its own, in the background, by the same rule as a new tab: only
+      // the most recently used terminal, and never if it's already open in another. Until the new one registers, the
       // request is remembered.
       if (this.fixed) {
         if (inHerdr && !this.openElsewhere(jid) && this.isMostRecentTerminal() && !this.spawning.has(jid)) {
           this.spawning.add(jid)
           setTimeout(() => this.spawning.delete(jid), 15000)
-          openChatHerdr(jid, chatName(jid), false).catch(e => logger.warn({ e }, 'herdr: open tab'))
+          openChatHerdr(jid, false).catch(e => logger.warn({ e }, 'herdr: open chat'))
         }
         return
       }
@@ -1071,7 +1071,7 @@ export class Ui {
 
   private saveTabs() {
     this.lastActiveSaved = this.lastActive
-    store.setState(this.tabsKey(), { tabs: this.tabs, active: this.active, pid: process.pid, lastActive: this.lastActive, herdrTab: process.env.HERDR_TAB_ID } satisfies TerminalState)
+    store.setState(this.tabsKey(), { tabs: this.tabs, active: this.active, pid: process.pid, lastActive: this.lastActive, herdrTab: process.env.HERDR_TAB_ID, herdrPane: process.env.HERDR_PANE_ID } satisfies TerminalState)
   }
 
   /**
@@ -1331,12 +1331,12 @@ export class Ui {
     const jid = this.filtered[index]?.jid
     uiLog.info({ index, jid }, 'pick chat')
     if (!jid) return
-    // In Herdr each chat is one of its tabs: the chosen one opens in a new tab, or switches to the tab where it already is.
+    // In Herdr each chat is one of its panes or tabs: the chosen one opens in a new one, or the focus goes to where it already is.
     if (inHerdr && jid !== this.current) {
       this.closePicker()
       const other = this.otherTerminals().find(t => t.herdrTab && t.tabs.includes(jid))
-      if (other?.herdrTab) focusTabHerdr(other.herdrTab)
-      else openChatHerdr(jid, chatName(jid)).catch(e => logger.warn({ e }, 'herdr: open tab'))
+      if (other?.herdrTab) focusHerdr(other.herdrTab, other.herdrPane)
+      else openChatHerdr(jid).catch(e => logger.warn({ e }, 'herdr: open chat'))
       return
     }
     // In single-chat mode the picker switches the chat instead of adding a tab; the previous one's draft stays saved.
@@ -1432,6 +1432,8 @@ export class Ui {
     const unread = store.listChats().filter(c => c.unread > 0 && (this.fixed ? c.jid === this.current : !c.archived))
     const title = `${unread.length ? '● ' : ''}${this.current ? chatName(this.current) : 'wa'}`
     if (title !== this.titleShown) { this.titleShown = title; this.screen.title = title; titleHerdr(title) }
+    // In Herdr, alone in its tab, the tab takes the chat's first name, with no state.
+    if (inHerdr) tabNameHerdr(this.current ? shortName(this.current) : null)
     // In Herdr the same signal goes to the agent's status: someone typing is work in progress, unread asks for attention.
     const typing = [...this.typing].filter(([jid, stopped]) => stopped == null && (!this.fixed || jid === this.current)).map(([jid]) => chatName(jid))
     if (typing.length) reportHerdr('working', t('typingWho', typing.join(', ')))

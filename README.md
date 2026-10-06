@@ -50,11 +50,12 @@ startup the terminal is asked for its real background colour to pick light or da
 
 ### Herdr
 
-Inside [Herdr](https://herdr.dev) `wa` starts in single-chat mode and each chat is a Herdr tab: picking one from the
-list opens a new tab (or focuses the one that already has it), and a message from a chat without a tab opens one in
-the background. The tab title follows the chat, with `●` when there is something unread, and `wa` shows up in Herdr's
-agent list: `working` while the other person types, `blocked` with unread messages, `idle` otherwise. Outside Herdr
-the terminal window title does the same.
+Inside [Herdr](https://herdr.dev) `wa` starts in single-chat mode and each chat is a Herdr tab or pane: picking one
+from the list opens a new tab, or a new pane beside `wa` when its tab is already split (or focuses the one that already
+has it), and a message from a chat without one opens it in the background. `wa` shows up in Herdr's agent list under
+the chat's name, with `●` when there is something unread: `working` while the other person types, `blocked` with
+unread messages, `idle` otherwise; alone in its tab, the tab takes the contact's first name. Outside Herdr the
+terminal window title carries the name.
 
 ### Formatting and emoji
 

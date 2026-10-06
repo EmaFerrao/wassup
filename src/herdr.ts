@@ -5,8 +5,8 @@ import { logger } from './log.js'
 /**
  * Inside Herdr (the terminal multiplexer for agents) wa presents itself as an agent called "wa" in the pane it
  * runs in, so the sidebar shows its state: someone typing → working, unread messages → blocked (asks for
- * attention), nothing → idle. The tab's title (or the pane's, if the tab is split) follows the window title, with
- * the name of the active conversation. The connection is the same as the official hooks: one JSON line over the Unix socket.
+ * attention), nothing → idle. The agent's name follows the window title, with the name of the active conversation.
+ * The connection is the same as the official hooks: one JSON line over the Unix socket.
  */
 export type HerdrState = 'idle' | 'working' | 'blocked' | 'unknown'
 
@@ -53,58 +53,73 @@ export function reportHerdr(state: HerdrState, message?: string) {
 }
 
 /**
- * The tab's title follows the window's ("● Fulano") if wa is the tab's only pane; in a split tab it's the pane that
- * carries it. The name that was there is saved to restore it on exit. Requests queue up so they don't overtake each other.
+ * The window's title ("● Fulano") goes on the agent (`display_agent`, what the sidebar shows for the pane in place
+ * of "wa"), the same whether wa is alone in its tab or in a pane of a split one. When wa is alone in its tab, the
+ * tab's label also takes the chat's short name (a first name, no state, nothing for a bare number); the label that
+ * was there is saved to restore it on exit. Pane labels are left alone. Requests queue up so they don't overtake each other.
  */
-type Target = { kind: 'tab' | 'pane'; original: string | null }
-let target: Promise<Target | undefined> | undefined
 let titleQueue: Promise<unknown> = Promise.resolve()
-
-async function findTarget(): Promise<Target | undefined> {
-  const tab = (await call('tab.get', { tab_id: env.HERDR_TAB_ID }) as { tab?: { pane_count?: number; label?: string | null } } | undefined)?.tab
-  if (!tab) return undefined
-  if ((tab.pane_count ?? 1) <= 1) return { kind: 'tab', original: tab.label ?? null }
-  const p = (await call('pane.get', { pane_id: env.HERDR_PANE_ID }) as { pane?: { label?: string | null } } | undefined)?.pane
-  return { kind: 'pane', original: p?.label ?? null }
-}
-
-function rename(t: Target, name: string | null) {
-  return t.kind === 'tab'
-    ? call('tab.rename', { tab_id: env.HERDR_TAB_ID, label: name ?? t.original ?? '' })
-    : call('pane.rename', { pane_id: env.HERDR_PANE_ID, label: name ?? t.original })
-}
+let lastTab: string | null | undefined
+/** The tab's original label when wa is alone in it, undefined when it isn't (so the label stays). */
+let tabOriginal: Promise<string | null | undefined> | undefined
 
 export function titleHerdr(title: string) {
   if (!inHerdr || title === lastTitle) return
   lastTitle = title
-  target ??= findTarget()
-  titleQueue = titleQueue.then(async () => { const t = await target; if (t) await rename(t, title) })
+  titleQueue = titleQueue.then(() => pane('pane.report_metadata', { display_agent: title }))
+}
+
+export function tabNameHerdr(name: string | null) {
+  if (!inHerdr || name === lastTab) return
+  lastTab = name
+  tabOriginal ??= call('tab.get', { tab_id: env.HERDR_TAB_ID })
+    .then(r => { const tab = (r as { tab?: { pane_count?: number; label?: string | null } } | undefined)?.tab; return tab && (tab.pane_count ?? 1) <= 1 ? tab.label ?? null : undefined })
+  titleQueue = titleQueue.then(async () => {
+    const original = await tabOriginal
+    if (original !== undefined) await call('tab.rename', { tab_id: env.HERDR_TAB_ID, label: name ?? original ?? '' })
+  })
 }
 
 /** The `wa` launcher at the project root, to open another conversation in another Herdr tab. */
 const waBin = fileURLToPath(new URL('../wa', import.meta.url))
 
 /**
- * Opens the conversation in a new Herdr tab (focused when it was chosen, unfocused when it's an incoming message):
- * the tab's shell receives `exec wa <jid>`, so when the conversation closes the tab closes with it.
+ * Opens the conversation in a new Herdr pane or tab (focused when it was chosen, unfocused when it's an incoming
+ * message): when wa's tab is already split, a new pane beside this one, to the right if the pane is wide enough for
+ * two conversations (100 columns), below otherwise; when wa is alone in its tab, a new tab. The new shell receives
+ * `exec wa <jid>`, so when the conversation closes the pane or tab closes with it.
  */
-export async function openChatHerdr(jid: string, name: string, focus = true) {
+export async function openChatHerdr(jid: string, focus = true) {
   if (!inHerdr) return
-  const created = await call('tab.create', { workspace_id: env.HERDR_WORKSPACE_ID ?? null, cwd: process.cwd(), focus, label: name }) as { root_pane?: { pane_id?: string } } | undefined
-  const paneId = created?.root_pane?.pane_id
-  if (!paneId) return logger.warn({ jid }, 'herdr: tab.create without pane')
+  const tab = (await call('tab.get', { tab_id: env.HERDR_TAB_ID }) as { tab?: { pane_count?: number } } | undefined)?.tab
+  let paneId: string | undefined
+  if ((tab?.pane_count ?? 1) > 1) {
+    const layout = (await call('pane.layout', { pane_id: env.HERDR_PANE_ID }) as { layout?: { panes?: { pane_id: string; rect: { width: number } }[] } } | undefined)?.layout
+    const width = layout?.panes?.find(p => p.pane_id === env.HERDR_PANE_ID)?.rect.width ?? 0
+    const created = await call('pane.split', { pane_id: env.HERDR_PANE_ID, direction: width >= 100 ? 'right' : 'down', focus, cwd: process.cwd() }) as { pane?: { pane_id?: string } } | undefined
+    paneId = created?.pane?.pane_id
+    if (!paneId) return logger.warn({ jid }, 'herdr: pane.split without pane')
+  } else {
+    const created = await call('tab.create', { workspace_id: env.HERDR_WORKSPACE_ID ?? null, cwd: process.cwd(), focus }) as { root_pane?: { pane_id?: string } } | undefined
+    paneId = created?.root_pane?.pane_id
+    if (!paneId) return logger.warn({ jid }, 'herdr: tab.create without pane')
+  }
   await call('pane.send_input', { pane_id: paneId, text: `exec '${waBin}' '${jid}'`, keys: ['enter'] })
 }
 
-/** Switches to the Herdr tab where the conversation is already open. */
-export function focusTabHerdr(tabId: string) {
+/** Switches to the Herdr tab, and the pane in it, where the conversation is already open. */
+export function focusHerdr(tabId: string, paneId?: string) {
   if (!inHerdr) return
-  void call('tab.focus', { tab_id: tabId })
+  void call('tab.focus', { tab_id: tabId }).then(() => { if (paneId) return call('pane.focus', { pane_id: paneId }) })
 }
 
-/** On exit, removes itself from the list and restores the title; resolves once the requests are sent, so the process doesn't end before that. */
+/**
+ * On exit, removes itself from the list, clears its name and restores the tab's label; resolves once the requests
+ * are sent, so the process doesn't end before that.
+ */
 export async function releaseHerdr(): Promise<void> {
   if (!inHerdr) return
-  const restore = titleQueue.then(async () => { const t = await target; if (t && lastTitle) await rename(t, null) })
-  await Promise.all([pane('pane.release_agent', {}), restore])
+  if (lastTab) tabNameHerdr(null)
+  const clear = titleQueue.then(() => { if (lastTitle) return pane('pane.report_metadata', { clear_display_agent: true }) })
+  await Promise.all([pane('pane.release_agent', {}), clear])
 }
