@@ -1,10 +1,16 @@
 {
   "name": "wa",
   "version": "0.1.0",
-  "private": true,
   "description": "Cliente WhatsApp em modo terminal",
+  "repository": "github:lucio-ferrao/wa",
   "license": "MIT",
   "type": "module",
+  "bin": {
+    "wa": "./wa"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
     "start": "tsx src/main.ts",
     "build": "tsc -p tsconfig.json",
@@ -19,13 +25,13 @@
     "jimp": "^1.6.1",
     "pino": "^9.6.0",
     "qrcode": "^1.5.4",
-    "sharp": "^0.35.5"
+    "sharp": "^0.35.5",
+    "tsx": "^4.19.0"
   },
   "devDependencies": {
     "@types/blessed": "^0.1.25",
     "@types/node": "^24.0.0",
     "@types/qrcode": "^1.5.5",
-    "tsx": "^4.19.0",
     "typescript": "^5.8.3"
   },
   "overrides": {

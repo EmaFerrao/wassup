@@ -1,3 +1,4 @@
 #!/bin/sh
-# Launch the client from any directory.
-cd "$(dirname "$(readlink -f "$0")")" && exec node_modules/.bin/tsx src/main.ts "$@"
+# Launch the client from any directory. `--import tsx` lets Node find tsx by its own resolution, wherever npm put
+# it: in our node_modules (a clone), or hoisted above us (installed with npm -g or run with npx).
+cd "$(dirname "$(readlink -f "$0")")" && exec node --import tsx src/main.ts "$@"

@@ -7,10 +7,14 @@ SQLite database and draws the interface with panels, mouse and images right in t
 ## Running
 
 ```sh
-npm install
-./wa            # or: npm start
-./wa emma       # opens straight into the chat whose name or number contains "emma"
+npm install -g github:lucio-ferrao/wa
+wa              # from anywhere
+wa emma         # opens straight into the chat whose name or number contains "emma"
 ```
+
+Without installing, `npx github:lucio-ferrao/wa` runs it from npm's cache (the first time downloads the
+dependencies, about 100 MB). Or, from a clone: `npm install`, then `./wa` (or `npm start`). npm 12 warns that some
+dependencies' install scripts were skipped; they are not needed, the warning can be ignored.
 
 The first time, a QR code appears: on the phone, WhatsApp › Settings › Linked devices › Link a device. The session is
 saved and later runs connect directly.
