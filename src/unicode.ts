@@ -50,3 +50,28 @@ export function tameEmoji(s: string): string {
     .replace(/(\p{Extended_Pictographic}️?)(?:‍\p{Extended_Pictographic}️?)+/gu, '$1')
     .replace(/\p{Regional_Indicator}\p{Regional_Indicator}/gu, m => `[${[...m].map(c => String.fromCodePoint(c.codePointAt(0)! - 0x1F1E6 + 65)).join('')}]`)
 }
+
+/** A text pictograph with the U+FE0F variation selector ("❤️", "✔️"): the emoji whose width terminals disagree on. */
+const AMBIGUOUS = /^\p{Extended_Pictographic}️$/u
+
+/** blessed's angle table (`screen.js`), which `draw` consults and the module doesn't export. */
+const ANGLES: Record<string, boolean> = Object.fromEntries([...'┘┐┌└┼├┤┴┬│─'].map(c => [c, true]))
+
+/**
+ * To blessed (see above) "❤️" has width 2, but some terminals, Termius among them, give it 1: the cursor ends up one
+ * cell behind where blessed thinks it is, and whatever blessed writes next on the same line, even the space that
+ * pads it, lands one column to the left and covers the right half of the emoji. blessed's `draw` is rewritten with
+ * a patch: right after one of those emoji the cursor moves, in absolute terms, to the cell blessed assumes, so the
+ * cell next to the emoji is never touched, on terminals that measure 1 and on those that measure 2.
+ */
+export function patchBlessedDraw() {
+  const Screen = (blessed as unknown as { Screen: { prototype: { draw: (start: number, end: number) => void; _waPatched?: boolean } } }).Screen
+  if (Screen.prototype._waPatched) return
+  Screen.prototype._waPatched = true
+  const src = Screen.prototype.draw.toString()
+  const marker = 'out += ch;\n      attr = data;'
+  if (!src.includes(marker)) throw new Error('blessed: draw changed; the ambiguous-width emoji patch does not apply')
+  const patched = src.replace(marker, 'out += ch;\n      if (ambiguous(ch)) out += this.tput.cup(y, x + 1);\n      attr = data;')
+  const u = (blessed as unknown as { unicode: BlessedUnicode }).unicode
+  Screen.prototype.draw = new Function('unicode', 'angles', 'ambiguous', `return ${patched}`)(u, ANGLES, (ch: string) => AMBIGUOUS.test(ch))
+}
