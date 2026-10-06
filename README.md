@@ -1,4 +1,4 @@
-# wa
+# wassup
 
 A WhatsApp client for the terminal, inspired by [wechit](https://github.com/LingDong-/wechit). It connects as a
 "linked device" through the [baileys](https://github.com/WhiskeySockets/Baileys) library, keeps everything in a local
@@ -7,12 +7,12 @@ SQLite database and draws the interface with panels, mouse and images right in t
 ## Running
 
 ```sh
-npm install -g github:lucio-ferrao/wa
+npm install -g github:lucio-ferrao/wassup
 wa              # from anywhere
 wa emma         # opens straight into the chat whose name or number contains "emma"
 ```
 
-Without installing, `npx github:lucio-ferrao/wa` runs it from npm's cache (the first time downloads the
+Without installing, `npx github:lucio-ferrao/wassup` runs it from npm's cache (the first time downloads the
 dependencies, about 100 MB). Or, from a clone: `npm install`, then `./wa` (or `npm start`). npm 12 warns that some
 dependencies' install scripts were skipped; they are not needed, the warning can be ignored.
 
@@ -57,10 +57,10 @@ or dark shades.
 
 ### Herdr
 
-Inside [Herdr](https://herdr.dev) `wa` starts in single-chat mode and each chat is a Herdr tab or pane: in the list,
-Enter puts the chat in this pane, → opens it in a new pane beside `wa` and Tab in a new tab (all three focus the one
-that already has it), and a message from a chat without one opens it in the background, in a pane when `wa`'s tab is
-already split and in a tab otherwise. `wa` shows up in Herdr's agent list under
+Inside [Herdr](https://herdr.dev) wassup starts in single-chat mode and each chat is a Herdr tab or pane: in the list,
+Enter puts the chat in this pane, → opens it in a new pane beside it and Tab in a new tab (all three focus the one
+that already has it), and a message from a chat without one opens it in the background, in a pane when its tab is
+already split and in a tab otherwise. wassup shows up in Herdr's agent list under
 the chat's name, with `●` when there is something unread: `working` while the other person types, `blocked` with
 unread messages, `idle` otherwise; alone in its tab, the tab takes the contact's first name. Outside Herdr the
 terminal window title carries the name.

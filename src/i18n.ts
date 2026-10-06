@@ -54,7 +54,7 @@ const STRINGS = {
   today: { pt: 'hoje', en: 'today' },
   yesterday: { pt: 'ontem', en: 'yesterday' },
   months: { pt: 'jan fev mar abr mai jun jul ago set out nov dez', en: 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec' },
-  anotherInstance: { pt: 'outra instância do wa ligou-se com esta conta; fecha-a e reinicia este', en: 'another wa instance connected with this account; close it and restart this one' },
+  anotherInstance: { pt: 'outra instância do wassup ligou-se com esta conta; fecha-a e reinicia este', en: 'another wassup instance connected with this account; close it and restart this one' },
   loggedOut: { pt: 'sessão terminada no telemóvel; novo QR a caminho', en: 'session ended on the phone; a new QR is coming' },
   closedReconnecting: { pt: 'ligação fechada ({0}), a religar', en: 'connection closed ({0}), reconnecting' },
   historyProgress: { pt: 'histórico: {0} mensagens, {1} conversas{2}', en: 'history: {0} messages, {1} chats{2}' },

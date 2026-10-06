@@ -1,8 +1,8 @@
 {
-  "name": "wa",
+  "name": "wassup",
   "version": "0.1.0",
   "description": "Cliente WhatsApp em modo terminal",
-  "repository": "github:lucio-ferrao/wa",
+  "repository": "github:lucio-ferrao/wassup",
   "license": "MIT",
   "type": "module",
   "bin": {

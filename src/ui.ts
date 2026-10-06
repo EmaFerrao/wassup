@@ -244,7 +244,7 @@ export class Ui {
     this.bgRgb = parseHex(caps.bg) ?? (this.dark ? [0, 0, 0] : [255, 255, 255])
     setTheme(this.dark)
     patchBlessedUnicode()
-    this.screen = blessed.screen({ smartCSR: true, fullUnicode: caps.utf8, title: 'wa', warnings: false })
+    this.screen = blessed.screen({ smartCSR: true, fullUnicode: caps.utf8, title: 'wassup', warnings: false })
     // Each patch rebuilds `draw` from the source of the one before, so the italic one, which only knows blessed's own
     // variables, goes first; the wide-emoji one then adds its own on top.
     patchBlessedItalic(this.screen); patchBlessedDraw()
@@ -1458,7 +1458,7 @@ export class Ui {
   private titleShown = ''
   private updateTitle() {
     const unread = store.listChats().filter(c => c.unread > 0 && (this.fixed ? c.jid === this.current : !c.archived))
-    const title = `${unread.length ? '● ' : ''}${this.current ? chatName(this.current) : 'wa'}`
+    const title = `${unread.length ? '● ' : ''}${this.current ? chatName(this.current) : 'wassup'}`
     if (title !== this.titleShown) { this.titleShown = title; this.screen.title = title; titleHerdr(title) }
     // In Herdr, alone in its tab, the tab takes the chat's first name, with no state.
     if (inHerdr) tabNameHerdr(this.current ? shortName(this.current) : null)

@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { logger } from './log.js'
 
 /**
- * Inside Herdr (the terminal multiplexer for agents) wa presents itself as an agent called "wa" in the pane it
+ * Inside Herdr (the terminal multiplexer for agents) wassup presents itself as an agent called "wassup" in the pane it
  * runs in, so the sidebar shows its state: someone typing → working, unread messages → blocked (asks for
  * attention), nothing → idle. The agent's name follows the window title, with the name of the active conversation.
  * The connection is the same as the official hooks: one JSON line over the Unix socket.
@@ -41,7 +41,7 @@ function call(method: string, params: Record<string, unknown>): Promise<unknown>
 
 /** Requests about the agent's pane always carry the origin and the sequence. */
 function pane(method: string, params: Record<string, unknown>) {
-  return call(method, { pane_id: env.HERDR_PANE_ID, source: 'wa', agent: 'wa', seq: ++seq, ...params })
+  return call(method, { pane_id: env.HERDR_PANE_ID, source: 'wassup', agent: 'wassup', seq: ++seq, ...params })
 }
 
 export function reportHerdr(state: HerdrState, message?: string) {
@@ -54,7 +54,7 @@ export function reportHerdr(state: HerdrState, message?: string) {
 
 /**
  * The window's title ("● Fulano") goes on the agent (`display_agent`, what the sidebar shows for the pane in place
- * of "wa"), the same whether wa is alone in its tab or in a pane of a split one. When wa is alone in its tab, the
+ * of "wassup"), the same whether wa is alone in its tab or in a pane of a split one. When wa is alone in its tab, the
  * tab's label also takes the chat's short name (a first name, no state, nothing for a bare number); the label that
  * was there is saved to restore it on exit. Pane labels are left alone. Requests queue up so they don't overtake each other.
  */
