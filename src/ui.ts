@@ -20,6 +20,9 @@ import { parseHex, rainbowRing, mix, nearest256, type Rgb } from './rainbow.js'
 import { suggest, llmEnabled, type Suggestion } from './llm.js'
 import { patchBlessedItalic } from './italic.js'
 
+/** WhatsApp Web's quick reactions, in its order, plus "⋯" for typing any other. */
+const QUICK = ['👍', '❤️', '😂', '😮', '😢', '🙏', '⋯']
+
 type Focus = 'picker' | 'messages' | 'input'
 
 /** An image in the panel: ready (with pixels) or just reserved, waiting to be downloaded and decoded once it becomes visible. */
@@ -164,6 +167,14 @@ export class Ui {
    * release and kept highlighted until the next click or key.
    */
   private textSel: { ax: number; ay: number; hx: number; hy: number; xi: number; xl: number } | undefined
+  /** The terminal reports the pointer's movement with no button held (mode 1003): only then is there a hover. */
+  private anyMotion: boolean
+  /** Message under the pointer: its name line gets a "☺" that opens the quick reactions. */
+  private hover: MessageRow | undefined
+  /** Message whose quick-reaction bar is open, after a click on its "☺". */
+  private quickFor: MessageRow | undefined
+  /** Where the "☺" or the bar were last drawn, so the click can find them. */
+  private quickHit: { y: number; icon?: number; items?: { x: number; w: number; emoji: string }[] } | undefined
   /** Drawn messages, in order; the selected one (click or arrows in the panel) and the one being replied to or reacted to. */
   private rows: MessageRow[] = []
   private selected: MessageRow | null = null
@@ -271,17 +282,20 @@ export class Ui {
 
     // Above everything, the hearts rising when a heart-only message is sent or received.
     this.hearts = new Hearts(this.screen, this.msgBox, this.bgRgb, blessed.box)
-    // Topmost of all: in its turn, inverts the cells of the text selection, whatever panel drew them.
-    const selLayer = blessed.box({ parent: this.screen, top: 0, left: 0, width: 1, height: 1, hidden: true })
-    selLayer.render = (() => { this.drawTextSel(); return undefined }) as unknown as typeof selLayer.render
+    // Topmost of all: in its turn, inverts the cells of the text selection and draws the "☺" or the quick reactions
+    // over the hovered message, whatever panel drew the cells.
+    const overlay = blessed.box({ parent: this.screen, top: 0, left: 0, width: 1, height: 1, hidden: true })
+    overlay.render = (() => { this.drawTextSel(); this.drawQuick(); return undefined }) as unknown as typeof overlay.render
 
     // Mouse with clicks, wheel and motion while a button is held (1000+1002) in SGR encoding (1006), instead of the
     // set blessed enables for xterm (1000/1002/1003/1005): any-motion reporting (1003) and UTF-8 encoding (1005)
-    // confuse SSH apps on phones like Termius, which with 1000+1006 send taps as clicks. blessed turns off whatever
-    // was enabled on exit.
+    // confuse SSH apps on phones like Termius, which with 1000+1006 send taps as clicks. Any-motion reporting, which
+    // the hover needs, is only asked of terminals that identified themselves (XTVERSION): desktop ones, not those
+    // apps. blessed turns off whatever was enabled on exit.
+    this.anyMotion = caps.version != null
     const mouse = this.screen.program as unknown as { disableMouse: () => void; setMouse: (o: Record<string, boolean>, enable: boolean) => void; _bindMouse: (s: string, buf: Buffer) => void }
     mouse.disableMouse()
-    mouse.setMouse({ vt200Mouse: true, cellMotion: true, sgrMouse: true }, true)
+    mouse.setMouse({ vt200Mouse: true, cellMotion: true, allMotion: this.anyMotion, sgrMouse: true }, true)
     // blessed only reads the first mouse sequence in each byte packet, and terminals send the button press and
     // release (or two wheel notches) in the same packet: the release was lost and there was never a click. The
     // packet is split into individual SGR sequences before blessed reads them.
@@ -376,6 +390,18 @@ export class Ui {
       pressed = undefined
       if (this.drag) { this.drag = undefined; this.dirtyMessages = true }
       if (this.textSelected()) return
+      // The "☺" opens the quick reactions of the hovered message; one of them reacts, "⋯" goes to the keyboard
+      // flow; any other click closes the bar and does nothing else, like on WhatsApp Web.
+      const hit = this.quickHit
+      if (hit && data.y === hit.y && hit.icon === data.x && this.hover) { this.quickFor = this.hover; return this.renderNow() }
+      if (this.quickFor) {
+        const target = this.quickFor
+        const item = hit && data.y === hit.y ? hit.items?.find(i => data.x >= i.x && data.x < i.x + i.w) : undefined
+        this.quickFor = undefined
+        if (item?.emoji === '⋯') { this.reactTo = target; this.replyTo = null; this.setFocus('input'); this.drawInput() }
+        else if (item) void this.react(target, item.emoji, true)
+        return this.renderNow()
+      }
       const now = Date.now()
       const double = !!row && lastClick?.id === row.id && now - lastClick.at < 400
       lastClick = row ? { y: data.y, at: now, id: row.id } : undefined
@@ -423,6 +449,13 @@ export class Ui {
     }
     let selPress: { x: number; y: number; xi: number; xl: number; yi: number; yl: number } | undefined
     this.screen.on('mouse', (d: { action: string; x: number; y: number; raw?: number[] }) => {
+      if (d.action === 'mousemove') {
+        const row = !this.pickerOpen && inside(this.msgBox, d.x, d.y) ? lineAt(d.y)?.row ?? undefined : undefined
+        if (row?.id === this.hover?.id) return
+        this.hover = row
+        if (!this.quickFor) this.screen.render()
+        return
+      }
       const motion = !!((d.raw?.[0] ?? 0) & 32)
       if (d.action === 'mousedown' && !motion) {
         if (this.textSel) { this.textSel = undefined; this.screen.render() }
@@ -488,15 +521,16 @@ export class Ui {
     })
     this.screen.on('mouse', (d: { action: string; button?: string; x: number; y: number; shift?: boolean; ctrl?: boolean }) => {
       this.touchActivity()
-      uiLog.info({ action: d.action, button: d.button, x: d.x, y: d.y, shift: d.shift, ctrl: d.ctrl }, 'mouse')
+      // Pointer movement with no button, when the terminal reports it, is one event per cell: not logged.
+      if (d.action !== 'mousemove') uiLog.info({ action: d.action, button: d.button, x: d.x, y: d.y, shift: d.shift, ctrl: d.ctrl }, 'mouse')
     })
     const named: [string, blessed.Widgets.BlessedElement][] = [['tabs', this.tabsBar], ['messages', this.msgBox], ['input', this.input], ['picker', this.picker]]
     for (const [name, w] of named) {
       ;(w as unknown as { on: (ev: string, fn: (el: blessed.Widgets.BlessedElement, d: { action: string; x: number; y: number }) => void) => void })
-        .on('element mouse', (el, d) => uiLog.info({ panel: name, child: el !== w ? el.type : undefined, action: d.action, x: d.x, y: d.y }, 'mouse in panel'))
+        .on('element mouse', (el, d) => { if (d.action !== 'mousemove') uiLog.info({ panel: name, child: el !== w ? el.type : undefined, action: d.action, x: d.x, y: d.y }, 'mouse in panel') })
     }
     this.screen.on('keypress', (_ch: string, key: blessed.Widgets.Events.IKeyEventArg) => uiLog.info({ key: key.full, focus: this.focus }, 'key'))
-    uiLog.info({ modes: 'mouse 1000+1006', term: process.env.TERM, program: process.env.TERM_PROGRAM, cols: this.screen.width, rows: this.screen.height }, 'startup')
+    uiLog.info({ modes: `mouse 1000+1002${this.anyMotion ? '+1003' : ''}+1006`, term: process.env.TERM, program: process.env.TERM_PROGRAM, cols: this.screen.width, rows: this.screen.height }, 'startup')
   }
 
   private onConnection(state: ConnState, detail?: string) {
@@ -591,6 +625,7 @@ export class Ui {
     // ESC closes, in order: the reply or reaction in progress, the selection, the picker filter, the picker, the
     // active tab, the program.
     if (k === 'escape') {
+      if (this.quickFor) { this.quickFor = undefined; return this.screen.render() }
       if (this.suggestions.length) { this.suggestions = []; this.drawSuggestions(); return this.screen.render() }
       if (this.replyTo || this.reactTo) { this.replyTo = this.reactTo = null; this.drawInput(); return this.screen.render() }
       if (this.editing) { this.editing = null; this.inputValue = ''; this.cursor = 0; this.updateSuggestions(); this.drawInput(); return this.screen.render() }
@@ -742,6 +777,75 @@ export class Ui {
     this.flash(t('copied'))
   }
 
+  // ---------- reactions ----------
+
+  /** Sends `emoji` as my reaction to `row` (empty removes it); the same emoji again, from the mouse, removes it too. */
+  private async react(row: MessageRow, emoji: string, toggle = false) {
+    if (this.wa.state !== 'open') return this.flash(t('noConnection'))
+    const mine = store.listReactions(row.chat_jid).find(r => r.msg_id === row.id && r.sender_jid === this.wa.me)
+    const send = toggle && mine?.emoji === emoji ? '' : emoji
+    try {
+      await this.wa.react(row.chat_jid, row.id, send)
+      if (!send) this.flash(t('reactionRemoved'))
+    } catch (e) {
+      logger.error({ e }, 'react')
+      this.flash(`${t('error')}: ${(e as Error).message}`, 10000)
+    }
+  }
+
+  /**
+   * Over the hovered message's name line: a gray "☺" to its right (to its left in mine, which sit flush right),
+   * or, once clicked, the quick reactions in its place. Drawn straight into the screen buffer, so the panel isn't
+   * rebuilt at every pointer move; where it landed is kept for the click.
+   */
+  private drawQuick() {
+    this.quickHit = undefined
+    const row = this.quickFor ?? this.hover
+    if (!row || this.showingQr) return
+    let idx = -1
+    for (let i = 0; i < this.lineMap.length; i++) if (this.lineMap[i]?.id === row.id && this.headerLines.has(i)) { idx = i; break }
+    if (idx < 0) return
+    const real = this.msgBox._clines.ftor[idx]?.[0]
+    if (real == null) return
+    const y = real - this.msgBox.childBase
+    if (y < 0 || y >= this.innerHeight()) return
+    const sy = num(this.msgBox.atop) + num(this.msgBox.itop) + y
+    const xi = num(this.msgBox.aleft) + num(this.msgBox.ileft), xl = xi + num(this.msgBox.width) - num(this.msgBox.iwidth)
+    const line = (this.screen as unknown as { lines: ([number, string][] & { dirty?: boolean })[] }).lines[sy]
+    if (!line) return
+    const mine = row.from_me === 1
+    const blank = (x: number) => { const ch = line[x]?.[1]; return ch === ' ' || ch === '' }
+    // Where the name line's text starts (mine) or ends (others).
+    let edge = mine ? xi : xl - 1
+    if (mine) while (edge < xl && blank(edge)) edge++
+    else while (edge >= xi && blank(edge)) edge--
+    const put = (x: number, ch: string, w: number) => {
+      for (let i = 0; i < w; i++) {
+        const cell = line[x + i]
+        if (!cell) continue
+        // The cell's own background (the selected message's, say) stays; the text goes gray.
+        cell[0] = (cell[0] & ~(0x1ff << 9)) | (244 << 9)
+        cell[1] = i ? ' ' : ch
+      }
+    }
+    // Two cells between the reactions: each one's click area is its own cells plus one on each side, so a click
+    // that lands next to the emoji still counts, and no cell belongs to two of them.
+    const items = this.quickFor ? QUICK.map(emoji => ({ emoji, w: emoji === '⋯' ? 1 : 2 })) : [{ emoji: '☺', w: 1 }]
+    const gap = this.quickFor ? 2 : 1
+    const total = items.reduce((n, i) => n + i.w, 0) + (items.length - 1) * gap
+    let x = mine ? edge - 2 - total : edge + 2
+    x = Math.max(xi, Math.min(xl - total, x))
+    const hit: { y: number; icon?: number; items?: { x: number; w: number; emoji: string }[] } = { y: sy }
+    if (this.quickFor) hit.items = []
+    for (const item of items) {
+      put(x, item.emoji, item.w)
+      if (hit.items) hit.items.push({ x: x - 1, w: item.w + 2, emoji: item.emoji }); else hit.icon = x
+      x += item.w + gap
+    }
+    line.dirty = true
+    this.quickHit = hit
+  }
+
   // ---------- message selection ----------
 
   private select(row: MessageRow | null) {
@@ -806,17 +910,8 @@ export class Ui {
       this.reactTo = null
       this.drawInput()
       this.screen.render()
-      if (this.wa.state !== 'open') return this.flash(t('noConnection'))
       // The ":" the reaction starts with, alone, counts the same as nothing: it removes the reaction.
-      const emoji = text === ':' ? '' : text
-      try {
-        await this.wa.react(reactTo.chat_jid, reactTo.id, emoji)
-        if (!emoji) this.flash(t('reactionRemoved'))
-      } catch (e) {
-        logger.error({ e }, 'react')
-        this.flash(`${t('error')}: ${(e as Error).message}`, 10000)
-      }
-      return
+      return this.react(reactTo, text === ':' ? '' : text)
     }
     // Edit in progress: the text replaces the open message's; empty sends nothing and the edit stays open.
     const editing = this.editing
@@ -951,7 +1046,7 @@ export class Ui {
     if (i !== this.active) {
       this.stopComposing()
       const prev = this.current
-      this.active = i; this.atBottom = true; this.dirtyMessages = true; this.selected = this.replyTo = this.reactTo = null
+      this.active = i; this.atBottom = true; this.dirtyMessages = true; this.selected = this.replyTo = this.reactTo = null; this.quickFor = undefined
       // A message correction isn't a draft: it's dropped. Everything else stays saved in the chat being left.
       if (this.editing) { this.editing = null; this.inputValue = ''; this.cursor = 0 }
       this.switchDraft(prev, jid)

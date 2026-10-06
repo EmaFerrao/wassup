@@ -54,7 +54,7 @@ const STRINGS = {
   contact: { pt: 'contacto', en: 'contact' },
   poll: { pt: 'sondagem', en: 'poll' },
   editHeader: { pt: '✎ editar: {0} · Enter envia, Esc desiste', en: '✎ edit: {0} · Enter sends, Esc cancels' },
-  reactHeader: { pt: 'reagir a {0}: {1} · :código: ou emoji e Enter; Enter vazio retira', en: 'react to {0}: {1} · :code: or emoji then Enter; empty Enter removes' },
+  reactHeader: { pt: 'reagir a {0}: {1} · :código: ou emoji e Enter', en: 'react to {0}: {1} · :code: or emoji then Enter' },
   today: { pt: 'hoje', en: 'today' },
   yesterday: { pt: 'ontem', en: 'yesterday' },
   months: { pt: 'jan fev mar abr mai jun jul ago set out nov dez', en: 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec' },
