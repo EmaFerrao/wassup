@@ -6,7 +6,7 @@ import { store, type ChatRow, type MessageRow, type ReactionRow } from './db.js'
 import { chatName, contactName, thumbPath, jidUser, type ConnState } from './wa.js'
 import { inHerdr, reportHerdr, titleHerdr, releaseHerdr, openChatHerdr, focusTabHerdr } from './herdr.js'
 import type { Backend } from './backend.js'
-import { waMarkup, clipTagged, esc, colorFor, setTheme, dim, italic, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, wrapWidth, fold, graphemes, wrapChars } from './format.js'
+import { waMarkup, clipTagged, esc, colorFor, setTheme, dim, faint, italic, padding, urlsIn, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, wrapWidth, fold, graphemes, wrapChars } from './format.js'
 import { decode, cached, cellSize, halfBlocks, detectImageMode, KittyImages, type Decoded, type ImageMode } from './image.js'
 import { logger, uiLog } from './log.js'
 import { patchBlessedDraw, patchBlessedUnicode } from './unicode.js'
@@ -161,8 +161,11 @@ export class Ui {
   private lineMap: (MessageRow | null)[] = []
   /** Content lines (indices in `lineMap`) holding a message's name and time: the only ones a drag replies from. */
   private headerLines = new Set<number>()
-  /** Content lines holding a message's own text (or caption): the only ones the text selection takes. */
-  private textLines = new Set<number>()
+  /**
+   * Content lines holding a message's own text (or caption), with the columns (within the panel, end exclusive)
+   * the text occupies: the only cells the text selection takes. The last one also carries the time, after the text.
+   */
+  private textLines = new Map<number, { start: number; end: number }>()
   /**
    * Text being selected with the mouse: the cell pressed (`ax`, `ay`) and the one the pointer is at (`hx`, `hy`),
    * swept in reading order within the columns of the panel it started in (`xi`..`xl`). Copied to the clipboard on
@@ -255,7 +258,9 @@ export class Ui {
     })
     this.msgBox = blessed.box({
       parent: this.screen, top: this.barRows, left: 0, right: 0, height: `100%-${this.bottom + this.barRows}`, padding: { left: 1 },
-      tags: true, scrollable: true, alwaysScroll: true, mouse: true,
+      // The lines arrive wrapped to the panel's width already (blessed only wraps from the left, and measures emoji
+      // one unit too long); left to itself it would still cut a line that reaches the edge at its last word.
+      tags: true, wrap: false, scrollable: true, alwaysScroll: true, mouse: true,
     }) as ClinesBox
     this.input = blessed.box({
       parent: this.screen, top: `100%-${this.bottom}`, left: 0, right: 0, height: this.inputRows, padding: { left: 1 },
@@ -368,16 +373,21 @@ export class Ui {
     // While the button is held the message's lines slide right with the pointer, like WhatsApp Web; letting go
     // 4 or more columns to the right starts the reply, less snaps back. In SGR the motion reports carry bit 32 of
     // the button byte, which blessed hands over as repeated 'mousedown's: the raw byte tells them apart.
-    const lineAt = (y: number) => {
+    // `header`: the message's name or time line, where a drag replies and the "☺" sits; on the line where the time
+    // follows the text, only outside the text's own columns, which select text instead.
+    const lineAt = (y: number, x = -1) => {
       const line = this.msgBox.childBase + (y - num(this.msgBox.atop) - num(this.msgBox.itop))
       const orig = this.msgBox._clines?.rtof?.[line]
-      return orig != null ? { row: this.lineMap[orig] ?? null, header: this.headerLines.has(orig) } : null
+      if (orig == null) return null
+      const cols = this.textLines.get(orig), col = x - num(this.msgBox.aleft) - num(this.msgBox.ileft)
+      const onText = cols != null && col >= cols.start && col < cols.end
+      return { row: this.lineMap[orig] ?? null, header: this.headerLines.has(orig) && !onText }
     }
     const rowAt = (y: number) => lineAt(y)?.row ?? null
     let pressed: { x: number; y: number; row: MessageRow | null; header: boolean } | undefined
     this.msgBox.on('mouse', (data: { action: string; x: number; y: number; raw?: number[] }) => {
       const motion = !!((data.raw?.[0] ?? 0) & 32)
-      if (data.action === 'mousedown' && !motion) { const l = lineAt(data.y); pressed = { x: data.x, y: data.y, row: l?.row ?? null, header: !!l?.header }; return }
+      if (data.action === 'mousedown' && !motion) { const l = lineAt(data.y, data.x); pressed = { x: data.x, y: data.y, row: l?.row ?? null, header: !!l?.header }; return }
       if (!motion || !pressed?.row || !pressed.header) return
       const dx = pressed.y === data.y ? Math.max(0, Math.min(8, data.x - pressed.x)) : 0
       if (this.drag?.id === pressed.row.id && this.drag.dx === dx) return
@@ -406,6 +416,8 @@ export class Ui {
         else if (item) void this.react(target, item.emoji, true)
         return this.renderNow()
       }
+      // A click on a link copies it, whole, instead of selecting the message.
+      if (!dragged) { const url = this.linkAt(data.x, data.y); if (url) return this.copyToClipboard(url) }
       const now = Date.now()
       const double = !!row && lastClick?.id === row.id && now - lastClick.at < 400
       lastClick = row ? { y: data.y, at: now, id: row.id } : undefined
@@ -467,7 +479,7 @@ export class Ui {
       const motion = !!((d.raw?.[0] ?? 0) & 32)
       if (d.action === 'mousedown' && !motion) {
         if (this.textSel) { this.textSel = undefined; this.screen.render() }
-        const box = (this.pickerOpen || lineAt(d.y)?.header ? null : inside(this.msgBox, d.x, d.y)) ?? inside(this.input, d.x, d.y)
+        const box = (this.pickerOpen || lineAt(d.y, d.x)?.header ? null : inside(this.msgBox, d.x, d.y)) ?? inside(this.input, d.x, d.y)
         selPress = box ? { x: d.x, y: d.y, ...box, input: !inside(this.msgBox, d.x, d.y) } : undefined
         return
       }
@@ -765,7 +777,9 @@ export class Ui {
     } else {
       const real = this.msgBox.childBase + (y - num(this.msgBox.atop) - num(this.msgBox.itop))
       const orig = this.msgBox._clines?.rtof?.[real]
-      if (orig == null || !this.textLines.has(orig)) return null
+      const cols = orig != null ? this.textLines.get(orig) : undefined
+      if (!cols) return null
+      from = s.xi + cols.start; to = s.xi + cols.end - 1
     }
     if (y === r.y0) from = Math.max(from, r.x0)
     if (y === r.y1) to = Math.min(to, r.x1)
@@ -805,9 +819,37 @@ export class Ui {
       }
       out.push(text.trim())
     }
-    if (!out.length) return
-    ;(this.screen.program as unknown as { _write: (s: string) => void })._write(`\x1b]52;c;${Buffer.from(out.join('\n')).toString('base64')}\x1b\\`)
+    if (out.length) this.copyToClipboard(out.join('\n'))
+  }
+
+  /** Puts `text` in the terminal's clipboard (OSC 52) and says so in the status. */
+  private copyToClipboard(text: string) {
+    ;(this.screen.program as unknown as { _write: (s: string) => void })._write(`\x1b]52;c;${Buffer.from(text).toString('base64')}\x1b\\`)
     this.flash(t('copied'))
+  }
+
+  /**
+   * The URL under screen cell (`x`, `y`), whole, if the cell is on a message's text and the run of non-blank
+   * cells around it is part of one of the message's URLs; a URL wrapped over two lines is found from either piece.
+   */
+  private linkAt(x: number, y: number): string | null {
+    const real = this.msgBox.childBase + (y - num(this.msgBox.atop) - num(this.msgBox.itop))
+    const orig = this.msgBox._clines?.rtof?.[real]
+    const cols = orig != null ? this.textLines.get(orig) : undefined
+    const row = orig != null ? this.lineMap[orig] : null
+    if (!cols || !row?.text) return null
+    const xi = num(this.msgBox.aleft) + num(this.msgBox.ileft)
+    const line = (this.screen as unknown as { lines: [number, string][][] }).lines[y]
+    if (!line) return null
+    const ch = (cx: number) => { const c = line[cx]?.[1]; return c && c !== '\x03' && c !== ' ' ? c : '' }
+    if (x < xi + cols.start || x >= xi + cols.end || !ch(x)) return null
+    let a = x, b = x
+    while (a - 1 >= xi + cols.start && (ch(a - 1) || line[a - 1]?.[1] === '\x03')) a--
+    while (b + 1 < xi + cols.end && (ch(b + 1) || line[b + 1]?.[1] === '\x03')) b++
+    let run = ''
+    for (let cx = a; cx <= b; cx++) run += ch(cx)
+    // Punctuation stuck to the link ("(https://…)") is in the run but not in the URL, and vice versa.
+    return urlsIn(row.text).find(u => u.includes(run) || run.includes(u)) ?? null
   }
 
   // ---------- reactions ----------
@@ -1666,10 +1708,13 @@ export class Ui {
     const selectedId = this.selected?.id
     // The selected message gets the background at full width, whoever it's from: the lines arrive here already
     // wrapped to the panel's width, and get padded with spaces up to the edge.
-    const push = (line: string, row: MessageRow | null) => {
+    const decorate = (line: string, row: MessageRow | null) => {
       if (row && row.id === this.drag?.id && this.drag.dx) line = clipTagged(' '.repeat(this.drag.dx) + line, width - 1)
-      if (row && row.id === selectedId) line = `{${this.selectedBg}-bg}${line}${' '.repeat(Math.max(0, width - 1 - visibleWidth(line)))}{/${this.selectedBg}-bg}`
-      lines.push(line)
+      if (row && row.id === selectedId) line = `{${this.selectedBg}-bg}${line}${' '.repeat(padding(line, width - 1))}{/${this.selectedBg}-bg}`
+      return line
+    }
+    const push = (line: string, row: MessageRow | null) => {
+      lines.push(decorate(line, row))
       map.push(row)
     }
     const reactions = new Map<string, ReactionRow[]>()
@@ -1677,7 +1722,7 @@ export class Ui {
     const rows = store.listMessages(jid)
     this.rows = rows
     this.selected = rows.find(r => r.id === selectedId) ?? null
-    const headers = new Set<number>(), texts = new Set<number>()
+    const headers = new Set<number>(), texts = new Map<number, { start: number; end: number }>()
     // The text under the highlight is about to change.
     this.textSel = undefined
     let lastDay = ''
@@ -1693,18 +1738,17 @@ export class Ui {
       // one to the edge; other people's stay on the left, wrapped the same way.
       const mine = row.from_me === 1
       // One column of margin on the right: blessed wraps the line if a closing tag lands on the last column.
+      // The last line `out` wrote for this message, as given, so the time can be appended to it afterwards.
+      let last: { at: number; line: string } | null = null
       const out = (line: string, r: MessageRow | null) => {
-        for (const l of wrapTagged(line, width - 1)) push(mine ? alignRight(l, width - 1) : l, r)
+        for (const l of wrapTagged(line, width - 1)) { last = { at: map.length, line: l }; push(mine ? alignRight(l, width - 1) : l, r) }
       }
-      const name = mine ? t('me') : isGroup ? contactName(row.sender_jid) : chatName(jid)
-      const color = mine ? 'green' : colorFor(row.sender_jid)
-      const ticks = !mine ? '' : (row.status ?? 0) >= 4 ? '{cyan-fg}✓✓{/cyan-fg}' : (row.status ?? 0) >= 3 ? '✓✓' : (row.status ?? 0) >= 2 ? '✓' : dim('○')
-      // In mine the time comes before "me"; names without bold, just the color.
-      const headerAt = map.length
-      out(mine
-        ? `${dim(fmtTime(row.ts))} {${color}-fg}${esc(name)}{/${color}-fg} ${ticks}`
-        : `{${color}-fg}${esc(name)}{/${color}-fg} ${dim(fmtTime(row.ts))}`, row)
-      for (let i = headerAt; i < map.length; i++) headers.add(i)
+      // No names: mine are on the right, the other side's text is green one-on-one. Only in groups does the
+      // sender's name open the message, in their color, and the text stays in the default color. The time closes it (below), so the text lines of
+      // consecutive messages read straight down; mine carries the ticks after it. Both lines are the message's
+      // "header" for the drag-to-reply and the "☺".
+      const header = (line: string) => { const at = map.length; out(line, row); for (let i = at; i < map.length; i++) headers.add(i) }
+      if (isGroup && !mine) header(`{${colorFor(row.sender_jid)}-fg}${esc(contactName(row.sender_jid))}{/${colorFor(row.sender_jid)}-fg}`)
       if (row.quoted) {
         const [who, text] = row.quoted.split('\t')
         // Who it was from only matters in groups; one-on-one the other person is obvious, and mine don't carry a name either.
@@ -1717,6 +1761,7 @@ export class Ui {
       if (type === 'deleted') out(dim(`⊘ ${t('deleted')}`), row)
       else if (type === 'image' || type === 'sticker' || type === 'gif' || type === 'video') {
         this.pushImage(row, push, images, lines, width, mine)
+        last = null
         if (type === 'video' || type === 'gif') out(`{magenta-fg}▶ ${type === 'gif' ? t('gif') : t('video')}{/magenta-fg} ${mediaHint}`, row)
       } else if (type === 'document') {
         out(`{yellow-fg}📎 ${esc(row.media_name ?? t('file'))}{/yellow-fg} ${mediaHint}`, row)
@@ -1727,11 +1772,38 @@ export class Ui {
       else if (type === 'poll') for (const l of row.text.split('\n')) out(`{yellow-fg}${esc(l)}{/yellow-fg}`, row)
       else if (type !== 'text') out(dim(esc(row.text || `[${type}]`)), row)
 
+      // The ticks always take two cells, so the time sits in the same column whatever the message's state.
+      const ticks = !mine ? '' : (row.status ?? 0) >= 4 ? '{cyan-fg}✓✓{/cyan-fg}' : (row.status ?? 0) >= 3 ? '✓✓' : (row.status ?? 0) >= 2 ? '✓ ' : `${dim('○')} `
+      const stamp = mine ? `${faint(fmtTime(row.ts))} ${ticks}` : faint(fmtTime(row.ts))
+      // The time goes at the end of the message's last line, like in a WhatsApp bubble, when it fits there with
+      // two cells of gap: the last text line, or, with no text, the note that stands for it (deleted, audio, file…),
+      // never an image. Otherwise it gets its own line.
+      let stamped = false
       if (row.text && (type === 'text' || type === 'image' || type === 'video' || type === 'gif' || type === 'document')) {
-        const textAt = map.length
-        for (const l of waMarkup(row.text).split('\n')) out(l, row)
-        for (let i = textAt; i < map.length; i++) texts.add(i)
+        // Mine wrap short of the columns the time and ticks take, so no line of text runs into them and the time
+        // always fits on the last one, however narrow the panel.
+        const textWidth = mine ? Math.max(1, width - 1 - 2 - visibleWidth(stamp)) : width - 1
+        const wrapped = waMarkup(row.text).split('\n').flatMap(l => wrapTagged(!mine && !isGroup ? `{green-fg}${l}{/green-fg}` : l, textWidth))
+        wrapped.forEach((l, i) => {
+          const tw = visibleWidth(l)
+          const withStamp = i === wrapped.length - 1 && tw + 2 + visibleWidth(stamp) <= width - 1
+          const line = withStamp ? `${l}  ${stamp}` : l
+          const at = map.length
+          push(mine ? alignRight(line, width - 1) : line, row)
+          const start = mine ? padding(line, width - 1) : 0
+          texts.set(at, { start, end: start + tw })
+          if (withStamp) { headers.add(at); stamped = true }
+        })
       }
+      const note = last as { at: number; line: string } | null
+      if (!stamped && note && visibleWidth(note.line) + 2 + visibleWidth(stamp) <= width - 1) {
+        const line = `${note.line}  ${stamp}`
+        lines[note.at] = decorate(mine ? alignRight(line, width - 1) : line, row)
+        headers.add(note.at); stamped = true
+      }
+      // On its own line the time goes straight in, not through the wrapping, which would drop the space that
+      // keeps a single tick in the first tick's column.
+      if (!stamped) { const at = map.length; push(mine ? alignRight(stamp, width - 1) : stamp, row); headers.add(at) }
       // Reactions underneath: each emoji with who reacted, or just the count when there were several.
       const rs = reactions.get(row.id)
       if (rs?.length) {
@@ -1741,7 +1813,6 @@ export class Ui {
         const parts = [...byEmoji].map(([emoji, who]) => `${emoji} ${who.length > 1 ? who.length : who[0]}`)
         out(dim(esc(parts.join('  '))), row)
       }
-      push('', null)
     }
 
     this.lineMap = map

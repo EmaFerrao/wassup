@@ -16,6 +16,11 @@ export function esc(s: string): string {
 
 const URL_RE = /(https?:\/\/[^\s<>"')\]]+)/g
 
+/** The URLs in a message's text, as written. */
+export function urlsIn(text: string): string[] {
+  return text.match(URL_RE) ?? []
+}
+
 /**
  * Converts WhatsApp markup into blessed tags: *bold*, _italic_ (for real, via the patch in italic.ts),
  * ~strikethrough~ (gray), `mono` and ```blocks``` (yellow), "> quote" lines (gray) and URLs (blue underline).
@@ -27,7 +32,7 @@ export function waMarkup(text: string): string {
     return `\u0000${blocks.length - 1}\u0000`
   })
   s = s.replace(/`([^`\n]+)`/g, '{yellow-fg}$1{/yellow-fg}')
-  s = s.replace(URL_RE, '{underline}{blue-fg}$1{/blue-fg}{/underline}')
+  s = s.replace(URL_RE, `{underline}{${LINK}-fg}$1{/${LINK}-fg}{/underline}`)
   const inline = (ch: string, open: string, close: string) => {
     const c = ch.replace(/[*~_]/g, '\\$&')
     s = s.replace(new RegExp(`(^|[\\s(\\[{>])${c}(\\S(?:[^${c}\\n]*?\\S)?)${c}(?=$|[\\s.,!?;:)\\]}])`, 'gm'), `$1${open}$2${close}`)
@@ -48,11 +53,22 @@ let palette = PALETTE_DARK_BG
 // Gray for secondary text (times, captions, quotes): from the 256 ramp, because the theme's "gray" (color 8) tends
 // to be almost invisible on a dark background.
 let DIM = 247
+/** A step fainter than DIM, for the time of each message. */
+let FAINT = 243
+/** Links: a blue that reads on the theme's background (plain ANSI blue is too dark on a dark one). */
+let LINK = 75
 
 /** Picks the name palette and the secondary gray depending on whether the terminal background is dark or light. */
 export function setTheme(darkBg: boolean): void {
   palette = darkBg ? PALETTE_DARK_BG : PALETTE_LIGHT_BG
   DIM = darkBg ? 247 : 242
+  FAINT = darkBg ? 243 : 246
+  LINK = darkBg ? 75 : 26
+}
+
+/** The time of a message: a gray a step closer to the background than the other secondary text. */
+export function faint(s: string): string {
+  return `{${FAINT}-fg}${s}{/${FAINT}-fg}`
 }
 
 /** Secondary text, in the theme's gray. */
@@ -220,9 +236,18 @@ export function wrapChars(chars: string[], width: number): string[][] {
   return lines
 }
 
-/** Right-aligns to `width` columns, measured as blessed measures it (`wrapWidth`), so it doesn't wrap the line. */
+/**
+ * Spaces that bring `s` up to `width` cells without blessed wrapping the line: blessed's own measure
+ * (`wrapWidth`) may go one past `width` before it wraps, so a line with one emoji still reaches the edge; with
+ * more, each further one costs a column.
+ */
+export function padding(s: string, width: number): number {
+  return Math.max(0, Math.min(width - visibleWidth(s), width + 1 - wrapWidth(s)))
+}
+
+/** Right-aligns to `width` columns, as far as `padding` allows. */
 export function alignRight(s: string, width: number): string {
-  return ' '.repeat(Math.max(0, width - wrapWidth(s))) + s
+  return ' '.repeat(padding(s, width)) + s
 }
 
 /** For comparing without accents or case: "Ferrão" and "ferrao" match. */
