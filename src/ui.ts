@@ -1807,7 +1807,8 @@ export class Ui {
       }
 
       const type = row.type
-      const mediaHint = row.media_path ? dim(t('clickToOpen')) : row.media_err ? dim(t('unavailable')) : dim(t('clickToDownload'))
+      // The note after an attachment: that it's gone, when it is; nothing otherwise.
+      const mediaHint = row.media_err && !row.media_path ? ` ${dim(t('unavailable'))}` : ''
       let stamped = false
       if (type === 'deleted') out(dim(`⊘ ${t('deleted')}`), row)
       else if (type === 'image' || type === 'sticker' || type === 'gif' || type === 'video') {
@@ -1815,11 +1816,11 @@ export class Ui {
         const bare = (type === 'image' || type === 'sticker') && !row.text
         if (this.pushImage(row, push, images, lines, width, mine, bare ? stamp : undefined)) { headers.add(map.length - 1); stamped = true }
         last = null
-        if (type === 'video' || type === 'gif') out(`{magenta-fg}▶ ${type === 'gif' ? t('gif') : t('video')}{/magenta-fg} ${mediaHint}`, row)
+        if (type === 'video' || type === 'gif') out(`{magenta-fg}▶ ${type === 'gif' ? t('gif') : t('video')}{/magenta-fg}${mediaHint}`, row)
       } else if (type === 'document') {
-        out(`{yellow-fg}📎 ${esc(row.media_name ?? t('file'))}{/yellow-fg} ${mediaHint}`, row)
+        out(`{yellow-fg}📎 ${esc(row.media_name ?? t('file'))}{/yellow-fg}${mediaHint}`, row)
       } else if (type === 'audio' || type === 'voice') {
-        out(`{yellow-fg}${type === 'voice' ? '🎤' : '🎵'} ${type === 'voice' ? t('voiceMessage') : t('audio')} ${esc(row.text)}{/yellow-fg} ${row.media_path ? dim(t('clickToListen')) : mediaHint}`, row)
+        out(`{yellow-fg}${type === 'voice' ? '🎤' : '🎵'} ${type === 'voice' ? t('voiceMessage') : t('audio')} ${esc(row.text)}{/yellow-fg}${mediaHint}`, row)
       } else if (type === 'location') out(`{yellow-fg}📍 ${waMarkup(row.text)}{/yellow-fg}`, row)
       else if (type === 'contact') out(`{yellow-fg}👤 ${esc(row.text)}{/yellow-fg}`, row)
       else if (type === 'poll') for (const l of row.text.split('\n')) out(`{yellow-fg}${esc(l)}{/yellow-fg}`, row)
