@@ -84,7 +84,8 @@ the user's language. `WA_LLM=off` disables it.
 
 ## Data
 
-Everything lives in `~/.config/wa` (or `WA_HOME`):
+Everything lives in `~/.config/wa` (or `WA_HOME`), readable by this user only (mode 700, umask 077 for whatever is
+written):
 
 | Path | Contents |
 |---|---|

@@ -14,4 +14,8 @@ export const dirs = {
   downloads: path.join(os.homedir(), 'Downloads', 'wa'),
 }
 
-for (const d of [dirs.base, dirs.auth, dirs.media]) fs.mkdirSync(d, { recursive: true })
+// Private to this user: credentials, messages and attachments are nobody else's business on a shared machine.
+// The umask covers everything the process creates from here on (SQLite's files, the log, each chat's media folder,
+// downloaded attachments); the chmod repairs folders made before this, or by hand.
+process.umask(0o077)
+for (const d of [dirs.base, dirs.auth, dirs.media]) { fs.mkdirSync(d, { recursive: true, mode: 0o700 }); fs.chmodSync(d, 0o700) }
