@@ -1381,8 +1381,10 @@ export class Ui {
     })
     this.picker.setItems(items as unknown as string[])
     // List flush to the bottom when it's shorter than the panel, with a blank line separating it from the prompt.
+    // Never shorter than one line: blessed skips an element of zero height altogether, leaving what was drawn there
+    // and the list's scroll state stale until the next refresh.
     const panel = num(this.screen.height) - this.bottom - this.barRows - 1
-    const gap = Math.max(0, panel - this.filtered.length)
+    const gap = Math.max(0, panel - Math.max(1, this.filtered.length))
     this.picker.top = this.barRows + gap
     this.picker.height = panel - gap
     const keep = sameFilter ? this.filtered.findIndex(c => c.jid === selectedJid) : -1
