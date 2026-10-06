@@ -1475,11 +1475,13 @@ export class Ui {
     this.disablePaste()
     const released = releaseHerdr()
     this.screen.destroy()
+    // Nothing the connection reports while closing reaches the destroyed screen.
+    this.wa.removeAllListeners()
     if (reason) process.stderr.write(`${reason}\n`)
-    this.wa.stop().catch(() => {})
+    // The connection is closed before the process ends, so the "unavailable" and the socket's close get out.
+    const stopped = this.wa.stop().catch(() => {})
     store.deleteState(this.tabsKey())
-    store.close()
-    void released.then(() => process.exit(0))
+    void Promise.all([released, stopped]).then(() => { store.close(); process.exit(0) })
   }
 
   private innerHeight(): number {

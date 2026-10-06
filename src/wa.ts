@@ -292,9 +292,19 @@ export class Wa extends EventEmitter<WaEvents> {
     await this.connect()
   }
 
+  /**
+   * On exit: tells WhatsApp this device is no longer available, if it had said it was, so the phone goes back to
+   * notifying right away instead of waiting for the server to notice the connection is gone, and closes the socket
+   * properly. Each step is bounded, so quitting never hangs on a dead connection.
+   */
   async stop() {
     this.stopped = true
-    this.sock?.end(undefined)
+    if (this.presenceTimer) { clearTimeout(this.presenceTimer); this.presenceTimer = undefined }
+    const sock = this.sock
+    if (!sock) return
+    const bounded = (p: Promise<unknown>, ms: number) => Promise.race([p.catch(e => logger.warn({ e: String(e) }, 'stop')), new Promise(r => setTimeout(r, ms))])
+    if (this.available) { this.available = false; await bounded(sock.sendPresenceUpdate('unavailable'), 1000) }
+    await bounded(sock.end(undefined), 1500)
   }
 
   private isGroup(jid: string): boolean {
