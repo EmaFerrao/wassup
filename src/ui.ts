@@ -202,7 +202,7 @@ export class Ui {
   private get bottom(): number { return this.inputRows + (this.fixed ? 0 : 1) }
 
   constructor(private wa: Backend, caps: TermCaps, private wanted?: string) {
-    this.mode = detectImageMode(caps.kittyGraphics)
+    this.mode = detectImageMode(caps.kittyGraphics, inHerdr)
     ;({ dark: this.dark, selected: this.selectedBg } = theme(caps.bg))
     this.ring = rainbowRing(this.dark)
     this.fgRgb = parseHex(caps.fg) ?? (this.dark ? [192, 192, 192] : [48, 48, 48])

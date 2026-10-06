@@ -67,7 +67,8 @@ names in the user's language.
 
 On startup the client asks the terminal what it can do, assuming nothing from `TERM`. In terminals with the Kitty
 graphics protocol (Ghostty, Kitty, WezTerm, Konsole) images, stickers and thumbnails are shown for real inside the
-panel; elsewhere they are drawn with coloured half-blocks. `WA_IMAGES=kitty|blocks|none` forces the mode.
+panel; elsewhere, and inside Herdr (which doesn't pass the placements through), they are drawn with coloured
+half-blocks. `WA_IMAGES=kitty|blocks|none` forces the mode.
 
 ## Writing suggestions
 
