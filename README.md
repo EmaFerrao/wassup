@@ -25,8 +25,8 @@ texts, the emoji names and the language of the writing suggestions.
 
 ## Interface
 
-Messages across the full width, the input at the bottom with the `>` prompt, and under it the tab bar with the
-connection state on the right. No frames or backgrounds of its own: the colours are the terminal theme's, and on
+The tab bar at the top with the connection state on the right, messages across the full width under it, and the
+input at the bottom with the `>` prompt. No frames or backgrounds of its own: the colours are the terminal theme's, and on
 startup the terminal is asked for its real background colour to pick light or dark shades.
 
 - **Tabs**: one per open chat, with the unread count in red and an `×` to close. Tab cycles through them; whatever

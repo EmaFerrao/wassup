@@ -198,8 +198,10 @@ export class Ui {
   private get fixed(): boolean { return !!this.wanted || inHerdr }
   /** Input lines: two at minimum, growing with the text up to half the screen. */
   private inputRows = 2
-  /** Lines occupied at the bottom: the input and the tab bar (1), which doesn't exist in single-chat mode. */
-  private get bottom(): number { return this.inputRows + (this.fixed ? 0 : 1) }
+  /** Lines occupied at the bottom: the input. */
+  private get bottom(): number { return this.inputRows }
+  /** Lines occupied at the top: the tab bar (1), which doesn't exist in single-chat mode. */
+  private get barRows(): number { return this.fixed ? 0 : 1 }
 
   constructor(private wa: Backend, caps: TermCaps, private wanted?: string) {
     this.mode = detectImageMode(caps.kittyGraphics, inHerdr)
@@ -222,12 +224,12 @@ export class Ui {
     this.disablePaste = enableBracketedPaste((this.screen.program as unknown as { input: Parameters<typeof enableBracketedPaste>[0] }).input, s => program._write(s))
     logger.info({ caps, images: this.mode, dark: this.dark, term: process.env.TERM }, 'terminal')
 
-    // Layout: messages at full width, input in two lines, and at the bottom the tab bar with status on the right.
+    // Layout: the tab bar at the top with status on the right, messages at full width, input in two lines at the bottom.
     this.tabsBar = blessed.box({
-      parent: this.screen, top: '100%-1', left: 0, width: '100%', height: 1, tags: true, mouse: true,
+      parent: this.screen, top: 0, left: 0, width: '100%', height: 1, tags: true, mouse: true,
     })
     this.msgBox = blessed.box({
-      parent: this.screen, top: 0, left: 0, right: 0, height: `100%-${this.bottom}`, padding: { left: 1, right: 1 },
+      parent: this.screen, top: this.barRows, left: 0, right: 0, height: `100%-${this.bottom + this.barRows}`, padding: { left: 1, right: 1 },
       tags: true, scrollable: true, alwaysScroll: true, mouse: true,
     }) as ClinesBox
     this.input = blessed.box({
@@ -235,13 +237,13 @@ export class Ui {
       tags: true, mouse: true,
     })
     this.picker = blessed.list({
-      parent: this.screen, top: 0, left: 0, right: 0, height: `100%-${this.bottom + 1}`, padding: { left: 1, right: 1 }, hidden: true,
+      parent: this.screen, top: this.barRows, left: 0, right: 0, height: `100%-${this.bottom + this.barRows + 1}`, padding: { left: 1, right: 1 }, hidden: true,
       tags: true, keys: true, mouse: true,
       // The selected chat is marked as the active tab: bold and the theme's strongest color, without inverting.
       style: { selected: { bold: true, fg: this.dark ? 'bright-white' : 'black' } } as unknown as blessed.Widgets.ListElementStyle,
     })
-    // Above the input's second line, flush against the chat's tab; created last so it stays on top.
-    this.toast = blessed.box({ parent: this.screen, top: `100%-${this.bottom - 1}`, left: 0, width: 1, height: 1, tags: true, hidden: true })
+    // Floating over the messages (status at the top right, "typing…" above the input); created last so it stays on top.
+    this.toast = blessed.box({ parent: this.screen, top: 0, left: 0, width: 1, height: 1, tags: true, hidden: true })
     // In single-chat mode the bar is gone and messages gain the line; status goes to the floating box, on the right.
     if (this.fixed) this.tabsBar.hide()
     // Emoji suggestions, above the input and over the messages, with the highlight background to stand out.
@@ -951,9 +953,9 @@ export class Ui {
       if (typing) text = this.rainbow(t('typing'), this.typing.get(jid)!)
       if (!text) return this.toast.hide()
       const w = Math.min(width, visibleWidth(text) + 2)
-      // Status sticks to the right, on the last line; "typing…" stays on the left, on the line above the input.
+      // Status sticks to the top right, where the tab bar would carry it; "typing…" stays on the left, on the line above the input.
       this.toast.left = typing ? 0 : width - w; this.toast.width = w
-      this.toast.top = typing ? `100%-${this.bottom + 1}` : `100%-${this.bottom - 1}`
+      this.toast.top = typing ? `100%-${this.bottom + 1}` : 0
       this.toast.setContent(` ${text} `)
       return this.toast.show()
     }
@@ -1088,10 +1090,10 @@ export class Ui {
     })
     this.picker.setItems(items as unknown as string[])
     // List flush to the bottom when it's shorter than the panel, with a blank line separating it from the prompt.
-    const panel = num(this.screen.height) - this.bottom - 1
-    const top = Math.max(0, panel - this.filtered.length)
-    this.picker.top = top
-    this.picker.height = panel - top
+    const panel = num(this.screen.height) - this.bottom - this.barRows - 1
+    const gap = Math.max(0, panel - this.filtered.length)
+    this.picker.top = this.barRows + gap
+    this.picker.height = panel - gap
     const keep = sameFilter ? this.filtered.findIndex(c => c.jid === selectedJid) : -1
     this.picker.select(keep >= 0 ? keep : Math.max(0, this.filtered.length - 1))
     this.drawInput()
@@ -1403,8 +1405,8 @@ export class Ui {
     this.inputRows = rows
     this.input.height = rows
     this.input.top = `100%-${this.bottom}`
-    this.msgBox.height = `100%-${this.bottom}`
-    this.picker.height = `100%-${this.bottom + 1}`
+    this.msgBox.height = `100%-${this.bottom + this.barRows}`
+    this.picker.height = `100%-${this.bottom + this.barRows + 1}`
     this.dirtyMessages = true
     this.dirtyTabs = true
     if (this.suggestions.length) this.drawSuggestions()
