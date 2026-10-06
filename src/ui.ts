@@ -239,15 +239,15 @@ export class Ui {
       parent: this.screen, top: 0, left: 0, width: '100%', height: 1, tags: true, mouse: true,
     })
     this.msgBox = blessed.box({
-      parent: this.screen, top: this.barRows, left: 0, right: 0, height: `100%-${this.bottom + this.barRows}`, padding: { left: 1, right: 1 },
+      parent: this.screen, top: this.barRows, left: 0, right: 0, height: `100%-${this.bottom + this.barRows}`, padding: { left: 1 },
       tags: true, scrollable: true, alwaysScroll: true, mouse: true,
     }) as ClinesBox
     this.input = blessed.box({
-      parent: this.screen, top: `100%-${this.bottom}`, left: 0, right: 0, height: this.inputRows, padding: { left: 1, right: 1 },
+      parent: this.screen, top: `100%-${this.bottom}`, left: 0, right: 0, height: this.inputRows, padding: { left: 1 },
       tags: true, mouse: true,
     })
     this.picker = blessed.list({
-      parent: this.screen, top: this.barRows, left: 0, right: 0, height: `100%-${this.bottom + this.barRows + 1}`, padding: { left: 1, right: 1 }, hidden: true,
+      parent: this.screen, top: this.barRows, left: 0, right: 0, height: `100%-${this.bottom + this.barRows + 1}`, padding: { left: 1 }, hidden: true,
       tags: true, keys: true, mouse: true,
       // The selected chat is marked as the active tab: bold and the theme's strongest color, without inverting.
       style: { selected: { bold: true, fg: this.dark ? 'bright-white' : 'black' } } as unknown as blessed.Widgets.ListElementStyle,
@@ -258,7 +258,7 @@ export class Ui {
     if (this.fixed) this.tabsBar.hide()
     // Emoji suggestions, above the input and over the messages, with the highlight background to stand out.
     this.suggest = blessed.box({
-      parent: this.screen, top: '100%-4', left: 0, width: 1, height: 1, tags: true, hidden: true, padding: { left: 1, right: 1 }, wrap: false, mouse: true,
+      parent: this.screen, top: '100%-4', left: 0, width: 1, height: 1, tags: true, hidden: true, padding: { left: 1 }, wrap: false, mouse: true,
       style: { bg: this.selectedBg } as unknown as blessed.Widgets.Types.TStyle,
     })
     // A click on a line of the emoji list selects that one.
@@ -1384,8 +1384,8 @@ export class Ui {
     const lines = this.suggestions.map((o, i) => i === this.suggestIndex
       ? `{bold}› ${esc(o.emoji)}  :${esc(o.name)}:{/bold}`
       : `  ${esc(o.emoji)}  :${esc(o.name)}:`)
-    // One extra column beyond the padding: blessed wraps the line if a closing tag lands on the last column.
-    this.suggest.width = Math.max(...lines.map(visibleWidth)) + 3
+    // One column of margin on the right, which also serves as padding: blessed wraps the line if a closing tag lands on the last column.
+    this.suggest.width = Math.max(...lines.map(visibleWidth)) + 2
     this.suggest.height = lines.length
     this.suggest.top = `100%-${this.bottom + lines.length}`
     this.suggest.setContent(lines.join('\n'))
