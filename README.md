@@ -42,8 +42,9 @@ or dark shades.
   ignoring accents and case; Enter, Tab, → or a click opens.
 - **Messages**: yours on the right. Mouse wheel or PgUp/PgDn. Clicking an attachment opens it with `xdg-open`,
   downloading it first if needed. ↑ selects a message: typing replies to it, `:` reacts, Delete opens one of yours
-  for editing. The `☺` next to a message under the pointer opens its quick reactions; a double click, dragging it to
-  the right, or → with it selected, starts a reply.
+  for editing. In a group, a click on a member's name opens the chat with them. The `☺` next to a message under
+  the pointer opens its quick reactions; a double click, dragging it to the right, or → with it selected, starts a
+  reply.
 - **Input**: grows with the text up to half the screen; Enter sends, Shift+Enter or Ctrl+J start a new line, and
   pasting several lines keeps them. Ctrl-U clears, Shift-Backspace deletes a word (with the Kitty keyboard protocol).
   `:` and two letters open the emoji list; ↑/↓, Enter, Tab, → or a click pick one.

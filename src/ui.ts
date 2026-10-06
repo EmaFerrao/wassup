@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import QRCode from 'qrcode'
 import { store, type ChatRow, type MessageRow, type ReactionRow } from './db.js'
-import { chatName, contactName, shortName, thumbPath, mediaFile, jidUser, type ConnState } from './wa.js'
+import { chatName, contactName, shortName, canonicalJid, thumbPath, mediaFile, jidUser, type ConnState } from './wa.js'
 import { inHerdr, reportHerdr, titleHerdr, tabNameHerdr, releaseHerdr, openChatHerdr, focusHerdr } from './herdr.js'
 import type { Backend } from './backend.js'
 import { waMarkup, clipTagged, esc, colorFor, setTheme, dim, faint, italic, padding, urlsIn, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, wrapWidth, fold, graphemes, wrapChars } from './format.js'
@@ -168,6 +168,8 @@ export class Ui {
    * the text occupies: the only cells the text selection takes. The last one also carries the time, after the text.
    */
   private textLines = new Map<number, { start: number; end: number }>()
+  /** Lines carrying a group member's name, by original line: who it is and how many columns the name takes. */
+  private nameLines = new Map<number, { jid: string; width: number }>()
   /**
    * Text being selected with the mouse: the cell pressed (`ax`, `ay`) and the one the pointer is at (`hx`, `hy`),
    * swept in reading order within the columns of the panel it started in (`xi`..`xl`). Copied to the clipboard on
@@ -390,7 +392,8 @@ export class Ui {
       if (orig == null) return null
       const cols = this.textLines.get(orig), col = x - num(this.msgBox.aleft) - num(this.msgBox.ileft)
       const onText = cols != null && col >= cols.start && col < cols.end
-      return { row: this.lineMap[orig] ?? null, header: this.headerLines.has(orig) && !onText }
+      const name = this.nameLines.get(orig)
+      return { row: this.lineMap[orig] ?? null, header: this.headerLines.has(orig) && !onText, name: name && col >= 0 && col < name.width ? name.jid : null }
     }
     const rowAt = (y: number) => lineAt(y)?.row ?? null
     let pressed: { x: number; y: number; row: MessageRow | null; header: boolean } | undefined
@@ -437,8 +440,11 @@ export class Ui {
         this.drawInput()
         return this.renderNow()
       }
-      // A click on a link copies it, whole.
-      if (!dragged) { const url = this.linkAt(data.x, data.y); if (url) return this.copyToClipboard(url) }
+      // A click on a link copies it, whole; on a group member's name, it opens the chat with that person.
+      if (!dragged) {
+        const url = this.linkAt(data.x, data.y); if (url) return this.copyToClipboard(url)
+        const who = lineAt(data.y, data.x)?.name; if (who) return this.openChat(canonicalJid(who))
+      }
       if (!row) { this.setFocus('input'); return this.renderNow() }
       // The "☺" opens the message's quick reactions; an attachment opens, an image only when the click lands on the
       // image itself. A click anywhere else on the message does nothing.
@@ -1341,7 +1347,11 @@ export class Ui {
   private pickChat(index: number, how: 'here' | 'pane' | 'tab' = 'here') {
     const jid = this.filtered[index]?.jid
     uiLog.info({ index, jid, how }, 'pick chat')
-    if (!jid) return
+    if (jid) this.openChat(jid, how)
+  }
+
+  /** Opens the chat the way the list does: in this pane or tab ('here'), or, in Herdr, in a new pane or tab. */
+  private openChat(jid: string, how: 'here' | 'pane' | 'tab' = 'here') {
     if (inHerdr && jid !== this.current) {
       const other = this.otherTerminals().find(t => t.herdrTab && t.tabs.includes(jid))
       if (other?.herdrTab) { this.closePicker(); return focusHerdr(other.herdrTab, other.herdrPane) }
@@ -1782,7 +1792,7 @@ export class Ui {
     const rows = store.listMessages(jid)
     this.rows = rows
     this.selected = rows.find(r => r.id === selectedId) ?? null
-    const headers = new Set<number>(), texts = new Map<number, { start: number; end: number }>()
+    const headers = new Set<number>(), texts = new Map<number, { start: number; end: number }>(), names = new Map<number, { jid: string; width: number }>()
     // The text under the highlight is about to change.
     this.textSel = undefined
     let lastDay = ''
@@ -1814,7 +1824,11 @@ export class Ui {
       // consecutive messages read straight down; mine carries the ticks after it. Both lines are the message's
       // "header" for the drag-to-reply and the "☺".
       const header = (line: string) => { const at = map.length; out(line, row); for (let i = at; i < map.length; i++) headers.add(i) }
-      if (isGroup && !mine) header(`{${colorFor(row.sender_jid)}-fg}${esc(contactName(row.sender_jid))}{/${colorFor(row.sender_jid)}-fg}`)
+      if (isGroup && !mine) {
+        const who = contactName(row.sender_jid)
+        names.set(map.length, { jid: row.sender_jid, width: strWidth(who) })
+        header(`{${colorFor(row.sender_jid)}-fg}${esc(who)}{/${colorFor(row.sender_jid)}-fg}`)
+      }
       if (row.quoted) {
         const [who, text] = row.quoted.split('\t')
         // Who it was from only matters in groups; one-on-one the other person is obvious, and mine don't carry a name either.
@@ -1883,6 +1897,7 @@ export class Ui {
     this.lineMap = map
     this.headerLines = headers
     this.textLines = texts
+    this.nameLines = names
     this.images = images
     this.msgBox.setContent(lines.join('\n'))
     if (this.atBottom) this.msgBox.setScrollPerc(100)
