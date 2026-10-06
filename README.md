@@ -35,7 +35,7 @@ or dark shades.
   the prompt. New messages in a chat without a tab open one without activating it, with a passing notice over it
   and the bell.
 - **Chats**: `/` opens the list, most recent at the bottom, with an excerpt of the last message; typing filters it,
-  ignoring accents and case; Enter or a click opens.
+  ignoring accents and case; Enter, Tab, → or a click opens.
 - **Messages**: yours on the right. Mouse wheel or PgUp/PgDn. Clicking an attachment opens it with `xdg-open`,
   downloading it first if needed. ↑ selects a message: typing replies to it, `:` reacts, Delete opens one of yours
   for editing. The `☺` next to a message under the pointer opens its quick reactions; a double click, dragging it to

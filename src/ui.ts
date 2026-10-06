@@ -693,10 +693,10 @@ export class Ui {
       this.acceptOnArrival++
       return
     }
-    // In the chat list, in Herdr: Enter (below, from the list) puts the chat in this pane, → (at the end of the
-    // filter) opens it in a new pane, Tab in a new tab.
-    if (this.pickerOpen && inHerdr && (k === 'tab' || (k === 'right' && this.filterCursor >= graphemes(this.filter).length))) {
-      return this.pickChat((this.picker as unknown as { selected: number }).selected, k === 'tab' ? 'tab' : 'pane')
+    // In the chat list: Enter (below, from the list) opens the chat; → (at the end of the filter) and Tab do the
+    // same, except in Herdr, where Enter puts it in this pane, → opens it in a new pane and Tab in a new tab.
+    if (this.pickerOpen && (k === 'tab' || (k === 'right' && this.filterCursor >= graphemes(this.filter).length))) {
+      return this.pickChat((this.picker as unknown as { selected: number }).selected, !inHerdr ? 'here' : k === 'tab' ? 'tab' : 'pane')
     }
     if (k === 'tab') {
       if (!this.tabs.length) return
