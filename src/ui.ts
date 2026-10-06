@@ -573,6 +573,14 @@ export class Ui {
     }
     if (this.focus === 'messages') {
       if (k === 'up' || k === 'down') return this.moveSelection(k === 'up' ? -1 : 1)
+      // → sobre a mensagem seleccionada responde-lhe. É também o que o Termius manda num deslize para a direita: uma
+      // rajada de setas, sem posição; as seguintes caem na escrita vazia e não fazem nada.
+      if (k === 'right' && this.selected) {
+        this.replyTo = this.selected; this.reactTo = null
+        this.setFocus('input')
+        this.drawInput()
+        return this.screen.render()
+      }
       // Delete ou Backspace sobre uma mensagem minha de texto abre-a na escrita para a corrigir; Enter envia a edição,
       // Esc desiste.
       if ((k === 'delete' || k === 'backspace') && this.selected) return this.editMessage(this.selected)
