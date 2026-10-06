@@ -438,9 +438,11 @@ export class Ui {
       // A click on a link copies it, whole.
       if (!dragged) { const url = this.linkAt(data.x, data.y); if (url) return this.copyToClipboard(url) }
       if (!row) { this.setFocus('input'); return this.renderNow() }
-      // An attachment opens, except on its "☺"; any other click on the message opens its quick reactions.
+      // An attachment opens, except on its "☺", and an image only when the click lands on the image itself; any
+      // other click on the message opens its quick reactions.
       const onIcon = hit?.icon != null && data.y === hit.y && Math.abs(data.x - hit.icon) <= 1
-      if (row.media_mime && !onIcon) this.openMedia(row)
+      const hasImage = this.images.some(i => i.row.id === row.id)
+      if (row.media_mime && !onIcon && (!hasImage || this.imageAt(data.x, data.y)?.row.id === row.id)) this.openMedia(row)
       else this.quickFor = row
       this.renderNow()
     })
@@ -1895,6 +1897,8 @@ export class Ui {
       images.push({ row, origLine: lines.length, cols, rows, d, pad, path: path! })
       for (let i = 0; i < rows; i++) push('', row)
     } else {
+      // The slot is kept for the click, which has to land on the image's own cells; without a path, placeImages skips it.
+      images.push({ row, origLine: lines.length, cols, rows, d, pad })
       for (const l of halfBlocks(d, cols, rows)) push(' '.repeat(pad) + l, row)
     }
   }
@@ -1903,6 +1907,17 @@ export class Ui {
   private imageSpan(img: ImageSlot): { top: number; bottom: number } | null {
     const top = this.msgBox._clines?.ftor?.[img.origLine]?.[0]
     return top == null ? null : { top, bottom: top + img.rows }
+  }
+
+  /** The image (or its placeholder) whose cells hold the screen position, if any. */
+  private imageAt(x: number, y: number): ImageSlot | null {
+    const line = this.msgBox.childBase + (y - num(this.msgBox.atop) - num(this.msgBox.itop))
+    const col = x - num(this.msgBox.aleft) - num(this.msgBox.ileft)
+    for (const img of this.images) {
+      const span = this.imageSpan(img)
+      if (span && line >= span.top && line < span.bottom && col >= img.pad && col < img.pad + img.cols) return img
+    }
+    return null
   }
 
   /** After each frame: downloads and decodes only the images that are in view. */
