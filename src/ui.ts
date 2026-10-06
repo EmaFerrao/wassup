@@ -373,8 +373,8 @@ export class Ui {
       if (x >= seg.closeX0 && x < seg.closeX1) return this.closeTab(seg.index)
       this.activateTab(seg.index)
     })
-    // Clicking a message selects it (and opens the attachment if the click lands on one); outside messages it
-    // returns focus to the input. Dragging a message's name and time line to the right (press and release on
+    // Clicking a message opens its quick reactions (or the attachment, if it has one); outside messages it
+    // returns focus to the input. Selecting is for the keyboard. Dragging a message's name and time line to the right (press and release on
     // that line, 4 or more columns ahead) starts a reply to it, like on WhatsApp mobile; dragging over any other
     // line selects text (below).
     // While the button is held the message's lines slide right with the pointer, like WhatsApp Web; letting go
@@ -402,8 +402,8 @@ export class Ui {
       this.dirtyMessages = true
       this.renderNow()
     })
-    // A double click (two clicks on the same message within 400 ms) also starts the reply, undoing the selection
-    // the first click made.
+    // A double click (two clicks on the same message within 400 ms) also starts the reply, closing the quick
+    // reactions the first click opened.
     let lastClick: { y: number; at: number; id: string } | undefined
     this.msgBox.on('click', (data: { x: number; y: number }) => {
       const row = rowAt(data.y)
@@ -411,33 +411,37 @@ export class Ui {
       pressed = undefined
       if (this.drag) { this.drag = undefined; this.dirtyMessages = true }
       if (this.textSelected()) return
-      // The "☺" opens the quick reactions of the hovered message; one of them reacts, "⋯" goes to the keyboard
-      // flow; any other click closes the bar and does nothing else, like on WhatsApp Web.
-      const hit = this.quickHit
-      if (hit?.icon != null && data.y === hit.y && Math.abs(data.x - hit.icon) <= 1 && this.hover) { this.quickFor = this.hover; return this.renderNow() }
-      if (this.quickFor) {
-        const target = this.quickFor
-        const item = hit && data.y === hit.y ? hit.items?.find(i => data.x >= i.x && data.x < i.x + i.w) : undefined
-        this.quickFor = undefined
-        if (item?.emoji === '⋯') { this.reactTo = target; this.replyTo = null; this.setFocus('input'); this.drawInput() }
-        else if (item) void this.react(target, item.emoji, true)
-        return this.renderNow()
-      }
-      // A click on a link copies it, whole, instead of selecting the message.
-      if (!dragged) { const url = this.linkAt(data.x, data.y); if (url) return this.copyToClipboard(url) }
       const now = Date.now()
       const double = !!row && lastClick?.id === row.id && now - lastClick.at < 400
       lastClick = row ? { y: data.y, at: now, id: row.id } : undefined
+      // With the quick reactions open, one of them reacts, "⋯" goes to the keyboard flow; any other click closes
+      // the bar and does nothing else, like on WhatsApp Web, unless it's the second of a double click (below).
+      const hit = this.quickHit
+      if (this.quickFor) {
+        const target = this.quickFor
+        const item = hit && data.y === hit.y ? hit.items?.find(i => data.x >= i.x && data.x < i.x + i.w) : undefined
+        if (item) {
+          this.quickFor = undefined
+          if (item.emoji === '⋯') { this.reactTo = target; this.replyTo = null; this.setFocus('input'); this.drawInput() }
+          else void this.react(target, item.emoji, true)
+          return this.renderNow()
+        }
+        if (!double) { this.quickFor = undefined; return this.renderNow() }
+      }
       if (row && (dragged || double)) {
-        if (double) this.select(null)
+        this.quickFor = undefined
         this.replyTo = row; this.reactTo = null
         this.setFocus('input')
         this.drawInput()
         return this.renderNow()
       }
-      if (row) this.select(row)
-      else this.setFocus('input')
-      if (row?.media_mime) this.openMedia(row)
+      // A click on a link copies it, whole.
+      if (!dragged) { const url = this.linkAt(data.x, data.y); if (url) return this.copyToClipboard(url) }
+      if (!row) { this.setFocus('input'); return this.renderNow() }
+      // An attachment opens, except on its "☺"; any other click on the message opens its quick reactions.
+      const onIcon = hit?.icon != null && data.y === hit.y && Math.abs(data.x - hit.icon) <= 1
+      if (row.media_mime && !onIcon) this.openMedia(row)
+      else this.quickFor = row
       this.renderNow()
     })
     this.msgBox.on('scroll', () => { this.updateAtBottom(); if (this.textSel) { this.textSel = undefined; this.screen.render() } })
