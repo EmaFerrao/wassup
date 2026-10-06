@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import QRCode from 'qrcode'
 import { store, type ChatRow, type MessageRow, type ReactionRow } from './db.js'
-import { chatName, contactName, thumbPath, mediaFile, jidUser, type ConnState } from './yap.js'
+import { chatName, contactName, thumbPath, mediaFile, jidUser, type ConnState } from './wa.js'
 import { inHerdr, reportHerdr, titleHerdr, releaseHerdr, openChatHerdr, focusTabHerdr } from './herdr.js'
 import type { Backend } from './backend.js'
 import { waMarkup, clipTagged, esc, colorFor, setTheme, dim, faint, italic, padding, urlsIn, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, wrapWidth, fold, graphemes, wrapChars } from './format.js'
@@ -220,7 +220,7 @@ export class Ui {
   private selectedBg: number
 
   /**
-   * `yap ema`, or any startup inside Herdr: only one chat at a time. No tabs (in Herdr, the tabs are its own) and no
+   * `wa ema`, or any startup inside Herdr: only one chat at a time. No tabs (in Herdr, the tabs are its own) and no
    * notices or state from the others; the picker switches it.
    */
   private get fixed(): boolean { return !!this.wanted || inHerdr }
@@ -231,7 +231,7 @@ export class Ui {
   /** Lines occupied at the top: the tab bar (1), which doesn't exist in single-chat mode. */
   private get barRows(): number { return this.fixed ? 0 : 1 }
 
-  constructor(private yap: Backend, caps: TermCaps, private wanted?: string) {
+  constructor(private wa: Backend, caps: TermCaps, private wanted?: string) {
     this.mode = detectImageMode(caps.kittyGraphics, inHerdr)
     ;({ dark: this.dark, selected: this.selectedBg } = theme(caps.bg))
     this.ring = rainbowRing(this.dark)
@@ -239,7 +239,7 @@ export class Ui {
     this.bgRgb = parseHex(caps.bg) ?? (this.dark ? [0, 0, 0] : [255, 255, 255])
     setTheme(this.dark)
     patchBlessedUnicode()
-    this.screen = blessed.screen({ smartCSR: true, fullUnicode: caps.utf8, title: 'yap', warnings: false })
+    this.screen = blessed.screen({ smartCSR: true, fullUnicode: caps.utf8, title: 'wa', warnings: false })
     // Each patch rebuilds `draw` from the source of the one before, so the italic one, which only knows blessed's own
     // variables, goes first; the wide-emoji one then adds its own on top.
     patchBlessedItalic(this.screen); patchBlessedDraw()
@@ -327,7 +327,7 @@ export class Ui {
     this.setFocus('input')
     this.drawInput()
     this.drawStatus()
-    // `yap paula` opens that chat right away: the first, from most recent backward, whose name or number contains the text.
+    // `wa paula` opens that chat right away: the first, from most recent backward, whose name or number contains the text.
     if (this.wanted) {
       const jid = this.findChat(this.wanted)
       if (!jid) { this.quit(t('noChatWith', this.wanted)); return }
@@ -511,13 +511,13 @@ export class Ui {
       }
     })
 
-    this.yap.on('connection', (state, detail) => this.onConnection(state, detail))
-    this.yap.on('chats', () => { this.dirtyTabs = true; if (this.pickerOpen) this.refreshPicker(); this.scheduleRender() })
-    this.yap.on('typing', (jid, who) => this.onTyping(jid, who.length > 0))
-    this.yap.on('messages', jid => { if (jid === '*' || jid === this.current) this.dirtyMessages = true; this.dirtyTabs = true; this.scheduleRender() })
-    this.yap.on('notify', (jid, row) => {
+    this.wa.on('connection', (state, detail) => this.onConnection(state, detail))
+    this.wa.on('chats', () => { this.dirtyTabs = true; if (this.pickerOpen) this.refreshPicker(); this.scheduleRender() })
+    this.wa.on('typing', (jid, who) => this.onTyping(jid, who.length > 0))
+    this.wa.on('messages', jid => { if (jid === '*' || jid === this.current) this.dirtyMessages = true; this.dirtyTabs = true; this.scheduleRender() })
+    this.wa.on('notify', (jid, row) => {
       if (jid === this.current) {
-        this.yap.markRead(jid).catch(e => logger.warn({ e }, 'markRead'))
+        this.wa.markRead(jid).catch(e => logger.warn({ e }, 'markRead'))
         if (row.type === 'text' && reaction(row.text)) this.heartFor(r => r.id === row.id, row.text)
         return
       }
@@ -540,12 +540,12 @@ export class Ui {
       this.screen.program.bell()
       this.notify(jid, row.text || `[${row.type}]`)
     })
-    this.yap.on('status', text => this.flash(text))
+    this.wa.on('status', text => this.flash(text))
     // A reaction, mine or someone else's, animates from the spot where it appears in the message.
-    this.yap.on('reaction', (jid, msgId, _sender, emoji) => { if (jid === this.current && reaction(emoji)) this.heartFor(r => r.id === msgId, emoji) })
+    this.wa.on('reaction', (jid, msgId, _sender, emoji) => { if (jid === this.current && reaction(emoji)) this.heartFor(r => r.id === msgId, emoji) })
   }
 
-  /** Logs to yap.log everything that arrives from the terminal and what the UI does with it. */
+  /** Logs to wa.log everything that arrives from the terminal and what the UI does with it. */
   private bindDiagnostics() {
     const program = this.screen.program as unknown as { input: NodeJS.ReadStream }
     program.input.on('data', (b: Buffer) => {
@@ -567,8 +567,8 @@ export class Ui {
   }
 
   private onConnection(state: ConnState, detail?: string) {
-    if (state === 'qr' && this.yap.qr) {
-      QRCode.toString(this.yap.qr, { type: 'terminal', small: true }, (err, qr) => {
+    if (state === 'qr' && this.wa.qr) {
+      QRCode.toString(this.wa.qr, { type: 'terminal', small: true }, (err, qr) => {
         if (err) { logger.error({ err }, 'qr'); return }
         this.showingQr = true
         this.msgBox.setContent(['', `  {bold}${esc(t('qrTitle'))}{/bold}`, '', `  ${esc(t('qrHint'))}`, '', qr].join('\n'))
@@ -580,8 +580,8 @@ export class Ui {
       this.connText = ''
       this.showingQr = false
       this.dirtyMessages = true
-      for (const jid of this.tabs) this.yap.subscribePresence(jid)
-      if (Date.now() - this.lastActive < 120000) { this.lastPresenceTouch = Date.now(); this.yap.touchPresence() }
+      for (const jid of this.tabs) this.wa.subscribePresence(jid)
+      if (Date.now() - this.lastActive < 120000) { this.lastPresenceTouch = Date.now(); this.wa.touchPresence() }
       this.scheduleRender()
     } else if (state === 'closed') {
       this.connText = `{${FG.error}-fg}● ${esc(detail ?? t('disconnected'))}{/${FG.error}-fg}`
@@ -869,11 +869,11 @@ export class Ui {
 
   /** Sends `emoji` as my reaction to `row` (empty removes it); the same emoji again, from the mouse, removes it too. */
   private async react(row: MessageRow, emoji: string, toggle = false) {
-    if (this.yap.state !== 'open') return this.flash(t('noConnection'))
-    const mine = store.listReactions(row.chat_jid).find(r => r.msg_id === row.id && r.sender_jid === this.yap.me)
+    if (this.wa.state !== 'open') return this.flash(t('noConnection'))
+    const mine = store.listReactions(row.chat_jid).find(r => r.msg_id === row.id && r.sender_jid === this.wa.me)
     const send = toggle && mine?.emoji === emoji ? '' : emoji
     try {
-      await this.yap.react(row.chat_jid, row.id, send)
+      await this.wa.react(row.chat_jid, row.id, send)
       if (!send) this.flash(t('reactionRemoved'))
     } catch (e) {
       logger.error({ e }, 'react')
@@ -1012,9 +1012,9 @@ export class Ui {
       this.editing = null
       this.drawInput()
       this.screen.render()
-      if (this.yap.state !== 'open') return this.flash(t('noConnection'))
+      if (this.wa.state !== 'open') return this.flash(t('noConnection'))
       try {
-        await this.yap.edit(editing.chat_jid, editing.id, text)
+        await this.wa.edit(editing.chat_jid, editing.id, text)
       } catch (e) {
         logger.error({ e }, 'edit')
         this.flash(`${t('error')}: ${(e as Error).message}`, 10000)
@@ -1024,7 +1024,7 @@ export class Ui {
     if (!text) return
     if (text.startsWith('/')) return this.openPicker(text.slice(1).trim())
     if (!this.current) return this.flash(t('openFirst'))
-    if (this.yap.state !== 'open') return this.flash(t('noConnection'))
+    if (this.wa.state !== 'open') return this.flash(t('noConnection'))
     const jid = this.current
     // On sending, the panel jumps to the bottom to show the new message, even if it was looking at history.
     this.atBottom = true
@@ -1034,7 +1034,7 @@ export class Ui {
       this.replyTo = null
       this.drawInput()
       this.screen.render()
-      await this.yap.send(jid, text, replyTo?.id)
+      await this.wa.send(jid, text, replyTo?.id)
       // My own message only appears once the server echoes it back; the most recent one of mine with the heart is then searched for.
       if (reaction(text)) this.heartFor(r => r.from_me === 1 && r.text === text && Date.now() - r.ts * 1000 < 30000, text)
     } catch (e) {
@@ -1083,8 +1083,8 @@ export class Ui {
     if (!jid || !this.inputValue || this.pickerOpen) return this.stopComposing()
     const now = Date.now()
     if (jid !== this.composingJid || now - this.composingSentAt > 5000) {
-      if (this.composingJid && jid !== this.composingJid) this.yap.setComposing(this.composingJid, false)
-      this.yap.setComposing(jid, true)
+      if (this.composingJid && jid !== this.composingJid) this.wa.setComposing(this.composingJid, false)
+      this.wa.setComposing(jid, true)
       this.composingJid = jid
       this.composingSentAt = now
     }
@@ -1095,7 +1095,7 @@ export class Ui {
   private stopComposing() {
     if (this.composingTimer) { clearTimeout(this.composingTimer); this.composingTimer = undefined }
     if (!this.composingJid) return
-    this.yap.setComposing(this.composingJid, false)
+    this.wa.setComposing(this.composingJid, false)
     this.composingJid = null
   }
 
@@ -1104,7 +1104,7 @@ export class Ui {
     this.lastActive = Date.now()
     if (this.lastActive - this.lastActiveSaved > 2000) this.saveTabs()
     // Keeps the device "available" while the terminal is in use; every 10 seconds is enough.
-    if (this.lastActive - this.lastPresenceTouch > 10000) { this.lastPresenceTouch = this.lastActive; this.yap.touchPresence() }
+    if (this.lastActive - this.lastPresenceTouch > 10000) { this.lastPresenceTouch = this.lastActive; this.wa.touchPresence() }
   }
 
   /** Records of the other terminals whose process is still alive. */
@@ -1146,11 +1146,11 @@ export class Ui {
     if (this.notice?.jid === jid) this.notice = undefined
     this.dirtyTabs = true
     this.saveTabs()
-    this.yap.subscribePresence(jid)
+    this.wa.subscribePresence(jid)
     if (this.pickerOpen) this.closePicker(false)
     this.setFocus('input')
     this.renderNow()
-    this.yap.markRead(jid).catch(e => logger.warn({ e }, 'markRead'))
+    this.wa.markRead(jid).catch(e => logger.warn({ e }, 'markRead'))
   }
 
   /** Moves the active tab to the first position, next to the input, when typing starts in it. */
@@ -1196,7 +1196,7 @@ export class Ui {
     if (!this.tabs.length) return this.quit()
     this.renderNow()
     const jid = this.current
-    if (jid) this.yap.markRead(jid).catch(e => logger.warn({ e }, 'markRead'))
+    if (jid) this.wa.markRead(jid).catch(e => logger.warn({ e }, 'markRead'))
   }
 
   private drawTabs() {
@@ -1430,7 +1430,7 @@ export class Ui {
   private titleShown = ''
   private updateTitle() {
     const unread = store.listChats().filter(c => c.unread > 0 && (this.fixed ? c.jid === this.current : !c.archived))
-    const title = `${unread.length ? '● ' : ''}${this.current ? chatName(this.current) : 'yap'}`
+    const title = `${unread.length ? '● ' : ''}${this.current ? chatName(this.current) : 'wa'}`
     if (title !== this.titleShown) { this.titleShown = title; this.screen.title = title; titleHerdr(title) }
     // In Herdr the same signal goes to the agent's status: someone typing is work in progress, unread asks for attention.
     const typing = [...this.typing].filter(([jid, stopped]) => stopped == null && (!this.fixed || jid === this.current)).map(([jid]) => chatName(jid))
@@ -1446,7 +1446,7 @@ export class Ui {
     const released = releaseHerdr()
     this.screen.destroy()
     if (reason) process.stderr.write(`${reason}\n`)
-    this.yap.stop().catch(() => {})
+    this.wa.stop().catch(() => {})
     store.deleteState(this.tabsKey())
     store.close()
     void released.then(() => process.exit(0))
@@ -1800,7 +1800,7 @@ export class Ui {
       if (row.quoted) {
         const [who, text] = row.quoted.split('\t')
         // Who it was from only matters in groups; one-on-one the other person is obvious, and mine don't carry a name either.
-        const author = who === this.yap.me || !row.chat_jid.endsWith('@g.us') ? '' : `${esc(contactName(who ?? ''))}: `
+        const author = who === this.wa.me || !row.chat_jid.endsWith('@g.us') ? '' : `${esc(contactName(who ?? ''))}: `
         out(dim(`│ ${author}${esc(truncate(text ?? '', width - 6))}`), row)
       }
 
@@ -1854,7 +1854,7 @@ export class Ui {
       if (rs?.length) {
         const byEmoji = new Map<string, string[]>()
         // Only the first name, to keep the line short.
-        for (const r of rs) byEmoji.set(r.emoji, [...(byEmoji.get(r.emoji) ?? []), r.sender_jid === this.yap.me ? t('me') : contactName(r.sender_jid).split(' ')[0]!])
+        for (const r of rs) byEmoji.set(r.emoji, [...(byEmoji.get(r.emoji) ?? []), r.sender_jid === this.wa.me ? t('me') : contactName(r.sender_jid).split(' ')[0]!])
         const parts = [...byEmoji].map(([emoji, who]) => `${emoji} ${who.length > 1 ? who.length : who[0]}`)
         out(dim(esc(parts.join('  '))), row)
       }
@@ -1948,7 +1948,7 @@ export class Ui {
         decode(path).then(() => { if (this.current === row.chat_jid) { this.dirtyMessages = true; this.scheduleRender() } })
       }
       // Thumbnail by hand while the full file hasn't arrived; videos and gifs stay with just the thumbnail.
-      if (!row.media_path && !row.media_err && row.type !== 'video' && row.type !== 'gif') this.yap.ensureMedia(row)
+      if (!row.media_path && !row.media_err && row.type !== 'video' && row.type !== 'gif') this.wa.ensureMedia(row)
     }
   }
 
@@ -1978,7 +1978,7 @@ export class Ui {
     const file = mediaFile(row)
     if (!file) {
       if (row.media_err) return this.flash(t('attachmentExpired'))
-      this.yap.ensureMedia(row)
+      this.wa.ensureMedia(row)
       return this.flash(t('downloading'))
     }
     const child = spawn('xdg-open', [file], { detached: true, stdio: 'ignore' })

@@ -9,21 +9,21 @@ import { t } from './i18n.js'
 import { logger } from './log.js'
 import { store, type MessageRow } from './db.js'
 import type { Backend } from './backend.js'
-import type { ConnState, YapEvents } from './yap.js'
+import type { ConnState, WaEvents } from './wa.js'
 
 /**
- * Several `yap` processes: the first one is the server (WhatsApp connection, database writes) and opens this
+ * Several `wa` processes: the first one is the server (WhatsApp connection, database writes) and opens this
  * socket; the others connect to it as clients. Only the actions that need the connection and the events the
  * server broadcasts go over the socket; reads (chats, messages, names) are done by each process directly on
  * SQLite, which accepts several readers in WAL mode. Protocol: one JSON line per message.
  */
 // A Unix socket path has a 108-byte limit: it lives in the user's runtime directory (or the temp one), with a
-// suffix derived from the data folder so different profiles (YAP_HOME) don't collide.
-export const sockPath = path.join(process.env.XDG_RUNTIME_DIR ?? os.tmpdir(), `yap-${createHash('sha1').update(dirs.base).digest('hex').slice(0, 8)}.sock`)
+// suffix derived from the data folder so different profiles (WA_HOME) don't collide.
+export const sockPath = path.join(process.env.XDG_RUNTIME_DIR ?? os.tmpdir(), `wa-${createHash('sha1').update(dirs.base).digest('hex').slice(0, 8)}.sock`)
 
 type Request = { id: number; op: string; args: unknown[] }
 type Reply = { id: number; ok: boolean; result?: unknown; error?: string }
-type Event = { event: keyof YapEvents | 'hello'; args: unknown[] }
+type Event = { event: keyof WaEvents | 'hello'; args: unknown[] }
 
 const slimRow = (row: MessageRow): MessageRow => ({ ...row, raw: '' })
 
@@ -49,14 +49,14 @@ export class IpcServer {
   private server: net.Server
   private clients = new Set<net.Socket>()
 
-  constructor(private yap: Backend) {
+  constructor(private wa: Backend) {
     this.server = net.createServer(socket => this.accept(socket))
-    const forward = (event: keyof YapEvents) => (...args: unknown[]) => {
+    const forward = (event: keyof WaEvents) => (...args: unknown[]) => {
       // The 'connection' event also carries the current QR: the client has no other way to know it.
-      const payload: Event = { event, args: event === 'notify' ? [args[0], slimRow(args[1] as MessageRow)] : event === 'connection' ? [args[0], args[1], yap.qr] : args }
+      const payload: Event = { event, args: event === 'notify' ? [args[0], slimRow(args[1] as MessageRow)] : event === 'connection' ? [args[0], args[1], wa.qr] : args }
       for (const c of this.clients) sendJson(c, payload)
     }
-    for (const ev of ['connection', 'chats', 'messages', 'notify', 'status', 'typing', 'reaction'] as const) yap.on(ev, forward(ev) as never)
+    for (const ev of ['connection', 'chats', 'messages', 'notify', 'status', 'typing', 'reaction'] as const) wa.on(ev, forward(ev) as never)
   }
 
   /** Opens the socket. Fails with EADDRINUSE if another process just opened it: the caller should then connect as a client. */
@@ -70,7 +70,7 @@ export class IpcServer {
   private accept(socket: net.Socket) {
     this.clients.add(socket)
     logger.info({ clients: this.clients.size }, 'ipc: client connected')
-    sendJson(socket, { event: 'hello', args: [{ me: this.yap.me, state: this.yap.state, qr: this.yap.qr }] } satisfies Event)
+    sendJson(socket, { event: 'hello', args: [{ me: this.wa.me, state: this.wa.state, qr: this.wa.qr }] } satisfies Event)
     lines(socket, obj => { this.handle(socket, obj as Request).catch(e => logger.warn({ e }, 'ipc: request')) })
     socket.on('close', () => { this.clients.delete(socket) })
     socket.on('error', e => logger.warn({ e: e.message }, 'ipc: client socket'))
@@ -81,16 +81,16 @@ export class IpcServer {
     try {
       const a = req.args as string[]
       switch (req.op) {
-        case 'send': await this.yap.send(a[0]!, a[1]!, a[2]); return reply({ ok: true })
-        case 'react': await this.yap.react(a[0]!, a[1]!, a[2] ?? ''); return reply({ ok: true })
-        case 'edit': await this.yap.edit(a[0]!, a[1]!, a[2]!); return reply({ ok: true })
-        case 'sendFile': await this.yap.sendFile(a[0]!, a[1]!, a[2]); return reply({ ok: true })
-        case 'markRead': await this.yap.markRead(a[0]!); return reply({ ok: true })
-        case 'subscribePresence': this.yap.subscribePresence(a[0]!); return reply({ ok: true })
-        case 'setComposing': this.yap.setComposing(a[0]!, a[1] === 'on'); return reply({ ok: true })
-        case 'touchPresence': this.yap.touchPresence(); return reply({ ok: true })
-        case 'ensureMedia': { const row = store.getMessage(a[0]!, a[1]!); if (row) this.yap.ensureMedia(row); return reply({ ok: true }) }
-        case 'downloadAll': return reply({ ok: true, result: await this.yap.downloadAll(a[0]!) })
+        case 'send': await this.wa.send(a[0]!, a[1]!, a[2]); return reply({ ok: true })
+        case 'react': await this.wa.react(a[0]!, a[1]!, a[2] ?? ''); return reply({ ok: true })
+        case 'edit': await this.wa.edit(a[0]!, a[1]!, a[2]!); return reply({ ok: true })
+        case 'sendFile': await this.wa.sendFile(a[0]!, a[1]!, a[2]); return reply({ ok: true })
+        case 'markRead': await this.wa.markRead(a[0]!); return reply({ ok: true })
+        case 'subscribePresence': this.wa.subscribePresence(a[0]!); return reply({ ok: true })
+        case 'setComposing': this.wa.setComposing(a[0]!, a[1] === 'on'); return reply({ ok: true })
+        case 'touchPresence': this.wa.touchPresence(); return reply({ ok: true })
+        case 'ensureMedia': { const row = store.getMessage(a[0]!, a[1]!); if (row) this.wa.ensureMedia(row); return reply({ ok: true }) }
+        case 'downloadAll': return reply({ ok: true, result: await this.wa.downloadAll(a[0]!) })
         default: return reply({ ok: false, error: t('unknownOp', req.op) })
       }
     } catch (e) {
@@ -107,7 +107,7 @@ export class IpcServer {
 
 // ---------- client ----------
 
-export class RemoteYap extends EventEmitter<YapEvents> implements Backend {
+export class RemoteWa extends EventEmitter<WaEvents> implements Backend {
   me = ''
   state: ConnState = 'connecting'
   qr: string | undefined
@@ -126,10 +126,10 @@ export class RemoteYap extends EventEmitter<YapEvents> implements Backend {
   }
 
   /** Connects to the server; null if none is listening (socket missing or dead). */
-  static connect(): Promise<RemoteYap | null> {
+  static connect(): Promise<RemoteWa | null> {
     return new Promise(resolve => {
       const socket = net.connect(sockPath)
-      socket.once('connect', () => resolve(new RemoteYap(socket)))
+      socket.once('connect', () => resolve(new RemoteWa(socket)))
       socket.once('error', (e: NodeJS.ErrnoException) => {
         if (e.code === 'ECONNREFUSED') { try { fs.unlinkSync(sockPath) } catch { /* no longer exists */ } }
         resolve(null)

@@ -2,9 +2,9 @@ import pino from 'pino'
 import { dirs } from './config.js'
 
 // The terminal belongs to the UI: everything that would be written to stdout (baileys, console.*) goes to the log file.
-export const logger = pino({ level: process.env.YAP_LOG ?? 'warn' }, pino.destination({ dest: dirs.log, sync: true }))
+export const logger = pino({ level: process.env.WA_LOG ?? 'warn' }, pino.destination({ dest: dirs.log, sync: true }))
 
-/** User interactions (mouse, keys, focus): always logged, to diagnose terminals, whatever YAP_LOG is. */
+/** User interactions (mouse, keys, focus): always logged, to diagnose terminals, whatever WA_LOG is. */
 export const uiLog = logger.child({ mod: 'ui' }, { level: 'info' })
 
 export function silenceConsole() {

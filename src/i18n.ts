@@ -1,11 +1,11 @@
 /**
- * User-facing strings in the user's language. Only Portuguese (Portugal) and English for now, picked from YAP_LANG or,
+ * User-facing strings in the user's language. Only Portuguese (Portugal) and English for now, picked from WA_LANG or,
  * failing that, from the locale (LC_ALL, LC_MESSAGES, LANG): anything starting with "pt" is Portuguese, the rest English.
  * Emoji names and the writing suggestions follow the same choice.
  */
 export type Lang = 'pt' | 'en'
 
-const locale = process.env.YAP_LANG ?? process.env.LC_ALL ?? process.env.LC_MESSAGES ?? process.env.LANG ?? ''
+const locale = process.env.WA_LANG ?? process.env.LC_ALL ?? process.env.LC_MESSAGES ?? process.env.LANG ?? ''
 export const lang: Lang = /^pt/i.test(locale) ? 'pt' : 'en'
 
 const STRINGS = {
@@ -58,7 +58,7 @@ const STRINGS = {
   today: { pt: 'hoje', en: 'today' },
   yesterday: { pt: 'ontem', en: 'yesterday' },
   months: { pt: 'jan fev mar abr mai jun jul ago set out nov dez', en: 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec' },
-  anotherInstance: { pt: 'outra instância do yap ligou-se com esta conta; fecha-a e reinicia este', en: 'another yap instance connected with this account; close it and restart this one' },
+  anotherInstance: { pt: 'outra instância do wa ligou-se com esta conta; fecha-a e reinicia este', en: 'another wa instance connected with this account; close it and restart this one' },
   loggedOut: { pt: 'sessão terminada no telemóvel; novo QR a caminho', en: 'session ended on the phone; a new QR is coming' },
   closedReconnecting: { pt: 'ligação fechada ({0}), a religar', en: 'connection closed ({0}), reconnecting' },
   historyProgress: { pt: 'histórico: {0} mensagens, {1} conversas{2}', en: 'history: {0} messages, {1} chats{2}' },

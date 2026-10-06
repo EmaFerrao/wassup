@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { logger } from './log.js'
 
 /**
- * Inside Herdr (the terminal multiplexer for agents) yap presents itself as an agent called "yap" in the pane it
+ * Inside Herdr (the terminal multiplexer for agents) wa presents itself as an agent called "wa" in the pane it
  * runs in, so the sidebar shows its state: someone typing → working, unread messages → blocked (asks for
  * attention), nothing → idle. The tab's title (or the pane's, if the tab is split) follows the window title, with
  * the name of the active conversation. The connection is the same as the official hooks: one JSON line over the Unix socket.
@@ -20,7 +20,7 @@ let lastTitle = ''
 
 /** A request; returns the response's `result`, or undefined if it fails or doesn't respond within half a second. */
 function call(method: string, params: Record<string, unknown>): Promise<unknown> {
-  const request = { id: `yap:${Date.now()}:${Math.floor(Math.random() * 1e6)}`, method, params }
+  const request = { id: `wa:${Date.now()}:${Math.floor(Math.random() * 1e6)}`, method, params }
   logger.info({ method, params }, 'herdr')
   return new Promise(resolve => {
     let buf = ''
@@ -41,7 +41,7 @@ function call(method: string, params: Record<string, unknown>): Promise<unknown>
 
 /** Requests about the agent's pane always carry the origin and the sequence. */
 function pane(method: string, params: Record<string, unknown>) {
-  return call(method, { pane_id: env.HERDR_PANE_ID, source: 'yap', agent: 'yap', seq: ++seq, ...params })
+  return call(method, { pane_id: env.HERDR_PANE_ID, source: 'wa', agent: 'wa', seq: ++seq, ...params })
 }
 
 export function reportHerdr(state: HerdrState, message?: string) {
@@ -53,7 +53,7 @@ export function reportHerdr(state: HerdrState, message?: string) {
 }
 
 /**
- * The tab's title follows the window's ("● Fulano") if yap is the tab's only pane; in a split tab it's the pane that
+ * The tab's title follows the window's ("● Fulano") if wa is the tab's only pane; in a split tab it's the pane that
  * carries it. The name that was there is saved to restore it on exit. Requests queue up so they don't overtake each other.
  */
 type Target = { kind: 'tab' | 'pane'; original: string | null }
@@ -81,12 +81,12 @@ export function titleHerdr(title: string) {
   titleQueue = titleQueue.then(async () => { const t = await target; if (t) await rename(t, title) })
 }
 
-/** The `yap` launcher at the project root, to open another conversation in another Herdr tab. */
-const waBin = fileURLToPath(new URL('../yap', import.meta.url))
+/** The `wa` launcher at the project root, to open another conversation in another Herdr tab. */
+const waBin = fileURLToPath(new URL('../wa', import.meta.url))
 
 /**
  * Opens the conversation in a new Herdr tab (focused when it was chosen, unfocused when it's an incoming message):
- * the tab's shell receives `exec yap <jid>`, so when the conversation closes the tab closes with it.
+ * the tab's shell receives `exec wa <jid>`, so when the conversation closes the tab closes with it.
  */
 export async function openChatHerdr(jid: string, name: string, focus = true) {
   if (!inHerdr) return

@@ -1,12 +1,12 @@
 import type { EventEmitter } from 'node:events'
 import type { MessageRow } from './db.js'
-import type { ConnState, YapEvents } from './yap.js'
+import type { ConnState, WaEvents } from './wa.js'
 
 /**
- * What the UI needs from whoever talks to WhatsApp. `Yap` (our own connection, in the server process) and
- * `RemoteYap` (another process's client, over the socket) implement it; the UI doesn't know which one it has.
+ * What the UI needs from whoever talks to WhatsApp. `Wa` (our own connection, in the server process) and
+ * `RemoteWa` (another process's client, over the socket) implement it; the UI doesn't know which one it has.
  */
-export interface Backend extends EventEmitter<YapEvents> {
+export interface Backend extends EventEmitter<WaEvents> {
   readonly me: string
   readonly state: ConnState
   readonly qr: string | undefined

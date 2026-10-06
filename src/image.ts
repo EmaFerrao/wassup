@@ -140,12 +140,12 @@ export function halfBlocks(d: Decoded, cols: number, rows: number): string[] {
 export type ImageMode = 'kitty' | 'blocks' | 'none'
 
 /**
- * `YAP_IMAGES` forces the mode; otherwise what the terminal answered during probing is used. Inside Herdr the
+ * `WA_IMAGES` forces the mode; otherwise what the terminal answered during probing is used. Inside Herdr the
  * probe reaches the terminal underneath, which says yes to Kitty graphics, but the multiplexer doesn't relay the
  * placements and the images come out as empty space: there it's half-blocks, which show something.
  */
 export function detectImageMode(kittyGraphics: boolean, inHerdr = false): ImageMode {
-  const forced = process.env.YAP_IMAGES
+  const forced = process.env.WA_IMAGES
   if (forced === 'kitty' || forced === 'blocks' || forced === 'none') return forced
   return kittyGraphics && !inHerdr ? 'kitty' : 'blocks'
 }

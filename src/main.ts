@@ -1,10 +1,10 @@
 import { EventEmitter } from 'node:events'
 import { silenceConsole, logger } from './log.js'
 import { t } from './i18n.js'
-import { Yap, type YapEvents } from './yap.js'
+import { Wa, type WaEvents } from './wa.js'
 import { Ui } from './ui.js'
 import { probeTerminal } from './term.js'
-import { IpcServer, RemoteYap } from './ipc.js'
+import { IpcServer, RemoteWa } from './ipc.js'
 import type { Backend } from './backend.js'
 import type { MessageRow } from './db.js'
 
@@ -17,7 +17,7 @@ process.on('unhandledRejection', e => logger.error({ e: e instanceof Error ? e.s
  * another process's client. When the server disappears, the election repeats and what's behind it swaps without
  * the UI noticing.
  */
-class BackendProxy extends EventEmitter<YapEvents> implements Backend {
+class BackendProxy extends EventEmitter<WaEvents> implements Backend {
   private inner: Backend | undefined
   private server: IpcServer | undefined
   get me() { return this.inner?.me ?? '' }
@@ -40,7 +40,7 @@ class BackendProxy extends EventEmitter<YapEvents> implements Backend {
   /** Connects to whatever server exists; if there's none, this process becomes the server. */
   async elect() {
     for (let attempt = 0; attempt < 5; attempt++) {
-      const remote = await RemoteYap.connect()
+      const remote = await RemoteWa.connect()
       if (remote) {
         this.use(remote)
         remote.once('lost', () => {
@@ -50,8 +50,8 @@ class BackendProxy extends EventEmitter<YapEvents> implements Backend {
         })
         return
       }
-      const yap = new Yap()
-      const server = new IpcServer(yap)
+      const wa = new Wa()
+      const server = new IpcServer(wa)
       try {
         await server.listen()
       } catch (e) {
@@ -61,8 +61,8 @@ class BackendProxy extends EventEmitter<YapEvents> implements Backend {
         continue
       }
       this.server = server
-      this.use(yap)
-      yap.start().catch(e => logger.error({ e }, 'start'))
+      this.use(wa)
+      wa.start().catch(e => logger.error({ e }, 'start'))
       return
     }
     throw new Error(t('noServer'))
