@@ -1749,8 +1749,8 @@ export class Ui {
       const out = (line: string, r: MessageRow | null) => {
         for (const l of wrapTagged(line, textWidth)) { last = { at: map.length, line: l }; push(mine ? alignRight(l, textWidth) : l, r) }
       }
-      // No names: mine are on the right, the other side's text is green one-on-one. Only in groups does the
-      // sender's name open the message, in their color, and the text stays in the default color. The time closes it (below), so the text lines of
+      // No names: mine are on the right, the other side's on the left, both in the default color. Only in groups
+      // does the sender's name open the message, in their color. The time closes it (below), so the text lines of
       // consecutive messages read straight down; mine carries the ticks after it. Both lines are the message's
       // "header" for the drag-to-reply and the "☺".
       const header = (line: string) => { const at = map.length; out(line, row); for (let i = at; i < map.length; i++) headers.add(i) }
@@ -1783,7 +1783,7 @@ export class Ui {
       // never an image. Otherwise it gets its own line.
       let stamped = false
       if (row.text && (type === 'text' || type === 'image' || type === 'video' || type === 'gif' || type === 'document')) {
-        const wrapped = waMarkup(row.text).split('\n').flatMap(l => wrapTagged(!mine && !isGroup ? `{green-fg}${l}{/green-fg}` : l, textWidth))
+        const wrapped = waMarkup(row.text).split('\n').flatMap(l => wrapTagged(l, textWidth))
         wrapped.forEach((l, i) => {
           const tw = visibleWidth(l)
           const withStamp = i === wrapped.length - 1 && tw + 2 + visibleWidth(stamp) <= width - 1
@@ -1814,6 +1814,7 @@ export class Ui {
         const parts = [...byEmoji].map(([emoji, who]) => `${emoji} ${who.length > 1 ? who.length : who[0]}`)
         out(dim(esc(parts.join('  '))), row)
       }
+      push('', null)
     }
 
     this.lineMap = map
