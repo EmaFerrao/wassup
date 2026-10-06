@@ -36,7 +36,7 @@ or dark shades.
 
 - **Tabs**: one per open chat, with the unread count in red and an `×` to close. Tab cycles through them; whatever
   is left unsent stays with each chat. While someone is typing, a rainbow runs along their name, in the tab and in
-  the prompt. New messages in a chat without a tab open one without activating it, with a passing notice over it
+  the prompt, where the `❯` becomes a `✎`. New messages in a chat without a tab open one without activating it, with a passing notice over it
   and the bell.
 - **Chats**: `/` opens the list, most recent at the bottom, with an excerpt of the last message; typing filters it,
   ignoring accents and case; Enter, Tab, → or a click opens.

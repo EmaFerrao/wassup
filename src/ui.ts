@@ -126,6 +126,8 @@ export class Ui {
   private ghost: { text: string; s: Suggestion } | undefined
   /** The correction floating right above the word it replaces. */
   private ghostBox!: blessed.Widgets.BoxElement
+  /** The reply, reaction or edit header, floating on the line above the input. */
+  private headerBox!: blessed.Widgets.BoxElement
   private ghostTimer: NodeJS.Timeout | undefined
   private ghostAbort: AbortController | undefined
   /** Right-arrow presses with the next suggestion still on the way: accepted on arrival, one per arrow, so → → → correct in a chain. */
@@ -195,7 +197,6 @@ export class Ui {
   /** What's left unsent in each chat: switching tabs swaps the input, so nothing goes to the wrong person. */
   private drafts = new Map<string, { value: string; cursor: number }>()
   private reactTo: MessageRow | null = null
-  private inputHeader = false
   /** Columns the prompt takes on the input's first line ("Ema ❯ "), and the continuation lines' indent. */
   private promptWidth = 2
   private images: ImageSlot[] = []
@@ -287,6 +288,10 @@ export class Ui {
       parent: this.screen, top: '100%-4', left: 0, width: 1, height: 1, tags: true, hidden: true, padding: { left: 1 }, wrap: false, mouse: true,
       style: { bg: this.selectedBg } as unknown as blessed.Widgets.Types.TStyle,
     })
+    // What's being replied to, reacted to or edited, on the line above the input: the blank line that closes the
+    // last message, so the messages don't move; floating, like the correction below, which is created after it
+    // and so wins the row when both are there.
+    this.headerBox = blessed.box({ parent: this.screen, top: 0, left: 0, right: 0, height: 1, tags: true, hidden: true, padding: { left: 1 } })
     // The model's correction, floating one line above the word it replaces, with the same background.
     this.ghostBox = blessed.box({
       parent: this.screen, top: 0, left: 0, width: 1, height: 1, tags: true, hidden: true, wrap: false,
@@ -461,7 +466,7 @@ export class Ui {
       if (!this.pickerOpen) this.setFocus('input')
       {
         const x = data.x - num(this.input.aleft) - num(this.input.ileft) - this.promptWidth
-        const row = this.inputTop + data.y - num(this.input.atop) - num(this.input.itop) - (this.inputHeader ? 1 : 0)
+        const row = this.inputTop + data.y - num(this.input.atop) - num(this.input.itop)
         let pos = 0
         for (let r = 0; r < Math.min(row, this.inputLines.length); r++) pos += this.inputLines[r]!.length
         const line = this.inputLines[row]
@@ -607,15 +612,19 @@ export class Ui {
   private onTyping(jid: string, active: boolean) {
     if (active) this.typing.set(jid, null)
     else if (this.typing.has(jid)) this.typing.set(jid, Date.now())
-    const frame = () => { this.drawTabs(); if (this.current && this.typing.has(this.current)) this.drawInput(); this.screen.render() }
+    // The input is redrawn while the active chat's person types, and once more when their entry goes, so the
+    // prompt's pencil gives way to the "❯" again.
+    const mine = () => !!this.current && this.typing.has(this.current)
+    const frame = (input: boolean) => { this.drawTabs(); if (input) this.drawInput(); this.screen.render() }
     if (this.typing.size && !this.typingTimer) {
       this.typingTimer = setInterval(() => {
+        const had = mine()
         for (const [j, stopped] of this.typing) if (stopped != null && Date.now() - stopped > FADE_MS) this.typing.delete(j)
         if (!this.typing.size && this.typingTimer) { clearInterval(this.typingTimer); this.typingTimer = undefined }
-        frame()
+        frame(had || mine())
       }, 40)
     }
-    frame()
+    frame(jid === this.current)
     this.updateTitle()
     this.screen.render()
   }
@@ -795,15 +804,14 @@ export class Ui {
   /**
    * The cells of screen row `y` the selection takes, or nothing: only written text counts, never the name and
    * time, day separators, quotes, reactions or media notes. In the messages that's the rows showing a message's
-   * own text; in the input, every row but the reply, reaction or edit header, from after the prompt.
+   * own text; in the input, every row, from after the prompt.
    */
   private selCells(y: number): { from: number; to: number } | null {
     const s = this.textSel, r = this.textSelRange()
     if (!s || !r) return null
     let from = s.xi, to = s.xl - 1
     if (s.input) {
-      if (this.inputHeader && y === num(this.input.atop) + num(this.input.itop)) return null
-      from += 2
+      from += this.promptWidth
     } else {
       const real = this.msgBox.childBase + (y - num(this.msgBox.atop) - num(this.msgBox.itop))
       const orig = this.msgBox._clines?.rtof?.[real]
@@ -1633,14 +1641,20 @@ export class Ui {
 
   private drawInput() {
     // One line at minimum (grows with the text), the prompt on the first ("Ema ❯ ": the chat's first name, with the
-    // rainbow across it while they type, or just "> " for a chat known only by a number), text wrapped by word
-    // (never mid-word) and continuation indented under the text.
+    // rainbow across it and "✎" against it in place of the " ❯" while they type, or just "❯ " for a chat known only by a
+    // number), text wrapped by word (never mid-word) and continuation indented under the text.
     // When the text has more lines than fit, the ones around the cursor are shown, with the cursor on the bottom one whenever possible. With
-    // "chats" open, the same line is used to type the filter. When replying or reacting, the first
-    // line says which message, leaving one for the text.
+    // "chats" open, the same line is used to type the filter. When replying, reacting or editing, the line
+    // above the input says which message (`headerBox`), so the input itself keeps its rows for the text.
     const w = num(this.input.width) - num(this.input.iwidth) - 1
     const name = this.pickerOpen || !this.current ? null : shortName(this.current)
-    const promptPlain = this.pickerOpen ? '/ ' : name ? `${name} ❯ ` : '❯ '
+    // The typing state is looked up here too, so the prompt's width matches what's drawn below.
+    const typing = !this.pickerOpen && this.current ? this.typing.get(this.current) : undefined
+    // The pencil sits against the name ("Ema✎"), the "❯" a cell away ("Ema ❯"); the prompt keeps its width either
+    // way, so the text doesn't shift when they start or stop.
+    const mark = typing !== undefined ? '✎' : '❯'
+    const promptMark = (n: string | null) => n ? (typing !== undefined ? `${n}${mark}  ` : `${n} ${mark} `) : `${mark} `
+    const promptPlain = this.pickerOpen ? '/ ' : promptMark(name)
     const pw = this.promptWidth = strWidth(promptPlain)
     const target = this.pickerOpen ? null : this.replyTo ?? this.reactTo ?? this.editing
     const header = !target ? null : this.editing
@@ -1653,7 +1667,6 @@ export class Ui {
     // floating on the line above the word, starting on its column. Tab accepts.
     const ghost = this.ghostShown()
     const view = ghost ? this.ghostView(ghost) : null
-    this.inputHeader = header != null
     const width = Math.max(4, w - pw)
     const chars = graphemes(this.pickerOpen ? this.filter : this.inputValue)
     const cursor = Math.min(this.pickerOpen ? this.filterCursor : this.cursor, chars.length)
@@ -1684,11 +1697,10 @@ export class Ui {
         ghostCol = Math.max(0, Math.min(strWidth(lines[wl]!.slice(0, at).join('')) - 2, width - strWidth(ghostAbove)))
       }
     }
-    // The input grows with the text, up to half the screen; the header (reply, react, edit) takes up one of the lines.
-    const extra = header ? 1 : 0
-    const rows = Math.max(1, Math.min(lines.length + extra, Math.floor(num(this.screen.height) / 2)))
+    // The input grows with the text, up to half the screen.
+    const rows = Math.max(1, Math.min(lines.length, Math.floor(num(this.screen.height) / 2)))
     if (rows !== this.inputRows) this.resizeInput(rows)
-    const rowsAvail = Math.max(1, rows - extra)
+    const rowsAvail = rows
     this.inputLines = lines
     this.inputTop = Math.max(0, Math.min(row - (rowsAvail - 1), lines.length - rowsAvail))
     const showCursor = this.focus === 'input' || this.focus === 'picker'
@@ -1704,16 +1716,22 @@ export class Ui {
       return before + '{inverse}' + esc(under) + '{/inverse}' + esc(text(line.slice(col + 1)))
     }
     const visible = lines.slice(this.inputTop, this.inputTop + rowsAvail)
-    // The prompt says what the line does: the name and "❯" type, "/" filters the chats.
-    const typing = name && this.current ? this.typing.get(this.current) : undefined
-    const prompt = this.pickerOpen ? '/ ' : name ? `${typing !== undefined ? this.rainbow(name, typing) : esc(name)} ❯ ` : '❯ '
+    // The prompt says what the line does: the name and "❯" type, "/" filters the chats; while the other person
+    // types, the mark is a pencil against the name and the rainbow runs across both alike.
+    const plain = promptMark(name), body = plain.trimEnd()
+    const prompt = this.pickerOpen ? '/ ' : `${typing !== undefined ? this.rainbow(body, typing) : esc(body)}${plain.slice(body.length)}`
     const out = visible.map((l, i) => (this.inputTop + i === 0 ? prompt : ' '.repeat(pw)) + render(l, this.inputTop + i))
-    if (header) out.unshift(dim(esc(truncate(header, w))))
     this.input.setContent(out.join('\n'))
+    // The header (reply, react, edit) floats on the line right above the input.
+    if (header) {
+      this.headerBox.top = num(this.screen.height) - rows - 1
+      this.headerBox.setContent(dim(esc(truncate(header, w))))
+      this.headerBox.show()
+    } else this.headerBox.hide()
     // The correction floats one line above its word's line, when that line is in view: the input starts `rows` from
-    // the bottom, the header (if any) takes its first row, the prompt its first two columns, after the padding.
+    // the bottom, the prompt takes its first columns, after the padding.
     if (ghostAbove && ghostLine >= this.inputTop && ghostLine < this.inputTop + rowsAvail) {
-      this.ghostBox.top = num(this.screen.height) - rows + extra + (ghostLine - this.inputTop) - 1
+      this.ghostBox.top = num(this.screen.height) - rows + (ghostLine - this.inputTop) - 1
       this.ghostBox.left = num(this.input.ileft) + pw - 1 + ghostCol
       this.ghostBox.width = strWidth(ghostAbove) + 1
       this.ghostBox.setContent(dim(italic(esc(ghostAbove))))
