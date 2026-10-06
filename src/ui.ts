@@ -161,12 +161,14 @@ export class Ui {
   private lineMap: (MessageRow | null)[] = []
   /** Content lines (indices in `lineMap`) holding a message's name and time: the only ones a drag replies from. */
   private headerLines = new Set<number>()
+  /** Content lines holding a message's own text (or caption): the only ones the text selection takes. */
+  private textLines = new Set<number>()
   /**
    * Text being selected with the mouse: the cell pressed (`ax`, `ay`) and the one the pointer is at (`hx`, `hy`),
    * swept in reading order within the columns of the panel it started in (`xi`..`xl`). Copied to the clipboard on
    * release and kept highlighted until the next click or key.
    */
-  private textSel: { ax: number; ay: number; hx: number; hy: number; xi: number; xl: number } | undefined
+  private textSel: { ax: number; ay: number; hx: number; hy: number; xi: number; xl: number; input: boolean } | undefined
   /** The terminal reports the pointer's movement with no button held (mode 1003): only then is there a hover. */
   private anyMotion: boolean
   /** Message under the pointer: its name line gets a "☺" that opens the quick reactions. */
@@ -175,6 +177,8 @@ export class Ui {
   private quickFor: MessageRow | undefined
   /** Where the "☺" or the bar were last drawn, so the click can find them. */
   private quickHit: { y: number; icon?: number; items?: { x: number; w: number; emoji: string }[] } | undefined
+  /** Where the pointer is (terminals that report motion): the reaction under it is drawn highlighted. */
+  private pointer: { x: number; y: number } | undefined
   /** Drawn messages, in order; the selected one (click or arrows in the panel) and the one being replied to or reacted to. */
   private rows: MessageRow[] = []
   private selected: MessageRow | null = null
@@ -393,7 +397,7 @@ export class Ui {
       // The "☺" opens the quick reactions of the hovered message; one of them reacts, "⋯" goes to the keyboard
       // flow; any other click closes the bar and does nothing else, like on WhatsApp Web.
       const hit = this.quickHit
-      if (hit && data.y === hit.y && hit.icon === data.x && this.hover) { this.quickFor = this.hover; return this.renderNow() }
+      if (hit?.icon != null && data.y === hit.y && Math.abs(data.x - hit.icon) <= 1 && this.hover) { this.quickFor = this.hover; return this.renderNow() }
       if (this.quickFor) {
         const target = this.quickFor
         const item = hit && data.y === hit.y ? hit.items?.find(i => data.x >= i.x && data.x < i.x + i.w) : undefined
@@ -447,27 +451,31 @@ export class Ui {
       const yi = num(box.atop) + num(box.itop), yl = num(box.atop) + num(box.height) - (num(box.iheight) - num(box.itop))
       return x >= xi && x < xl && y >= yi && y < yl ? { xi, xl, yi, yl } : null
     }
-    let selPress: { x: number; y: number; xi: number; xl: number; yi: number; yl: number } | undefined
+    let selPress: { x: number; y: number; xi: number; xl: number; yi: number; yl: number; input: boolean } | undefined
     this.screen.on('mouse', (d: { action: string; x: number; y: number; raw?: number[] }) => {
       if (d.action === 'mousemove') {
         const row = !this.pickerOpen && inside(this.msgBox, d.x, d.y) ? lineAt(d.y)?.row ?? undefined : undefined
-        if (row?.id === this.hover?.id) return
+        // A redraw when the message under the pointer changes, and along the line with the "☺" or the reactions,
+        // where the one under the pointer is highlighted.
+        const onBar = (y: number) => this.quickHit != null && y === this.quickHit.y
+        const changed = row?.id !== this.hover?.id || onBar(d.y) || (this.pointer != null && onBar(this.pointer.y))
+        this.pointer = { x: d.x, y: d.y }
         this.hover = row
-        if (!this.quickFor) this.screen.render()
+        if (changed) this.screen.render()
         return
       }
       const motion = !!((d.raw?.[0] ?? 0) & 32)
       if (d.action === 'mousedown' && !motion) {
         if (this.textSel) { this.textSel = undefined; this.screen.render() }
         const box = (this.pickerOpen || lineAt(d.y)?.header ? null : inside(this.msgBox, d.x, d.y)) ?? inside(this.input, d.x, d.y)
-        selPress = box ? { x: d.x, y: d.y, ...box } : undefined
+        selPress = box ? { x: d.x, y: d.y, ...box, input: !inside(this.msgBox, d.x, d.y) } : undefined
         return
       }
       if (motion && selPress) {
         const { xi, xl, yi, yl } = selPress
         const hx = Math.max(xi, Math.min(xl - 1, d.x)), hy = Math.max(yi, Math.min(yl - 1, d.y))
         if (this.textSel?.hx === hx && this.textSel.hy === hy) return
-        this.textSel = { ax: selPress.x, ay: selPress.y, hx, hy, xi, xl }
+        this.textSel = { ax: selPress.x, ay: selPress.y, hx, hy, xi, xl, input: selPress.input }
         return this.screen.render()
       }
       if (d.action === 'mouseup' && selPress) {
@@ -742,15 +750,37 @@ export class Ui {
     return back ? { x0: s.hx, y0: s.hy, x1: s.ax, y1: s.ay } : { x0: s.ax, y0: s.ay, x1: s.hx, y1: s.hy }
   }
 
+  /**
+   * The cells of screen row `y` the selection takes, or nothing: only written text counts, never the name and
+   * time, day separators, quotes, reactions or media notes. In the messages that's the rows showing a message's
+   * own text; in the input, every row but the reply, reaction or edit header, from after the prompt.
+   */
+  private selCells(y: number): { from: number; to: number } | null {
+    const s = this.textSel, r = this.textSelRange()
+    if (!s || !r) return null
+    let from = s.xi, to = s.xl - 1
+    if (s.input) {
+      if (this.inputHeader && y === num(this.input.atop) + num(this.input.itop)) return null
+      from += 2
+    } else {
+      const real = this.msgBox.childBase + (y - num(this.msgBox.atop) - num(this.msgBox.itop))
+      const orig = this.msgBox._clines?.rtof?.[real]
+      if (orig == null || !this.textLines.has(orig)) return null
+    }
+    if (y === r.y0) from = Math.max(from, r.x0)
+    if (y === r.y1) to = Math.min(to, r.x1)
+    return from <= to ? { from, to } : null
+  }
+
   /** Inverts the selected cells in the screen buffer, right before blessed writes it out. */
   private drawTextSel() {
     const r = this.textSelRange()
-    if (!r || !this.textSel) return
+    if (!r) return
     const lines = (this.screen as unknown as { lines: ([number, string][] & { dirty?: boolean })[] }).lines
     for (let y = r.y0; y <= r.y1; y++) {
-      const line = lines[y]
-      if (!line) continue
-      for (let x = y === r.y0 ? r.x0 : this.textSel.xi; x <= (y === r.y1 ? r.x1 : this.textSel.xl - 1); x++) {
+      const line = lines[y], cells = this.selCells(y)
+      if (!line || !cells) continue
+      for (let x = cells.from; x <= cells.to; x++) {
         const cell = line[x]
         if (cell) cell[0] ^= 8 << 18
       }
@@ -761,18 +791,21 @@ export class Ui {
   /** Copies the selected cells' text to the clipboard, one line per screen row, without the spaces around each. */
   private copyTextSel() {
     const r = this.textSelRange()
-    if (!r || !this.textSel) return
+    if (!r) return
     const lines = (this.screen as unknown as { lines: [number, string][][] }).lines
     const out: string[] = []
     for (let y = r.y0; y <= r.y1; y++) {
+      const cells = this.selCells(y)
+      if (!cells) continue
       let text = ''
-      for (let x = y === r.y0 ? r.x0 : this.textSel.xi; x <= (y === r.y1 ? r.x1 : this.textSel.xl - 1); x++) {
+      for (let x = cells.from; x <= cells.to; x++) {
         const ch = lines[y]?.[x]?.[1]
         // The cell after a wide character holds blessed's marker, not text.
         if (ch && ch !== '\x03') text += ch
       }
       out.push(text.trim())
     }
+    if (!out.length) return
     ;(this.screen.program as unknown as { _write: (s: string) => void })._write(`\x1b]52;c;${Buffer.from(out.join('\n')).toString('base64')}\x1b\\`)
     this.flash(t('copied'))
   }
@@ -819,13 +852,17 @@ export class Ui {
     let edge = mine ? xi : xl - 1
     if (mine) while (edge < xl && blank(edge)) edge++
     else while (edge >= xi && blank(edge)) edge--
-    const put = (x: number, ch: string, w: number) => {
-      for (let i = 0; i < w; i++) {
+    // The pointer over an item's click area (its cells and one on each side) makes it stand out: the "☺" goes
+    // from gray to bold in the text color, a reaction gets the selected message's background over the whole area.
+    const over = (x: number, w: number) => this.pointer != null && this.pointer.y === sy && this.pointer.x >= x - 1 && this.pointer.x <= x + w
+    const put = (x: number, ch: string, w: number, hot: boolean) => {
+      for (let i = hot && w > 1 ? -1 : 0; i < (hot && w > 1 ? w + 1 : w); i++) {
         const cell = line[x + i]
         if (!cell) continue
         // The cell's own background (the selected message's, say) stays; the text goes gray.
-        cell[0] = (cell[0] & ~(0x1ff << 9)) | (244 << 9)
-        cell[1] = i ? ' ' : ch
+        if (w > 1) cell[0] = hot ? (cell[0] & ~0x1ff) | this.selectedBg : cell[0]
+        else cell[0] = hot ? (cell[0] & ~(0x1ff << 9)) | (0x1ff << 9) | (1 << 18) : (cell[0] & ~(0x1ff << 9)) | (244 << 9)
+        if (i >= 0) cell[1] = i ? ' ' : ch
       }
     }
     // Two cells between the reactions: each one's click area is its own cells plus one on each side, so a click
@@ -838,7 +875,7 @@ export class Ui {
     const hit: { y: number; icon?: number; items?: { x: number; w: number; emoji: string }[] } = { y: sy }
     if (this.quickFor) hit.items = []
     for (const item of items) {
-      put(x, item.emoji, item.w)
+      put(x, item.emoji, item.w, over(x, item.w))
       if (hit.items) hit.items.push({ x: x - 1, w: item.w + 2, emoji: item.emoji }); else hit.icon = x
       x += item.w + gap
     }
@@ -1639,7 +1676,7 @@ export class Ui {
     const rows = store.listMessages(jid)
     this.rows = rows
     this.selected = rows.find(r => r.id === selectedId) ?? null
-    const headers = new Set<number>()
+    const headers = new Set<number>(), texts = new Set<number>()
     // The text under the highlight is about to change.
     this.textSel = undefined
     let lastDay = ''
@@ -1690,7 +1727,9 @@ export class Ui {
       else if (type !== 'text') out(dim(esc(row.text || `[${type}]`)), row)
 
       if (row.text && (type === 'text' || type === 'image' || type === 'video' || type === 'gif' || type === 'document')) {
+        const textAt = map.length
         for (const l of waMarkup(row.text).split('\n')) out(l, row)
+        for (let i = textAt; i < map.length; i++) texts.add(i)
       }
       // Reactions underneath: each emoji with who reacted, or just the count when there were several.
       const rs = reactions.get(row.id)
@@ -1706,6 +1745,7 @@ export class Ui {
 
     this.lineMap = map
     this.headerLines = headers
+    this.textLines = texts
     this.images = images
     this.msgBox.setContent(lines.join('\n'))
     if (this.atBottom) this.msgBox.setScrollPerc(100)
