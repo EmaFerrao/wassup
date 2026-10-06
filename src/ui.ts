@@ -1837,12 +1837,13 @@ export class Ui {
     if (d instanceof Error) { push(dim(t('mediaUnreadable', row.type, esc(d.message))), row); return }
     // Size: from the pixels if we already have them, otherwise from the dimensions the message carries, otherwise a default rectangle.
     const w = d?.w ?? row.media_w ?? 4, h = d?.h ?? row.media_h ?? 3
-    // In block mode the image takes up the panel's full width, so it looks better with so little resolution; in
-    // Kitty, with real pixels, its natural size up to 60 columns is enough. The height never exceeds the panel.
+    // In block mode the image takes up to 40 columns: each cell is a color pair the terminal (and a multiplexer
+    // in between) has to paint, and a chat full of photos scrolls at the cost of those cells. In Kitty, with
+    // real pixels, its natural size up to 60 columns is enough. The height never exceeds the panel.
     const maxRows = row.type === 'sticker' ? 8 : Math.max(4, this.innerHeight() - 2)
     const { cols, rows } = this.kitty
       ? cellSize(w, h, Math.min(width - 1, 60), Math.min(maxRows, 18))
-      : cellSize(w, h, width - 1, maxRows, true)
+      : cellSize(w, h, Math.min(width - 1, 40), maxRows, true)
     const pad = mine ? Math.max(0, width - 1 - cols) : 0
     if (!d) {
       images.push({ row, origLine: lines.length, cols, rows, pad })

@@ -1,6 +1,7 @@
 import { createJimp } from '@jimp/core'
 import { defaultFormats, defaultPlugins } from 'jimp'
 import webp from '@jimp/wasm-webp'
+import { nearest256 } from './rainbow.js'
 
 const Jimp = createJimp({ formats: [...defaultFormats, webp], plugins: defaultPlugins })
 
@@ -105,24 +106,31 @@ export function cellSize(w: number, h: number, maxCols: number, maxRows: number,
   return { cols, rows }
 }
 
-/** Rows of ▀ half-blocks in 24-bit color (blessed reduces it to 256 colors): two pixel rows per line. */
+/**
+ * Rows of ▀ half-blocks, two pixel rows per line, in the 256-color palette blessed keeps anyway (handing it 24-bit
+ * colors made it match each cell against the palette while parsing), and with a color only written where it
+ * changes from the cell before: a line costs blessed and the terminal a fraction of what one SGR pair per cell did.
+ */
 export function halfBlocks(d: Decoded, cols: number, rows: number): string[] {
   const out: string[] = []
   const sx = d.rw / cols, sy = d.rh / (rows * 2)
-  const px = (x: number, y: number): [number, number, number, number] => {
+  // Palette index of the pixel, or -1 when transparent.
+  const px = (x: number, y: number): number => {
     const ix = Math.min(d.rw - 1, Math.floor(x * sx)), iy = Math.min(d.rh - 1, Math.floor(y * sy))
     const o = (iy * d.rw + ix) * 4
-    return [d.rgba[o]!, d.rgba[o + 1]!, d.rgba[o + 2]!, d.rgba[o + 3]!]
+    return d.rgba[o + 3]! < 64 ? -1 : nearest256([d.rgba[o]!, d.rgba[o + 1]!, d.rgba[o + 2]!])
   }
   for (let r = 0; r < rows; r++) {
-    let line = ''
+    let line = '', fg = -1, bg = -1
     for (let c = 0; c < cols; c++) {
-      const [tr, tg, tb, ta] = px(c, r * 2)
-      const [br, bg, bb, ba] = px(c, r * 2 + 1)
-      if (ta < 64 && ba < 64) line += '\x1b[0m '
-      else if (ba < 64) line += `\x1b[0m\x1b[38;2;${tr};${tg};${tb}m▀`
-      else if (ta < 64) line += `\x1b[0m\x1b[38;2;${br};${bg};${bb}m▄`
-      else line += `\x1b[38;2;${tr};${tg};${tb}m\x1b[48;2;${br};${bg};${bb}m▀`
+      const top = px(c, r * 2), bottom = px(c, r * 2 + 1)
+      // Which color goes in the foreground (the block's glyph) and which in the background; -1 is the terminal's own.
+      const [f, b, ch] = top < 0 && bottom < 0 ? [-1, -1, ' '] : bottom < 0 ? [top, -1, '▀'] : top < 0 ? [bottom, -1, '▄'] : [top, bottom, '▀']
+      if (b < 0 && bg >= 0) { line += '\x1b[0m'; fg = -1 }
+      else if (b >= 0 && b !== bg) line += `\x1b[48;5;${b}m`
+      if (f >= 0 && f !== fg) line += `\x1b[38;5;${f}m`
+      fg = f; bg = b
+      line += ch
     }
     out.push(line + '\x1b[0m')
   }
