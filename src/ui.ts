@@ -223,7 +223,7 @@ export class Ui {
    */
   private get fixed(): boolean { return !!this.wanted || inHerdr }
   /** Input lines: two at minimum, growing with the text up to half the screen. */
-  private inputRows = 2
+  private inputRows = 1
   /** Lines occupied at the bottom: the input. */
   private get bottom(): number { return this.inputRows }
   /** Lines occupied at the top: the tab bar (1), which doesn't exist in single-chat mode. */
@@ -252,7 +252,7 @@ export class Ui {
     this.disablePaste = enableBracketedPaste((this.screen.program as unknown as { input: Parameters<typeof enableBracketedPaste>[0] }).input, s => program._write(s))
     logger.info({ caps, images: this.mode, dark: this.dark, term: process.env.TERM }, 'terminal')
 
-    // Layout: the tab bar at the top with status on the right, messages at full width, input in two lines at the bottom.
+    // Layout: the tab bar at the top with status on the right, messages at full width, input in one line at the bottom, growing with the text.
     this.tabsBar = blessed.box({
       parent: this.screen, top: 0, left: 0, width: '100%', height: 1, tags: true, mouse: true,
     })
@@ -1581,8 +1581,8 @@ export class Ui {
   }
 
   private drawInput() {
-    // Two lines at minimum (grows with the text), ">" prompt on the first, text wrapped by word (never mid-word) and indented continuation.
-    // With more than two lines, the two around the cursor are shown, with the cursor on the bottom one whenever possible. With
+    // One line at minimum (grows with the text), ">" prompt on the first, text wrapped by word (never mid-word) and indented continuation.
+    // When the text has more lines than fit, the ones around the cursor are shown, with the cursor on the bottom one whenever possible. With
     // "chats" open, the same line is used to type the filter. When replying or reacting, the first
     // line says which message, leaving one for the text.
     const w = num(this.input.width) - num(this.input.iwidth) - 1
@@ -1626,7 +1626,7 @@ export class Ui {
     // The input grows with the text, up to half the screen; the header (reply, react, edit) and the suggestion on
     // its own line each take up one of the lines.
     const extra = (header ? 1 : 0) + (ghostBelow ? 1 : 0)
-    const rows = Math.max(2, Math.min(lines.length + extra, Math.floor(num(this.screen.height) / 2)))
+    const rows = Math.max(1, Math.min(lines.length + extra, Math.floor(num(this.screen.height) / 2)))
     if (rows !== this.inputRows) this.resizeInput(rows)
     const rowsAvail = Math.max(1, rows - extra)
     this.inputLines = lines
