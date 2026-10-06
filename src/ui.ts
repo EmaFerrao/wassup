@@ -6,7 +6,7 @@ import { store, type ChatRow, type MessageRow, type ReactionRow } from './db.js'
 import { chatName, contactName, thumbPath, jidUser, type ConnState } from './wa.js'
 import { inHerdr, reportHerdr, titleHerdr, releaseHerdr, openChatHerdr, focusTabHerdr } from './herdr.js'
 import type { Backend } from './backend.js'
-import { waMarkup, esc, colorFor, setTheme, dim, italic, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, wrapWidth, fold, graphemes, wrapChars } from './format.js'
+import { waMarkup, clipTagged, esc, colorFor, setTheme, dim, italic, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, wrapWidth, fold, graphemes, wrapChars } from './format.js'
 import { decode, cached, cellSize, halfBlocks, detectImageMode, KittyImages, type Decoded, type ImageMode } from './image.js'
 import { logger, uiLog } from './log.js'
 import { patchBlessedDraw, patchBlessedUnicode } from './unicode.js'
@@ -151,6 +151,8 @@ export class Ui {
   private disableKittyKeyboard?: () => void
   private disablePaste: () => void
   private hearts: Hearts
+  /** The message being dragged right to reply to it, and by how many columns. */
+  private drag: { id: string; dx: number } | undefined
   /** Chats whose Herdr tab was requested recently and may not be registered yet. */
   private spawning = new Set<string>()
   private lineMap: (MessageRow | null)[] = []
@@ -258,12 +260,13 @@ export class Ui {
     // Above everything, the hearts rising when a heart-only message is sent or received.
     this.hearts = new Hearts(this.screen, this.msgBox, this.bgRgb, blessed.box)
 
-    // Mouse with only clicks and wheel (1000) in SGR encoding (1006), instead of the set blessed enables for xterm
-    // (1000/1002/1003/1005): motion reporting (1003) and UTF-8 encoding (1005) confuse SSH apps on phones like
-    // Termius, which with 1000+1006 send taps as clicks. blessed turns off whatever was enabled on exit.
+    // Mouse with clicks, wheel and motion while a button is held (1000+1002) in SGR encoding (1006), instead of the
+    // set blessed enables for xterm (1000/1002/1003/1005): any-motion reporting (1003) and UTF-8 encoding (1005)
+    // confuse SSH apps on phones like Termius, which with 1000+1006 send taps as clicks. blessed turns off whatever
+    // was enabled on exit.
     const mouse = this.screen.program as unknown as { disableMouse: () => void; setMouse: (o: Record<string, boolean>, enable: boolean) => void; _bindMouse: (s: string, buf: Buffer) => void }
     mouse.disableMouse()
-    mouse.setMouse({ vt200Mouse: true, sgrMouse: true }, true)
+    mouse.setMouse({ vt200Mouse: true, cellMotion: true, sgrMouse: true }, true)
     // blessed only reads the first mouse sequence in each byte packet, and terminals send the button press and
     // release (or two wheel notches) in the same packet: the release was lost and there was never a click. The
     // packet is split into individual SGR sequences before blessed reads them.
@@ -329,19 +332,40 @@ export class Ui {
     // returns focus to the input. Dragging a message to the right (press and release on the same line, 4 or more
     // columns ahead) starts a reply to it, like on WhatsApp mobile. The terminal only gives the press and release,
     // not the movement.
-    let pressed: { x: number; y: number } | undefined
-    this.msgBox.on('mousedown', (data: { x: number; y: number }) => { pressed = { x: data.x, y: data.y } })
-    this.msgBox.on('click', (data: { x: number; y: number }) => {
-      const line = this.msgBox.childBase + (data.y - num(this.msgBox.atop) - num(this.msgBox.itop))
+    // While the button is held the message's lines slide right with the pointer, like WhatsApp Web; letting go
+    // 4 or more columns to the right starts the reply, less snaps back. In SGR the motion reports carry bit 32 of
+    // the button byte, which blessed hands over as repeated 'mousedown's: the raw byte tells them apart.
+    const rowAt = (y: number) => {
+      const line = this.msgBox.childBase + (y - num(this.msgBox.atop) - num(this.msgBox.itop))
       const orig = this.msgBox._clines?.rtof?.[line]
-      const row = orig != null ? this.lineMap[orig] : null
+      return orig != null ? this.lineMap[orig] ?? null : null
+    }
+    let pressed: { x: number; y: number; row: MessageRow | null } | undefined
+    this.msgBox.on('mouse', (data: { action: string; x: number; y: number; raw?: number[] }) => {
+      const motion = !!((data.raw?.[0] ?? 0) & 32)
+      if (data.action === 'mousedown' && !motion) { pressed = { x: data.x, y: data.y, row: rowAt(data.y) }; return }
+      if (!motion || !pressed?.row) return
+      const dx = pressed.y === data.y ? Math.max(0, Math.min(8, data.x - pressed.x)) : 0
+      if (this.drag?.id === pressed.row.id && this.drag.dx === dx) return
+      this.drag = { id: pressed.row.id, dx }
+      this.dirtyMessages = true
+      this.renderNow()
+    })
+    // A double click (two clicks on the same message within 400 ms) also starts the reply.
+    let lastClick: { y: number; at: number; id: string } | undefined
+    this.msgBox.on('click', (data: { x: number; y: number }) => {
+      const row = rowAt(data.y)
       const dragged = pressed && pressed.y === data.y && data.x - pressed.x >= 4
       pressed = undefined
-      if (row && dragged) {
+      if (this.drag) { this.drag = undefined; this.dirtyMessages = true }
+      const now = Date.now()
+      const double = !!row && lastClick?.id === row.id && now - lastClick.at < 400
+      lastClick = row ? { y: data.y, at: now, id: row.id } : undefined
+      if (row && (dragged || double)) {
         this.replyTo = row; this.reactTo = null
         this.setFocus('input')
         this.drawInput()
-        return this.screen.render()
+        return this.renderNow()
       }
       if (row) this.select(row)
       else this.setFocus('input')
@@ -1406,6 +1430,7 @@ export class Ui {
     // The selected message gets the background at full width, whoever it's from: the lines arrive here already
     // wrapped to the panel's width, and get padded with spaces up to the edge.
     const push = (line: string, row: MessageRow | null) => {
+      if (row && row.id === this.drag?.id && this.drag.dx) line = clipTagged(' '.repeat(this.drag.dx) + line, width - 1)
       if (row && row.id === selectedId) line = `{${this.selectedBg}-bg}${line}${' '.repeat(Math.max(0, width - 1 - visibleWidth(line)))}{/${this.selectedBg}-bg}`
       lines.push(line)
       map.push(row)

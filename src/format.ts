@@ -139,6 +139,22 @@ export function wrapWidth(s: string): number {
  * fit), measured as blessed measures it (`wrapUnits`). Tags stay where they were; blessed keeps their
  * state across lines.
  */
+/** Cuts a tagged line to `width` visible columns, letting tags through and closing whatever is open at the end. */
+export function clipTagged(s: string, width: number): string {
+  let out = '', w = 0
+  for (let i = 0; i < s.length;) {
+    if (s[i] === '{') {
+      const j = s.indexOf('}', i)
+      if (j > i) { out += s.slice(i, j + 1); i = j + 1; continue }
+    }
+    const ch = String.fromCodePoint(s.codePointAt(i)!)
+    const cw = strWidth(ch)
+    if (w + cw > width) break
+    out += ch; w += cw; i += ch.length
+  }
+  return out + '{/}'
+}
+
 export function wrapTagged(s: string, width: number): string[] {
   const lines: string[] = []
   let cur = '', curW = 0
