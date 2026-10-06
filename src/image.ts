@@ -37,7 +37,8 @@ function remember(path: string, d: Decoded | Error) {
  */
 type SharpFn = typeof import('sharp').default
 let sharpMod: SharpFn | null | undefined
-async function loadSharp() {
+/** sharp, loaded on first use, or null when it isn't installed. */
+export async function loadSharp() {
   if (sharpMod !== undefined) return sharpMod
   try { sharpMod = (await import('sharp')).default } catch { sharpMod = null }
   return sharpMod

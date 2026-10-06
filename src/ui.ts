@@ -284,7 +284,7 @@ export class Ui {
       this.acceptSuggestion()
     })
 
-    // Above everything, the hearts rising when a heart-only message is sent or received.
+    // Above everything, the emoji rising when a message or reaction is a single emoji, sent or received.
     this.hearts = new Hearts(this.screen, this.msgBox, this.bgRgb, blessed.box)
     // Topmost of all: in its turn, inverts the cells of the text selection and draws the "☺" or the quick reactions
     // over the hovered message, whatever panel drew the cells.
@@ -516,7 +516,7 @@ export class Ui {
       this.notify(jid, row.text || `[${row.type}]`)
     })
     this.wa.on('status', text => this.flash(text))
-    // A heart or kiss reaction, mine or someone else's, animates from the spot where it appears in the message.
+    // A reaction, mine or someone else's, animates from the spot where it appears in the message.
     this.wa.on('reaction', (jid, msgId, _sender, emoji) => { if (jid === this.current && reaction(emoji)) this.heartFor(r => r.id === msgId, emoji) })
   }
 
@@ -1611,15 +1611,15 @@ export class Ui {
   }
 
   /**
-   * Launches the animated shape from the emoji of the message `pick` identifies. The position is looked up at draw
+   * Launches the animated emoji from its place in the message `pick` identifies. The position is looked up at draw
    * time, once the message (or its reactions line) is already in the panel: its last line in `lineMap`, converted
    * to the real line by blessed's map and to the screen by the scroll; the column is the emoji's in that line,
    * without the color codes. No emoji on the line yet drawn: nothing is returned and the animation asks again.
    */
   private heartFor(pick: (r: MessageRow) => boolean, text: string) {
-    const what = reaction(text)
-    if (!what) return
-    this.hearts.launch(what.kind, what.color, () => {
+    const emoji = reaction(text)
+    if (!emoji) return
+    this.hearts.launch(emoji, () => {
       let idx = -1
       for (let i = this.lineMap.length - 1; i >= 0; i--) { const r = this.lineMap[i]; if (r && pick(r)) { idx = i; break } }
       if (idx < 0) return null
@@ -1628,9 +1628,10 @@ export class Ui {
       const y = real - this.msgBox.childBase
       if (y < 0 || y >= this.innerHeight()) return null
       const line = (this.msgBox._clines[real] ?? '').replace(/\x1b\[[\d;]*m/g, '')
-      const m = /[♥♡❣💟❤🧡💛💚💙💜🖤🤍🤎🩷🩵🩶💖💗💓💞💕💘💝😘😗😙😚💋💏<:]/u.exec(line)
-      if (!m) return null
-      return { x: num(this.msgBox.aleft) + num(this.msgBox.ileft) + strWidth(line.slice(0, m.index)), y: num(this.msgBox.atop) + num(this.msgBox.itop) + y }
+      // The emoji as shown, or the text as received (a smiley like "<3" that stands for it).
+      const at = [emoji, text.trim()].map(s => line.indexOf(s)).find(i => i >= 0)
+      if (at == null) return null
+      return { x: num(this.msgBox.aleft) + num(this.msgBox.ileft) + strWidth(line.slice(0, at)), y: num(this.msgBox.atop) + num(this.msgBox.itop) + y }
     })
   }
 

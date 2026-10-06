@@ -44,8 +44,8 @@ startup the terminal is asked for its real background colour to pick light or da
 - **Several terminals**: the first process is the server with the WhatsApp connection; the next ones connect to it
   through a socket and are interface only, each with its own tabs. If the server ends, another one takes over.
 - **Single chat**: `wa <name>` opens only that chat, without the tab bar or notices from others; the `/` list swaps
-  it. A heart or a kiss on its own, as a message or a reaction, sends a heart or a pair of lips in the emoji's colour
-  floating up the panel, drawn in block characters.
+  it. An emoji on its own, as a message or a reaction, sends a big copy of it floating up the panel, drawn in block
+  characters from the system's emoji font (the same glyph and colours the terminal shows); needs `sharp`.
 
 ### Herdr
 
@@ -104,7 +104,7 @@ History starts with what WhatsApp sends to new devices. `WA_FULL_HISTORY=1` asks
 | `src/term.ts` | Probing the terminal's capabilities |
 | `src/kittykeys.ts`, `src/paste.ts` | Kitty keyboard protocol and bracketed paste, read before blessed |
 | `src/herdr.ts` | Agent state, titles and tabs in Herdr |
-| `src/hearts.ts` | Heart and kiss animation |
+| `src/hearts.ts` | Animated emoji rising from a single-emoji message or reaction |
 | `src/i18n.ts` | Interface strings in Portuguese and English |
 | `src/llm.ts` | Writing suggestions from the local `llama-server` |
 | `src/emoji.ts`, `src/italic.ts`, `src/rainbow.ts` | `:name:` table, italics in blessed, colours |
