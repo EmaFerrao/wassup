@@ -55,7 +55,7 @@ export class IpcServer {
       const payload: Event = { event, args: event === 'notify' ? [args[0], slimRow(args[1] as MessageRow)] : event === 'connection' ? [args[0], args[1], wa.qr] : args }
       for (const c of this.clients) sendJson(c, payload)
     }
-    for (const ev of ['connection', 'chats', 'messages', 'notify', 'status', 'typing'] as const) wa.on(ev, forward(ev) as never)
+    for (const ev of ['connection', 'chats', 'messages', 'notify', 'status', 'typing', 'reaction'] as const) wa.on(ev, forward(ev) as never)
   }
 
   /** Abre o socket. Falha com EADDRINUSE se outro processo acabou de o abrir: quem chama deve então ligar-se como cliente. */

@@ -14,6 +14,7 @@ import type { TermCaps } from './term.js'
 import { emojify, completeEmoji } from './emoji.js'
 import { enableKittyKeyboard } from './kittykeys.js'
 import { enableBracketedPaste } from './paste.js'
+import { Hearts, reaction } from './hearts.js'
 import { parseHex, rainbowRing, mix, nearest256, type Rgb } from './rainbow.js'
 import { suggest, llmEnabled, type Suggestion } from './llm.js'
 import { patchBlessedItalic } from './italic.js'
@@ -147,6 +148,7 @@ export class Ui {
   private inputTop = 0
   private disableKittyKeyboard?: () => void
   private disablePaste: () => void
+  private hearts: Hearts
   /** Conversas cujo tab do Herdr foi pedido há pouco e ainda pode não estar registado. */
   private spawning = new Set<string>()
   private lineMap: (MessageRow | null)[] = []
@@ -250,6 +252,9 @@ export class Ui {
       this.suggestIndex = i
       this.acceptSuggestion()
     })
+
+    // Por cima de tudo, os corações a subir quando se envia ou recebe um coração sozinho.
+    this.hearts = new Hearts(this.screen, this.msgBox, this.bgRgb, blessed.box)
 
     // Rato só com cliques e roda (1000) em codificação SGR (1006), em vez do conjunto que o blessed activa para xterm
     // (1000/1002/1003/1005): o relato de movimento (1003) e a codificação UTF-8 (1005) baralham apps de SSH no
@@ -366,7 +371,11 @@ export class Ui {
     this.wa.on('typing', (jid, who) => this.onTyping(jid, who.length > 0))
     this.wa.on('messages', jid => { if (jid === '*' || jid === this.current) this.dirtyMessages = true; this.dirtyTabs = true; this.scheduleRender() })
     this.wa.on('notify', (jid, row) => {
-      if (jid === this.current) { this.wa.markRead(jid).catch(e => logger.warn({ e }, 'markRead')); return }
+      if (jid === this.current) {
+        this.wa.markRead(jid).catch(e => logger.warn({ e }, 'markRead'))
+        if (row.type === 'text' && reaction(row.text)) this.heartFor(r => r.id === row.id, row.text)
+        return
+      }
       // No Herdr a conversa nova abre num tab dele, em segundo plano, pela mesma regra do tab novo: só o terminal
       // usado mais recentemente, e nunca se já estiver aberta noutro. Até o tab novo se registar, lembra-se o pedido.
       if (this.fixed) {
@@ -386,6 +395,8 @@ export class Ui {
       this.notify(jid, row.text || `[${row.type}]`)
     })
     this.wa.on('status', text => this.flash(text))
+    // Uma reacção com coração ou beijo, minha ou de outros, anima-se a partir do sítio onde ela aparece na mensagem.
+    this.wa.on('reaction', (jid, msgId, _sender, emoji) => { if (jid === this.current && reaction(emoji)) this.heartFor(r => r.id === msgId, emoji) })
   }
 
   /** Regista no wa.log tudo o que chega do terminal e o que a interface faz com isso. */
@@ -703,6 +714,8 @@ export class Ui {
       this.drawInput()
       this.screen.render()
       await this.wa.send(jid, text, replyTo?.id)
+      // A minha mensagem só aparece quando o servidor a devolver; procura-se então a mais recente minha com o coração.
+      if (reaction(text)) this.heartFor(r => r.from_me === 1 && r.text === text && Date.now() - r.ts * 1000 < 30000, text)
     } catch (e) {
       logger.error({ e }, 'submit')
       this.flash(`erro: ${(e as Error).message}`, 10000)
@@ -1328,6 +1341,30 @@ export class Ui {
     if (ghostBelow) out.push('  ' + dim(italic(esc(ghostBelow))))
     if (header) out.unshift(dim(esc(truncate(header, w))))
     this.input.setContent(out.join('\n'))
+  }
+
+  /**
+   * Lança a forma animada a partir do emoji da mensagem que `pick` identificar. A posição procura-se ao desenhar, quando
+   * a mensagem (ou a linha das reacções dela) já está no painel: a última linha dela em `lineMap`, passada a linha real
+   * pelo mapa do blessed e ao ecrã pelo scroll; a coluna é a do emoji nessa linha, sem os códigos de cor. Sem emoji na
+   * linha ainda não está desenhado: devolve-se nada e a animação volta a perguntar.
+   */
+  private heartFor(pick: (r: MessageRow) => boolean, text: string) {
+    const what = reaction(text)
+    if (!what) return
+    this.hearts.launch(what.kind, what.color, () => {
+      let idx = -1
+      for (let i = this.lineMap.length - 1; i >= 0; i--) { const r = this.lineMap[i]; if (r && pick(r)) { idx = i; break } }
+      if (idx < 0) return null
+      const real = this.msgBox._clines.ftor[idx]?.[0]
+      if (real == null) return null
+      const y = real - this.msgBox.childBase
+      if (y < 0 || y >= this.innerHeight()) return null
+      const line = (this.msgBox._clines[real] ?? '').replace(/\x1b\[[\d;]*m/g, '')
+      const m = /[♥♡❣💟❤🧡💛💚💙💜🖤🤍🤎🩷🩵🩶💖💗💓💞💕💘💝😘😗😙😚💋💏<:]/u.exec(line)
+      if (!m) return null
+      return { x: num(this.msgBox.aleft) + num(this.msgBox.ileft) + strWidth(line.slice(0, m.index)), y: num(this.msgBox.atop) + num(this.msgBox.itop) + y }
+    })
   }
 
   /** Muda a altura da escrita e desloca o que depende dela: mensagens, barra flutuante, sugestões e escolhedor. */

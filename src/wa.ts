@@ -22,6 +22,8 @@ export interface WaEvents {
   status: [text: string]
   /** Quem está a escrever ou a gravar numa conversa (jids canónicos); lista vazia quando ninguém. */
   typing: [chatJid: string, who: string[]]
+  /** Uma reacção acabada de chegar ou de enviar (emoji vazio: retirada). */
+  reaction: [chatJid: string, msgId: string, senderJid: string, emoji: string]
   /** Só do cliente remoto: o processo servidor desapareceu. */
   lost: []
 }
@@ -129,11 +131,13 @@ function quotedSnippet(msg: proto.IMessage | null | undefined): string {
   }
 }
 
+export interface Reaction { chatJid: string; msgId: string; senderJid: string; emoji: string }
+
 /**
- * Uma reacção (emoji sobre uma mensagem anterior) não é uma mensagem: guarda-se na tabela própria. Devolve a conversa
- * tocada, para a interface a redesenhar, ou null se a WAMessage não é uma reacção.
+ * Uma reacção (emoji sobre uma mensagem anterior) não é uma mensagem: guarda-se na tabela própria. Devolve o que foi
+ * guardado, para a interface redesenhar e animar, ou null se a WAMessage não é uma reacção.
  */
-export function storeReaction(m: WAMessage, meJid: string): string | null {
+export function storeReaction(m: WAMessage, meJid: string): Reaction | null {
   const r = normalizeMessageContent(m.message ?? undefined)?.reactionMessage
   if (!r?.key?.id || !m.key?.remoteJid) return null
   const chatJid = canonicalJid(m.key.remoteJid, m.key.remoteJidAlt)
@@ -141,8 +145,9 @@ export function storeReaction(m: WAMessage, meJid: string): string | null {
   const fromMe = !!m.key.fromMe
   const senderJid = fromMe ? meJid : isJidGroup(chatJid) ? canonicalJid(m.key.participant, m.key.participantAlt) : chatJid
   const ts = r.senderTimestampMs ? toNumber(r.senderTimestampMs) : toNumber(m.messageTimestamp) * 1000
-  store.setReaction(chatJid, r.key.id, senderJid, r.text ?? '', ts)
-  return chatJid
+  const emoji = r.text ?? ''
+  store.setReaction(chatJid, r.key.id, senderJid, emoji, ts)
+  return { chatJid, msgId: r.key.id, senderJid, emoji }
 }
 
 /** Traduz uma WAMessage do baileys para a linha que guardamos. Devolve null para o que não é uma mensagem visível. */
@@ -393,10 +398,11 @@ export class Wa extends EventEmitter<WaEvents> {
 
     sock.ev.on('messages.upsert', ({ messages, type }) => {
       const touched = new Set<string>()
+      const reactions: Reaction[] = []
       store.transaction(() => {
         for (const m of messages) {
           const reacted = storeReaction(m, this.me)
-          if (reacted) { touched.add(reacted); continue }
+          if (reacted) { touched.add(reacted.chatJid); if (type === 'notify') reactions.push(reacted); continue }
           const row = this.storeMessage(m, type === 'notify')
           if (!row) continue
           touched.add(row.chat_jid)
@@ -404,6 +410,7 @@ export class Wa extends EventEmitter<WaEvents> {
         }
       })
       for (const jid of touched) this.emit('messages', jid)
+      for (const r of reactions) this.emit('reaction', r.chatJid, r.msgId, r.senderJid, r.emoji)
       if (touched.size) this.emit('chats')
     })
 
@@ -523,7 +530,8 @@ export class Wa extends EventEmitter<WaEvents> {
     const target = this.rawMessage(chatJid, msgId)
     if (!target) throw new Error('mensagem desconhecida')
     const sent = await this.sock!.sendMessage(chatJid, { react: { text: emoji, key: target.key } })
-    if (sent && storeReaction(sent, this.me)) this.emit('messages', chatJid)
+    const stored = sent && storeReaction(sent, this.me)
+    if (stored) { this.emit('messages', chatJid); this.emit('reaction', stored.chatJid, stored.msgId, stored.senderJid, stored.emoji) }
   }
 
   /** Substitui o texto de uma mensagem minha; na base fica marcada como as edições que chegam dos outros. */
