@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import QRCode from 'qrcode'
 import { store, type ChatRow, type MessageRow, type ReactionRow } from './db.js'
-import { chatName, contactName, thumbPath, jidUser, type ConnState } from './yap.js'
+import { chatName, contactName, thumbPath, mediaFile, jidUser, type ConnState } from './yap.js'
 import { inHerdr, reportHerdr, titleHerdr, releaseHerdr, openChatHerdr, focusTabHerdr } from './herdr.js'
 import type { Backend } from './backend.js'
 import { waMarkup, clipTagged, esc, colorFor, setTheme, dim, faint, italic, padding, urlsIn, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, wrapWidth, fold, graphemes, wrapChars } from './format.js'
@@ -1692,7 +1692,8 @@ export class Ui {
   }
 
   private imagePathFor(row: MessageRow): string | null {
-    if (row.media_path && /^image\//.test(row.media_mime ?? '') && fs.existsSync(row.media_path)) return row.media_path
+    const file = mediaFile(row)
+    if (file && /^image\//.test(row.media_mime ?? '') && fs.existsSync(file)) return file
     const t = thumbPath(row.chat_jid, row.id)
     return fs.existsSync(t) ? t : null
   }
@@ -1907,12 +1908,13 @@ export class Ui {
   }
 
   private openMedia(row: MessageRow) {
-    if (!row.media_path) {
+    const file = mediaFile(row)
+    if (!file) {
       if (row.media_err) return this.flash(t('attachmentExpired'))
       this.yap.ensureMedia(row)
       return this.flash(t('downloading'))
     }
-    const child = spawn('xdg-open', [row.media_path], { detached: true, stdio: 'ignore' })
+    const child = spawn('xdg-open', [file], { detached: true, stdio: 'ignore' })
     child.on('error', e => this.flash(t('cannotOpen', e.message)))
     child.unref()
   }

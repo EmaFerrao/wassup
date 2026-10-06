@@ -33,7 +33,7 @@ export interface MessageRow {
   text: string
   push_name: string | null
   quoted: string | null
-  media_path: string | null
+  media_path: string | null // relative to dirs.media
   media_mime: string | null
   media_name: string | null
   media_w: number | null

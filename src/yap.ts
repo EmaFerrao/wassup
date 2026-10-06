@@ -95,6 +95,10 @@ export function mediaDir(chatJid: string): string {
 export function thumbPath(chatJid: string, id: string): string {
   return path.join(mediaDir(chatJid), `${id}.thumb.jpg`)
 }
+/** Where a message's attachment is on disk: `media_path` is kept relative to the media folder, so the folder can move. */
+export function mediaFile(row: MessageRow): string | null {
+  return row.media_path ? path.join(dirs.media, row.media_path) : null
+}
 
 export interface Parsed {
   id: string
@@ -562,7 +566,13 @@ export class Yap extends EventEmitter<YapEvents> {
     if (sent) {
       store.transaction(() => {
         const row = this.storeMessage(sent, false)
-        if (row && row.media_mime) store.setMedia(chatJid, row.id, filePath, null, null)
+        if (row && row.media_mime) {
+          const dir = mediaDir(chatJid)
+          fs.mkdirSync(dir, { recursive: true })
+          const file = path.join(dir, `${row.id}.${ext || extFor(mimetype, filePath)}`)
+          fs.copyFileSync(filePath, file)
+          store.setMedia(chatJid, row.id, path.relative(dirs.media, file), null, null)
+        }
       })
       this.emit('messages', chatJid); this.emit('chats')
     }
@@ -644,7 +654,7 @@ export class Yap extends EventEmitter<YapEvents> {
       fs.mkdirSync(dir, { recursive: true })
       const file = path.join(dir, `${row.id}.${extFor(row.media_mime, row.media_name)}`)
       fs.writeFileSync(file, buf as Buffer)
-      store.setMedia(row.chat_jid, row.id, file, row.media_w, row.media_h)
+      store.setMedia(row.chat_jid, row.id, path.relative(dirs.media, file), row.media_w, row.media_h)
     } catch (e) {
       logger.warn({ e: (e as Error)?.message, id: row.id }, 'download failed')
       store.setMediaErr(row.chat_jid, row.id)
@@ -660,10 +670,11 @@ export class Yap extends EventEmitter<YapEvents> {
     fs.mkdirSync(out, { recursive: true })
     let copied = 0, pending = 0
     for (const row of store.listMedia(chatJid)) {
-      if (!row.media_path) { if (!row.media_err) { this.ensureMedia(row); pending++ }; continue }
-      const name = row.media_name ?? path.basename(row.media_path)
+      const file = mediaFile(row)
+      if (!file) { if (!row.media_err) { this.ensureMedia(row); pending++ }; continue }
+      const name = row.media_name ?? path.basename(file)
       const dest = path.join(out, `${new Date(row.ts * 1000).toISOString().slice(0, 10)}_${name}`)
-      if (!fs.existsSync(dest)) { fs.copyFileSync(row.media_path, dest); copied++ }
+      if (!fs.existsSync(dest)) { fs.copyFileSync(file, dest); copied++ }
     }
     return { copied, pending }
   }
