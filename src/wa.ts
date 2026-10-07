@@ -27,6 +27,8 @@ export interface WaEvents {
   reaction: [chatJid: string, msgId: string, senderJid: string, emoji: string]
   /** Whether the person of a one-to-one chat is online, as far as WhatsApp lets this device know. */
   presence: [chatJid: string, online: boolean]
+  /** How many of a group's followed members are online (see subscribePresence). */
+  groupOnline: [groupJid: string, count: number]
   /** Whether this device shows as online to the others: from activity in a terminal until two idle minutes. */
   available: [on: boolean]
   /** Only from the remote client: the server process disappeared. */
@@ -310,6 +312,9 @@ export class Wa extends EventEmitter<WaEvents> {
    */
   private online = new Map<string, boolean>()
   private subscribed = new Set<string>()
+  /** Per group, the members whose presence is followed, and how many of them are online. */
+  private groupMembers = new Map<string, string[]>()
+  private groupOnline = new Map<string, number>()
   /** Which terminals (by pid) have the focus, for those whose terminal reports it. */
   private focus = new Map<number, boolean>()
   private presenceTimer: NodeJS.Timeout | undefined
@@ -752,12 +757,23 @@ export class Wa extends EventEmitter<WaEvents> {
     if ((this.online.get(chatJid) ?? false) === on) return void this.online.set(chatJid, on)
     this.online.set(chatJid, on)
     this.emit('presence', chatJid, on)
+    for (const [group, members] of this.groupMembers) if (members.includes(chatJid)) this.countGroup(group)
+  }
+
+  /** Recounts a group's followed members online, and says so when the count changed (or `always`). */
+  private countGroup(group: string, always = false) {
+    const n = (this.groupMembers.get(group) ?? []).filter(j => this.online.get(j)).length
+    if (!always && n === (this.groupOnline.get(group) ?? 0)) return
+    this.groupOnline.set(group, n)
+    this.emit('groupOnline', group, n)
   }
 
   /** Nothing more will arrive (this device unavailable, or the connection gone): everyone known online goes back to unknown. */
   private dropOnline() {
     for (const [jid, on] of this.online) if (on) this.emit('presence', jid, false)
     this.online.clear()
+    for (const [group, n] of this.groupOnline) if (n) this.emit('groupOnline', group, 0)
+    this.groupOnline.clear()
   }
 
   /** Tells the chat that we're typing (or that we stopped): it's the "typing…" that the other person sees. */
@@ -773,6 +789,18 @@ export class Wa extends EventEmitter<WaEvents> {
     this.subscribed.add(chatJid)
     this.sock?.presenceSubscribe(chatJid).catch(e => logger.warn({ e, chatJid }, 'presenceSubscribe'))
     if (this.online.get(chatJid)) this.emit('presence', chatJid, true)
+    // A group's presence only brings who's typing in it: who's online is each member's own, so the members are
+    // followed one by one, but only the 30 who wrote most recently, to keep the subscriptions few.
+    if (this.isGroup(chatJid)) {
+      const members = store.recentSenders(chatJid, 30).filter(j => j !== this.me)
+      this.groupMembers.set(chatJid, members)
+      for (const m of members) {
+        if (this.subscribed.has(m)) continue
+        this.subscribed.add(m)
+        this.sock?.presenceSubscribe(m).catch(e => logger.warn({ e, jid: m }, 'presenceSubscribe'))
+      }
+      this.countGroup(chatJid, true)
+    }
     // And this device's own presence, which such a terminal doesn't know either.
     this.emit('available', this.available)
   }
