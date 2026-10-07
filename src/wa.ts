@@ -96,6 +96,12 @@ export function withMentions(text: string, show: (jid: string, first: string) =>
   })
 }
 
+/** The id of the message a pin or unpin is about (pinInChatMessage.key.id), from the message as it came. */
+export function pinTarget(row: Pick<MessageRow, 'type' | 'raw'>): string | null {
+  if (row.type !== 'pinInChat') return null
+  return /"pinInChatMessage":\{"key":\{[^}]*?"id":"([^"]+)"/.exec(row.raw)?.[1] ?? null
+}
+
 /**
  * The words for a message of a kind the client has no drawing of its own for (stored as "[kind]"): a pin, an album's
  * announcement, a round video, a message still on its way, a group invite, a business message, or anything else.
