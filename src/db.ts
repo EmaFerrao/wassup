@@ -151,6 +151,7 @@ const q = {
   findMessage: db.prepare(`SELECT * FROM messages WHERE id = ? LIMIT 1`),
   listMessages: db.prepare(`SELECT * FROM (SELECT * FROM messages WHERE chat_jid = ? ORDER BY ts DESC LIMIT ?) ORDER BY ts ASC`),
   countMessages: db.prepare(`SELECT COUNT(*) AS n FROM messages WHERE chat_jid = ?`),
+  countMessagesSince: db.prepare(`SELECT COUNT(*) AS n FROM messages WHERE chat_jid = ? AND ts >= ?`),
   recentSenders: db.prepare(`SELECT sender_jid FROM messages WHERE chat_jid = ? AND from_me = 0 AND sender_jid <> '' GROUP BY sender_jid ORDER BY MAX(ts) DESC LIMIT ?`),
   oldestMessage: db.prepare(`SELECT * FROM messages WHERE chat_jid = ? ORDER BY ts ASC LIMIT 1`),
   listMedia: db.prepare(`SELECT * FROM messages WHERE chat_jid = ? AND media_mime IS NOT NULL ORDER BY ts ASC`),
@@ -254,6 +255,10 @@ export const store = {
   },
   countMessages(chat: string): number {
     return (q.countMessages.get(chat) as { n: number }).n
+  },
+  /** How many of a chat's messages are from `ts` on: how far back the panel has to draw to reach one of that time. */
+  countMessagesSince(chat: string, ts: number): number {
+    return (q.countMessagesSince.get(chat, ts) as { n: number }).n
   },
   oldestMessage(chat: string): MessageRow | undefined {
     return q.oldestMessage.get(chat) as unknown as MessageRow | undefined

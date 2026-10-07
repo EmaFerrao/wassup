@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import QRCode from 'qrcode'
 import { store, type ChatRow, type MessageRow, type ReactionRow } from './db.js'
-import { chatName, contactName, shortName, canonicalJid, thumbPath, previewPath, hasPreviewImage, mediaFile, jidUser, withMentions, typeLabel, type ConnState } from './wa.js'
+import { chatName, contactName, shortName, canonicalJid, thumbPath, previewPath, hasPreviewImage, mediaFile, jidUser, withMentions, typeLabel, pinTarget, type ConnState } from './wa.js'
 import { inHerdr, reportHerdr, titleHerdr, tabNameHerdr, releaseHerdr, openChatHerdr, focusHerdr, focusNextChatHerdr, paneFocusedHerdr } from './herdr.js'
 import type { Backend } from './backend.js'
 import { waMarkup, clipTagged, esc, colorFor, setTheme, dim, faint, italic, padding, urlsIn, fmtTime, fmtDay, fmtWhen, daysAgo, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, wrapWidth, fold, graphemes, wrapChars } from './format.js'
@@ -592,10 +592,11 @@ export class Ui {
       }
       if (!row) { this.setFocus('input'); return this.renderNow() }
       // The "☺" opens the message's quick reactions; an attachment opens, an image only when the click lands on the
-      // image itself. A click anywhere else on the message does nothing.
+      // image itself; a pin or unpin goes to the message it's about. A click anywhere else on a message does nothing.
       const onIcon = hit?.icon != null && data.y === hit.y && Math.abs(data.x - hit.icon) <= 1
       const hasImage = this.images.some(i => i.row.id === row.id)
       if (onIcon) this.quickFor = row
+      else if (row.type === 'pinInChat') return this.jumpTo(pinTarget(row))
       else if (row.media_mime && (!hasImage || this.imageAt(data.x, data.y)?.row.id === row.id)) this.openMedia(row)
       this.renderNow()
     })
@@ -1149,6 +1150,23 @@ export class Ui {
     this.select(next >= this.rows.length ? null : this.rows[Math.max(0, next)]!)
     this.renderNow()
     if (this.selected) this.scrollToSelected()
+    this.screen.render()
+  }
+
+  /**
+   * Selects a message of the open chat and scrolls to it, drawing the stored messages back as far as it when it's
+   * older than those in the panel; one that isn't stored (from before what the phone handed over) is only flashed.
+   */
+  private jumpTo(id: string | null) {
+    const jid = this.current
+    const target = jid && id ? store.getMessage(jid, id) : undefined
+    if (!jid || !target) return this.flash(t('messageNotFound'))
+    const limit = this.shown.get(jid) ?? PAGE
+    const need = store.countMessagesSince(jid, target.ts)
+    if (limit !== -1 && need > limit) this.shown.set(jid, need)
+    this.select(target)
+    this.renderNow()
+    this.scrollToSelected()
     this.screen.render()
   }
 

@@ -83,6 +83,7 @@ const STRINGS = {
   groupInvite: { pt: 'convite para um grupo', en: 'group invite' },
   businessMessage: { pt: 'mensagem de empresa', en: 'business message' },
   unsupported: { pt: 'mensagem não suportada', en: 'unsupported message' },
+  messageNotFound: { pt: 'mensagem não encontrada', en: 'message not found' },
   loadingOlder: { pt: 'a carregar mensagens anteriores…', en: 'loading earlier messages…' },
 } as const
 
