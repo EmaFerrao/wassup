@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import QRCode from 'qrcode'
 import { store, type ChatRow, type MessageRow, type ReactionRow } from './db.js'
 import { chatName, contactName, shortName, canonicalJid, thumbPath, previewPath, hasPreviewImage, mediaFile, jidUser, withMentions, typeLabel, pinTarget, type ConnState } from './wa.js'
-import { inHerdr, reportHerdr, titleHerdr, tabNameHerdr, releaseHerdr, openChatHerdr, focusHerdr, focusNextChatHerdr, paneFocusedHerdr } from './herdr.js'
+import { inHerdr, reportHerdr, doneHerdr, titleHerdr, tabNameHerdr, releaseHerdr, openChatHerdr, focusHerdr, focusNextChatHerdr, paneFocusedHerdr } from './herdr.js'
 import type { Backend } from './backend.js'
 import { waMarkup, clipTagged, esc, colorFor, setTheme, dim, faint, italic, padding, fmtTime, fmtDay, fmtWhen, daysAgo, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, wrapWidth, fold, graphemes, wrapChars } from './format.js'
 import { decode, cached, cellSize, halfBlocks, blockGrid, blockCell, detectImageMode, detectRgb, KittyImages, RgbPainter, type Decoded, type ImageMode, type RgbCell } from './image.js'
@@ -1802,21 +1802,28 @@ export class Ui {
   }
 
   // Window title: the active chat, with the typing spinner in front while someone types, or else a dot while there
-  // are unread messages in any chat. In Herdr, where the title is the agent's name, no spinner: the agent's status
-  // says it ("working").
+  // are unread messages in any chat. In Herdr, where the title is the agent's name, the name alone: the agent's status
+  // says the rest.
   private titleShown = ''
+  /** How many unread messages the title last counted, so a new one is told apart (doneHerdr). */
+  private unreadShown = 0
   private updateTitle() {
     const unread = store.listChats().filter(c => c.unread > 0 && (this.fixed ? c.jid === this.current : !c.archived))
     const typing = [...this.typing].filter(jid => !this.fixed || jid === this.current).map(jid => chatName(jid))
-    const mark = typing.length && !inHerdr ? `${spinnerFrame()} ` : unread.length ? '● ' : ''
+    const mark = inHerdr ? '' : typing.length ? `${spinnerFrame()} ` : unread.length ? '● ' : ''
     const title = `${mark}${this.current ? chatName(this.current) : 'wassup'}`
     if (title !== this.titleShown) { this.titleShown = title; this.screen.title = title; titleHerdr(title) }
     // In Herdr, alone in its tab, the tab takes the chat's first name, with no state.
     if (inHerdr) tabNameHerdr(this.current ? shortName(this.current) : null)
-    // In Herdr the same signal goes to the agent's status: someone typing is work in progress, unread asks for attention.
+    // In Herdr the agent's status: "working" while someone types; "done", in blue, from a new unread message until you
+    // look at the pane (doneHerdr; Herdr gives it too when the typing stops out of view); idle otherwise. Never
+    // "blocked".
+    const summary = unread.map(c => `${chatName(c.jid)} (${c.unread})`).join(', ')
+    const total = unread.reduce((n, c) => n + c.unread, 0)
     if (typing.length) reportHerdr('working', t('typingWho', typing.join(', ')))
-    else if (unread.length) reportHerdr('blocked', unread.map(c => `${chatName(c.jid)} (${c.unread})`).join(', '))
-    else reportHerdr('idle')
+    else if (total > this.unreadShown) doneHerdr(summary)
+    else reportHerdr('idle', summary || undefined)
+    this.unreadShown = total
   }
 
   quit(reason?: string) {
