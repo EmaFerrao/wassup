@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import QRCode from 'qrcode'
 import { store, type ChatRow, type MessageRow, type ReactionRow } from './db.js'
 import { chatName, contactName, shortName, canonicalJid, thumbPath, mediaFile, jidUser, type ConnState } from './wa.js'
-import { inHerdr, reportHerdr, titleHerdr, tabNameHerdr, releaseHerdr, openChatHerdr, focusHerdr, paneFocusedHerdr } from './herdr.js'
+import { inHerdr, reportHerdr, titleHerdr, tabNameHerdr, releaseHerdr, openChatHerdr, focusHerdr, focusNextChatHerdr, paneFocusedHerdr } from './herdr.js'
 import type { Backend } from './backend.js'
 import { waMarkup, clipTagged, esc, colorFor, setTheme, dim, faint, italic, padding, urlsIn, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, wrapWidth, fold, graphemes, wrapChars } from './format.js'
 import { decode, cached, cellSize, halfBlocks, blockGrid, blockCell, detectImageMode, detectRgb, KittyImages, RgbBlocks, type Decoded, type ImageMode, type RgbCell } from './image.js'
@@ -731,7 +731,8 @@ export class Ui {
       this.dirtyMessages = true
       return this.renderNow()
     }
-    // Tab cycles through the open tabs; with the picker open it goes back to the active tab. New chats open with "/".
+    // Tab cycles through the open tabs (in Herdr, the panes or tabs of the other conversations); with the picker
+    // open it goes back to the active tab. New chats open with "/".
     // With text in the input, Tab accepts the suggestion in view: the emoji list, or the model's; with no text, it
     // switches tabs. The right arrow, with the cursor already at the end, does the same as Tab; mid-text it keeps
     // moving the cursor.
@@ -751,6 +752,8 @@ export class Ui {
       return this.pickChat((this.picker as unknown as { selected: number }).selected, !inHerdr ? 'here' : k === 'tab' ? 'tab' : 'pane')
     }
     if (k === 'tab') {
+      // In Herdr each conversation is a pane or tab of its own: Tab moves to the next one, in Herdr's order.
+      if (inHerdr && !this.pickerOpen) return void focusNextChatHerdr().catch(e => logger.warn({ e: String(e) }, 'herdr: next chat'))
       if (!this.tabs.length) return
       return this.activateTab(this.pickerOpen ? this.active : (this.active + 1) % this.tabs.length)
     }
