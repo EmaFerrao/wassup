@@ -772,25 +772,30 @@ export class Ui {
 
   /**
    * Someone started or stopped typing: a braille spinner turns in their tab, before the name, on the rule above the
-   * active chat's input, beside the 👀 over the name, and in the window title (in Herdr, the agent's name), on a
-   * clock that runs while anyone is typing.
+   * active chat's input, in place of the 👀 over the name, and in the window title (in Herdr, the agent's name).
    */
   private onTyping(jid: string, active: boolean) {
     if (active) this.typing.add(jid); else this.typing.delete(jid)
-    if (this.typing.size && !this.typingTimer) {
-      this.typingTimer = setInterval(() => {
-        this.drawTabs()
-        this.redrawPickerRows(this.typing)
-        if (this.current && this.typing.has(this.current)) this.drawRules()
-        this.updateTitle()
-        this.screen.render()
-      }, 80)
-    } else if (!this.typing.size && this.typingTimer) { clearInterval(this.typingTimer); this.typingTimer = undefined }
+    this.syncTypingTimer()
     this.drawTabs()
     this.redrawPickerRows([jid])
     if (jid === this.current) this.drawInput()
     this.updateTitle()
     this.screen.render()
+  }
+
+  /** The spinners' clock, a frame every 80 ms: it runs while anyone is typing, someone else or me (composingJid). */
+  private syncTypingTimer() {
+    const on = this.typing.size > 0 || !!this.composingJid
+    if (on && !this.typingTimer) {
+      this.typingTimer = setInterval(() => {
+        this.drawTabs()
+        this.redrawPickerRows(this.typing)
+        if ((this.current && this.typing.has(this.current)) || this.composingJid) this.drawRules()
+        this.updateTitle()
+        this.screen.render()
+      }, 80)
+    } else if (!on && this.typingTimer) { clearInterval(this.typingTimer); this.typingTimer = undefined }
   }
 
   /** Pasted text goes in whole where the cursor is; in the input it keeps the lines, in the picker filter it collapses to one. */
@@ -1297,6 +1302,7 @@ export class Ui {
       this.wa.setComposing(jid, true)
       this.composingJid = jid
       this.composingSentAt = now
+      this.syncTypingTimer()
     }
     if (this.composingTimer) clearTimeout(this.composingTimer)
     this.composingTimer = setTimeout(() => this.stopComposing(), 5000)
@@ -1307,6 +1313,9 @@ export class Ui {
     if (!this.composingJid) return
     this.wa.setComposing(this.composingJid, false)
     this.composingJid = null
+    this.syncTypingTimer()
+    this.drawRules()
+    this.screen.render()
   }
 
   /** Marks this terminal as the most recently used; saves at most every two seconds. */
@@ -2617,14 +2626,15 @@ export class Ui {
    * The rule above the input: 👀 near its right end while this device shows as online (myEyes), and centred over
    * the prompt's name while the person of the chat is online, or one per member online in a group (eyesBoxes). Only
    * with a UTF-8 locale, as it's a two-cell emoji from the emoji font; otherwise mine is the word "online" and theirs
-   * aren't shown. While they type, the braille spinner follows their 👀 (typingBox), a frame every 80 ms, turned by
-   * the typing timer's redraws.
+   * aren't shown. While someone types, the braille spinner takes the place of their 👀 (typingBox; in a group, of the
+   * first), and while I do, of mine; a frame every 80 ms, turned by the typing timer's redraws.
    */
   private drawRules() {
     const width = Math.max(0, num(this.screen.width))
     const utf8 = this.ruleChar === '─'
     const label = this.onlineLabel(), tail = 2
-    const labelCol = this.available && width >= label.length + tail + 4 ? width - label.length - tail : width
+    const typingHere = !!this.composingJid
+    const labelCol = (this.available || typingHere) && width >= label.length + tail + 4 ? width - label.length - tail : width
     const rule = labelCol < width
       ? `${this.ruleChar.repeat(labelCol)}${label}${this.ruleChar.repeat(tail)}`
       : this.ruleChar.repeat(width)
@@ -2632,27 +2642,30 @@ export class Ui {
     if (utf8 && labelCol < width) {
       this.myEyes.top = num(this.screen.height) - this.bottom
       this.myEyes.left = labelCol
+      this.myEyes.setContent(typingHere ? ` ${spinnerFrame()}` : ' 👀')
       this.myEyes.show()
     } else this.myEyes.hide()
-    // The eyes span 3n - 1 cells (two each, a space between), and the spinner one more after a space; together
-    // centred over the name, with a space on either side.
-    const n = utf8 ? this.promptName?.eyes ?? 0 : 0
+    // The spinner (one cell) first, in the place of the first 👀, then the other eyes (two cells each), a space
+    // between them all; together centred over the name, with a space on either side.
     const spin = !!this.promptName?.typing
-    const span = (n ? 3 * n - 1 : -1) + (spin ? 2 : 0)
+    const n = Math.max(0, (utf8 ? this.promptName?.eyes ?? 0 : 0) - (spin ? 1 : 0))
+    const span = (spin ? 1 : 0) + (n ? 3 * n - 1 : 0) + (spin && n ? 1 : 0)
     const col = this.promptName ? this.promptName.col + Math.max(0, Math.floor((this.promptName.width - span) / 2)) : -1
     const fits = span > 0 && col >= 1 && col + span + 1 <= labelCol
-    this.eyesBoxes.forEach((box, k) => {
-      if (!fits || k >= n) return void box.hide()
-      box.top = num(this.screen.height) - this.bottom
-      box.left = col - 1 + 3 * k
-      box.show()
-    })
+    const top = num(this.screen.height) - this.bottom
     if (fits && spin) {
-      this.typingBox.top = num(this.screen.height) - this.bottom
-      this.typingBox.left = col - 1 + 3 * n
+      this.typingBox.top = top
+      this.typingBox.left = col - 1
       this.typingBox.setContent(` ${spinnerFrame()} `)
       this.typingBox.show()
     } else this.typingBox.hide()
+    const eyesCol = col + (spin ? 2 : 0)
+    this.eyesBoxes.forEach((box, k) => {
+      if (!fits || k >= n) return void box.hide()
+      box.top = top
+      box.left = eyesCol - 1 + 3 * k
+      box.show()
+    })
   }
 
   /** What the rule holds near its right end while online: blank cells under myEyes, or the word. */
