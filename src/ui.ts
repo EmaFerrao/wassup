@@ -1947,6 +1947,8 @@ export class Ui {
         lastDay = day
         const label = `── ${fmtDay(row.ts)} ──`
         push(dim(`${' '.repeat(Math.max(0, Math.floor((width - strWidth(label)) / 2)))}${label}`), null)
+        // A blank line under it, so the day stands apart from its first message as from the last one before.
+        push('', null)
       }
       // My own messages stay flush right: I wrap the lines myself (blessed only wraps from the left) and push each
       // one to the edge; other people's stay on the left, wrapped the same way.
