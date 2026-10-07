@@ -70,14 +70,28 @@ export function chatName(jid: string): string {
 }
 
 /**
- * A short name for the chat, for a tab's label: a contact's first name, a group's whole name, and nothing when all
- * we have is a number or a lid.
+ * A short name for the chat, for a tab's label or the prompt: a contact's first name (with `two`, the first two when
+ * there are more than two, see firstNames), a group's whole name, and nothing when all we have is a number or a lid.
  */
-export function shortName(jid: string): string | null {
+export function shortName(jid: string, two = false): string | null {
   const name = chatName(jid)
   if (isJidGroup(jid)) return store.getChat(jid)?.name ?? null
   if (looksLikeNumber(name) || name.startsWith('lid:')) return null
-  return name.split(' ')[0] || null
+  return firstNames(name, two)
+}
+
+/** Words joining the parts of a Portuguese name, which aren't names themselves ("João da Silva"). */
+const PARTICLES = new Set(['de', 'da', 'do', 'das', 'dos', 'e'])
+
+/**
+ * A name's first word; with `two`, when it has more than two names, its first two, with any particle between them
+ * kept ("Ana Maria Costa": "Ana Maria", "João da Silva Santos": "João da Silva", "Paula Costa": "Paula").
+ */
+export function firstNames(name: string, two: boolean): string | null {
+  const words = name.split(/\s+/).filter(Boolean)
+  const names = words.flatMap((w, i) => PARTICLES.has(w.toLowerCase()) ? [] : [i])
+  if (two && names.length > 2) return words.slice(0, names[1]! + 1).join(' ')
+  return words[0] ?? null
 }
 
 const EXT_BY_MIME: Record<string, string> = {

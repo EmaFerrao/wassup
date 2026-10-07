@@ -1671,7 +1671,7 @@ export class Ui {
     // "chats" open, the same line is used to type the filter. When replying, reacting or editing, the line
     // above the input says which message (`headerBox`), so the input itself keeps its rows for the text.
     const w = num(this.input.width) - num(this.input.iwidth) - 1
-    const name = this.pickerOpen || !this.current ? null : shortName(this.current)
+    const name = this.pickerOpen || !this.current ? null : shortName(this.current, true)
     // Groups end the prompt in "∴", three dots like three people; one-to-one chats in "❯". Both are one cell wide
     // in common monospace fonts (a glyph a font lacks falls back to another and may overflow its cell).
     const mark = this.current?.endsWith('@g.us') ? '∴' : '❯'
