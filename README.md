@@ -34,17 +34,16 @@ texts, the emoji names and the language of the writing suggestions.
 ## Interface
 
 The tab bar at the top with the connection state on the right, messages across the full width under it, and the input
-at the bottom, with the chat's first name as the prompt, in the colour the person's name has in groups (`Ema ❯ `,
-with 👀 over the name on the rule above while they're online, and in a group one per member online, up to five, among
-the 30 who wrote most recently, and a braille spinner beside them while they type; the first two for a contact with
-more than two names, or a group's name). No frames
-or backgrounds of its own: the colours are the terminal theme's, and on startup the terminal is asked for its real
-background colour to pick light or dark shades.
+at the bottom, with the chat's first name as the prompt, in the colour the person's name has in groups (`Ema ❯ `, with
+👀 over the name on the rule above while they're online, and in a group one per member online, up to five, among the 30
+who wrote most recently, and a braille spinner in place of the 👀 while they type; the first two for a contact with
+more than two names, or a group's name). No frames or backgrounds of its own: the colours are the terminal theme's,
+and on startup the terminal is asked for its real background colour to pick light or dark shades.
 
 - **Tabs**: one per open chat, with the unread count in red and an `×` to close. Tab cycles through them; whatever is
   left unsent stays with each chat. While someone is typing, a braille spinner turns before their name in the tab and
-  beside their 👀 on the rule above the input. New messages in a chat without a tab open one without activating it, with a passing
-  notice over it and the bell.
+  in place of their 👀 on the rule above the input. New messages in a chat without a tab open one without activating
+  it, with a passing notice over it and the bell.
 - **Chats**: `/`, or a click on the chat's name in the prompt, opens the list under the app's name, most recent at the
   bottom, under day separators (today, yesterday, this week, older); each row has the name in its colour, 👀 while the
   person is online, the last message (a spinner and "typing…" while someone types, the state of yours, mentions by
@@ -63,9 +62,9 @@ background colour to pick light or dark shades.
   under the pointer opens its quick reactions; a double click, dragging it to the right, or → with it selected, starts
   a reply.
 - **Input**: grows with the text up to half the screen; the rule above it shows 👀 near its right end while you show as
-  online; Enter sends, Shift+Enter or Ctrl+J start a new line, and pasting several lines keeps them. Ctrl-U clears,
-  Shift-Backspace deletes a word (with the Kitty keyboard protocol). `:` and two letters open the emoji list; ↑/↓,
-  Enter, Tab, → or a click pick one.
+  online, a braille spinner instead while you type; Enter sends, Shift+Enter or Ctrl+J start a new line, and pasting
+  several lines keeps them. Ctrl-U clears, Shift-Backspace deletes a word (with the Kitty keyboard protocol). `:` and
+  two letters open the emoji list; ↑/↓, Enter, Tab, → or a click pick one.
 - Esc closes, in order: the filter, the list, the active tab. Closing the last tab quits. Ctrl-C quits at once;
   Ctrl-R redraws the screen.
 - **Several terminals**: the first process is the server with the WhatsApp connection; the next ones connect to it
