@@ -2059,7 +2059,7 @@ export class Ui {
       }
       // On its own line the time goes straight in, flush right for mine, without passing through the wrapping.
       if (!stamped) { const at = map.length; push(mine ? alignRight(stamp, width) : stamp, row); headers.add(at) }
-      this.bubble(lines, bubbleFrom, lines.length, row.from_me === 1, width, row.id === selectedId || row.id === this.drag?.id)
+      this.bubble(lines, bubbleFrom, lines.length, row.from_me === 1, width, row.id === selectedId || row.id === this.drag?.id || type === 'image' || type === 'sticker')
       // Reactions underneath, outside the bubble: each emoji with who reacted, or just the count when there were several.
       const rs = reactions.get(row.id)
       if (rs?.length) {
@@ -2195,7 +2195,7 @@ export class Ui {
    * spaces are added around each line's own content, never inside it, so no column moves (clicks, selection and
    * images keep their places). The background is opened in three runs, before, over and after the content: an image
    * line ends in a full reset, which would leave the spare cells after it bare. Not for the selected message, whose
-   * own background spans the whole width, nor one being dragged.
+   * own background spans the whole width, nor one being dragged, nor images and stickers, which stand bare.
    */
   private bubble(lines: string[], from: number, to: number, mine: boolean, width: number, skip: boolean) {
     if (skip || to <= from) return
