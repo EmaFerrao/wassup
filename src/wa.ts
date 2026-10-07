@@ -50,6 +50,11 @@ export function canonicalJid(jid?: string | null, alt?: string | null): string {
   return norm
 }
 
+/** Whether a process still exists (signal 0 only checks). */
+function alive(pid: number): boolean {
+  try { process.kill(pid, 0); return true } catch { return false }
+}
+
 export function jidUser(jid: string): string {
   return jid.split('@')[0] ?? jid
 }
@@ -305,6 +310,8 @@ export class Wa extends EventEmitter<WaEvents> {
    */
   private online = new Map<string, boolean>()
   private subscribed = new Set<string>()
+  /** Which terminals (by pid) have the focus, for those whose terminal reports it. */
+  private focus = new Map<number, boolean>()
   private presenceTimer: NodeJS.Timeout | undefined
   me = ''
   state: ConnState = 'connecting'
@@ -702,9 +709,10 @@ export class Wa extends EventEmitter<WaEvents> {
   /**
    * Someone is using a terminal: announces this device as available, which is the condition for WhatsApp to send
    * who's typing, and goes back to unavailable after 2 minutes without activity, so the phone starts notifying
-   * again. Any connected terminal extends the deadline.
+   * again. Any connected terminal extends the deadline, except one that said it doesn't have the focus.
    */
-  touchPresence() {
+  touchPresence(terminal?: number) {
+    if (terminal != null && this.focus.get(terminal) === false) return
     if (this.presenceTimer) clearTimeout(this.presenceTimer)
     this.presenceTimer = setTimeout(() => { this.presenceTimer = undefined; this.setAvailable(false) }, 120000)
     this.setAvailable(true)
@@ -718,6 +726,19 @@ export class Wa extends EventEmitter<WaEvents> {
       .then(() => { if (on) for (const jid of this.subscribed) sock.presenceSubscribe(jid).catch(e => logger.warn({ e, jid }, 'presenceSubscribe')) })
       .catch(e => logger.warn({ e }, 'sendPresenceUpdate'))
     if (!on) this.dropOnline()
+  }
+
+  /**
+   * A terminal (by pid) gained or lost the focus, as its terminal reports it, the way WhatsApp is online only while
+   * it's in front: losing it takes this device offline at once, unless another live terminal has it. Gaining it
+   * doesn't make it online by itself: a key or the mouse does, as when opening.
+   */
+  setFocus(terminal: number, focused: boolean) {
+    this.focus.set(terminal, focused)
+    if (focused) return
+    for (const [pid, f] of this.focus) if (f && pid !== terminal && alive(pid)) return
+    if (this.presenceTimer) { clearTimeout(this.presenceTimer); this.presenceTimer = undefined }
+    this.setAvailable(false)
   }
 
   /** Records this device's own presence and tells the terminals, which show it in the cursor. */

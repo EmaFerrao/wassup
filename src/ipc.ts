@@ -88,7 +88,8 @@ export class IpcServer {
         case 'markRead': await this.wa.markRead(a[0]!); return reply({ ok: true })
         case 'subscribePresence': this.wa.subscribePresence(a[0]!); return reply({ ok: true })
         case 'setComposing': this.wa.setComposing(a[0]!, a[1] === 'on'); return reply({ ok: true })
-        case 'touchPresence': this.wa.touchPresence(); return reply({ ok: true })
+        case 'touchPresence': this.wa.touchPresence(Number(a[0])); return reply({ ok: true })
+        case 'setFocus': this.wa.setFocus(Number(a[0]), a[1] === 'on'); return reply({ ok: true })
         case 'ensureMedia': { const row = store.getMessage(a[0]!, a[1]!); if (row) this.wa.ensureMedia(row); return reply({ ok: true }) }
         case 'downloadAll': return reply({ ok: true, result: await this.wa.downloadAll(a[0]!) })
         case 'fetchOlder': return reply({ ok: true, result: await this.wa.fetchOlder(a[0]!) })
@@ -177,7 +178,8 @@ export class RemoteWa extends EventEmitter<WaEvents> implements Backend {
   markRead(chatJid: string) { return this.call<void>('markRead', chatJid) }
   subscribePresence(chatJid: string) { this.call('subscribePresence', chatJid).catch(() => {}) }
   setComposing(chatJid: string, on: boolean) { this.call('setComposing', chatJid, on ? 'on' : 'off').catch(() => {}) }
-  touchPresence() { this.call('touchPresence').catch(() => {}) }
+  touchPresence(terminal: number) { this.call('touchPresence', String(terminal)).catch(() => {}) }
+  setFocus(terminal: number, focused: boolean) { this.call('setFocus', String(terminal), focused ? 'on' : 'off').catch(() => {}) }
   ensureMedia(row: MessageRow) { this.call('ensureMedia', row.chat_jid, row.id).catch(() => {}) }
   downloadAll(chatJid: string) { return this.call<{ copied: number; pending: number }>('downloadAll', chatJid) }
   fetchOlder(chatJid: string) { return this.call<number>('fetchOlder', chatJid) }

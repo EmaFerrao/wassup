@@ -32,7 +32,8 @@ class BackendProxy extends EventEmitter<WaEvents> implements Backend {
   async markRead(jid: string) { await this.inner?.markRead(jid) }
   subscribePresence(jid: string) { this.inner?.subscribePresence(jid) }
   setComposing(jid: string, on: boolean) { this.inner?.setComposing(jid, on) }
-  touchPresence() { this.inner?.touchPresence() }
+  touchPresence(terminal: number) { this.inner?.touchPresence(terminal) }
+  setFocus(terminal: number, focused: boolean) { this.inner?.setFocus(terminal, focused) }
   ensureMedia(row: MessageRow) { this.inner?.ensureMedia(row) }
   downloadAll(jid: string) { return this.ready().downloadAll(jid) }
   async fetchOlder(jid: string) { return this.ready().fetchOlder(jid) }

@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import QRCode from 'qrcode'
 import { store, type ChatRow, type MessageRow, type ReactionRow } from './db.js'
 import { chatName, contactName, shortName, canonicalJid, thumbPath, mediaFile, jidUser, type ConnState } from './wa.js'
-import { inHerdr, reportHerdr, titleHerdr, tabNameHerdr, releaseHerdr, openChatHerdr, focusHerdr } from './herdr.js'
+import { inHerdr, reportHerdr, titleHerdr, tabNameHerdr, releaseHerdr, openChatHerdr, focusHerdr, paneFocusedHerdr } from './herdr.js'
 import type { Backend } from './backend.js'
 import { waMarkup, clipTagged, esc, colorFor, setTheme, dim, faint, italic, padding, urlsIn, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, wrapWidth, fold, graphemes, wrapChars } from './format.js'
 import { decode, cached, cellSize, halfBlocks, blockGrid, blockCell, detectImageMode, detectRgb, KittyImages, RgbBlocks, type Decoded, type ImageMode, type RgbCell } from './image.js'
@@ -276,6 +276,19 @@ export class Ui {
     if (caps.utf8) (this.screen.program as unknown as { tput: { brokenACS: boolean } }).tput.brokenACS = true
     const program = this.screen.program as unknown as { _write: (s: string) => void }
     if (this.mode === 'kitty') this.kitty = new KittyImages(s => program._write(s))
+    // Focus events (DECSET 1004): a terminal that knows them says when this window or pane gains or loses the
+    // focus, which decides whether activity here keeps this device online; one that doesn't simply ignores it.
+    program._write('\x1b[?1004h')
+    const focusChanged = (focused: boolean) => {
+      this.hasFocus = focused
+      // Back in front, the next key or mouse counts at once rather than up to ten seconds later.
+      if (!focused) this.lastPresenceTouch = 0
+      this.wa.setFocus(process.pid, focused)
+    }
+    this.screen.program.on('focus', () => focusChanged(true))
+    this.screen.program.on('blur', () => focusChanged(false))
+    // In Herdr the events only come with a change, so the pane's state at start is asked of Herdr.
+    paneFocusedHerdr().then(f => { if (f !== undefined && this.hasFocus === undefined) focusChanged(f) }).catch(() => {})
     if (this.mode === 'blocks' && detectRgb(caps.truecolor)) this.rgbBlocks = new RgbBlocks(s => program._write(s))
     // Only with the terminal confirming the protocol: it's what lets Shift+Backspace be distinguished, for deleting words.
     if (caps.kittyKeyboard) this.disableKittyKeyboard = enableKittyKeyboard((this.screen.program as unknown as { input: Parameters<typeof enableKittyKeyboard>[0] }).input, s => program._write(s))
@@ -601,6 +614,8 @@ export class Ui {
       if (b[0] === 0x1b) uiLog.info({ raw: JSON.stringify(b.toString('latin1')) }, 'bytes')
     })
     this.screen.on('mouse', (d: { action: string; button?: string; x: number; y: number; shift?: boolean; ctrl?: boolean }) => {
+      // blessed hands the focus events over as mouse events too: gaining or losing the focus isn't activity.
+      if (d.action === 'focus' || d.action === 'blur') return
       this.touchActivity()
       // Pointer movement with no button, when the terminal reports it, is one event per cell: not logged.
       if (d.action !== 'mousemove') uiLog.info({ action: d.action, button: d.button, x: d.x, y: d.y, shift: d.shift, ctrl: d.ctrl }, 'mouse')
@@ -635,7 +650,8 @@ export class Ui {
       this.showingQr = false
       this.dirtyMessages = true
       for (const jid of this.tabs) this.wa.subscribePresence(jid)
-      if (this.interacted && Date.now() - this.lastActive < 120000) { this.lastPresenceTouch = Date.now(); this.wa.touchPresence() }
+      if (this.lastWrite && this.hasFocus !== false && Date.now() - this.lastWrite < 120000) { this.lastPresenceTouch = Date.now(); this.wa.touchPresence(process.pid) }
+      if (this.hasFocus !== undefined) this.wa.setFocus(process.pid, this.hasFocus)
       this.scheduleRender()
     } else if (state === 'closed') {
       this.connText = `{${FG.error}-fg}● ${esc(detail ?? t('disconnected'))}{/${FG.error}-fg}`
@@ -681,6 +697,7 @@ export class Ui {
     this.accepted = undefined
     this.promoteActive()
     this.noteComposing()
+    this.noteWriting()
     this.updateSuggestions()
     this.drawInput()
     this.screen.render()
@@ -768,7 +785,7 @@ export class Ui {
         }
         if (k === 'enter' || k === 'return') return this.acceptSuggestion()
       }
-      if (k === 'enter' || k === 'return') { const v = this.inputValue; this.inputValue = ''; this.cursor = 0; this.stopComposing(); this.updateSuggestions(); this.drawInput(); this.screen.render(); return void this.submit(v) }
+      if (k === 'enter' || k === 'return') { const v = this.inputValue; if (v) this.noteWriting(); this.inputValue = ''; this.cursor = 0; this.stopComposing(); this.updateSuggestions(); this.drawInput(); this.screen.render(); return void this.submit(v) }
       // Right after accepting a suggestion that ended mid-word, a letter or digit starts a new word: it goes in
       // with a space before it. Space and punctuation follow directly.
       if (this.accepted === this.inputValue && this.cursorAtEnd() && ch && /^[\p{L}\p{N}]$/u.test(ch) && !key.ctrl && !key.meta) {
@@ -778,7 +795,7 @@ export class Ui {
       const e = edit(this.inputValue, this.cursor, k, ch, key)
       if (!e) { if (k === 'up') this.moveSelection(-1); return }
       // Only the text changing spends the promised space; moving the cursor (→ at the end, with no suggestion) leaves it unspent.
-      if (e.value !== this.inputValue) { this.accepted = undefined; this.promoteActive() }
+      if (e.value !== this.inputValue) { this.accepted = undefined; this.promoteActive(); this.noteWriting() }
       this.inputValue = e.value
       this.cursor = e.cursor
       this.noteComposing()
@@ -1110,8 +1127,17 @@ export class Ui {
   }
 
   private lastActive = Date.now()
-  /** A key or the mouse has been used here: until then, opening wassup doesn't make this device show as online. */
-  private interacted = false
+  /**
+   * When something was last written in a chat here (typed, deleted, pasted or sent): only writing makes this device
+   * show as online, not opening wassup, the mouse, other keys or gaining the focus. 0 while nothing was.
+   */
+  private lastWrite = 0
+  /**
+   * Whether this terminal has the focus, from the terminal's focus events (DECSET 1004) or, in Herdr, its pane's
+   * state at start; undefined while neither has said, which counts as having it, so a terminal without the events
+   * behaves as before. Without the focus, activity here doesn't keep this device online.
+   */
+  private hasFocus: boolean | undefined
   private lastActiveSaved = 0
   private lastPresenceTouch = 0
   /** The chat we told "typing" to, when we told it, and the deadline to say we stopped. */
@@ -1157,11 +1183,14 @@ export class Ui {
 
   /** Marks this terminal as the most recently used; saves at most every two seconds. */
   private touchActivity() {
-    this.interacted = true
     this.lastActive = Date.now()
     if (this.lastActive - this.lastActiveSaved > 2000) this.saveTabs()
-    // Keeps the device "available" while the terminal is in use; every 10 seconds is enough.
-    if (this.lastActive - this.lastPresenceTouch > 10000) { this.lastPresenceTouch = this.lastActive; this.wa.touchPresence() }
+  }
+
+  /** Something was written in a chat: keeps this device "available" while it has the focus; every 10 seconds is enough. */
+  private noteWriting() {
+    this.lastWrite = Date.now()
+    if (this.hasFocus !== false && this.lastWrite - this.lastPresenceTouch > 10000) { this.lastPresenceTouch = this.lastWrite; this.wa.touchPresence(process.pid) }
   }
 
   /** Records of the other terminals whose process is still alive. */
@@ -1514,6 +1543,7 @@ export class Ui {
     this.kitty?.dispose()
     this.disableKittyKeyboard?.()
     this.disablePaste()
+    ;(this.screen.program as unknown as { _write: (s: string) => void })._write('\x1b[?1004l')
     const released = releaseHerdr()
     this.screen.destroy()
     // Nothing the connection reports while closing reaches the destroyed screen.

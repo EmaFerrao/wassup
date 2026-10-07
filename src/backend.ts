@@ -17,7 +17,10 @@ export interface Backend extends EventEmitter<WaEvents> {
   markRead(chatJid: string): Promise<void>
   subscribePresence(chatJid: string): void
   setComposing(chatJid: string, on: boolean): void
-  touchPresence(): void
+  /** Activity in this terminal (its pid), which keeps the device online. */
+  touchPresence(terminal: number): void
+  /** This terminal (its pid) gained or lost the focus. */
+  setFocus(terminal: number, focused: boolean): void
   ensureMedia(row: MessageRow): void
   downloadAll(chatJid: string): Promise<{ copied: number; pending: number }>
   /** Asks the phone for messages older than the oldest stored for this chat; resolves with how many came, 0 for none. */
