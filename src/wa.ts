@@ -73,18 +73,26 @@ export function contactName(jid: string): string {
   return `+${jidUser(jid)}`
 }
 
+/** "@" and a number (a lid's or a phone's) starting a word: a mention as WhatsApp sends it, not part of an address. */
+const MENTION = /(?<![\p{L}\p{N}._%+-])@(\d{6,})(?!\d)/gu
+
+/** Who a mention's number is, when it's a known contact: their jid (a lid's phone number when known) and name. */
+function mentioned(digits: string): { jid: string; name: string } | null {
+  for (const jid of [canonicalJid(`${digits}@lid`), `${digits}@s.whatsapp.net`]) {
+    const name = contactName(jid)
+    if (!name.startsWith('lid:') && !name.startsWith('+')) return { jid, name }
+  }
+  return null
+}
+
 /**
- * "@" mentions as WhatsApp sends them, by number (a lid's or a phone's), with the person's name in place of the
- * number when it's known: "@110827554213968" becomes "@Ana Costa".
+ * Mentions with the person's first name in place of the number when they're a known contact: "@110827554213968"
+ * becomes "@Ana". `show` draws each one found from the jid and first name; by default "@" and the name.
  */
-export function withMentions(text: string): string {
-  // Only an "@" that starts a word: not one inside an address ("x@123456.pt").
-  return text.replace(/(?<![\p{L}\p{N}._%+-])@(\d{6,})(?!\d)/gu, (m, d: string) => {
-    for (const jid of [canonicalJid(`${d}@lid`), `${d}@s.whatsapp.net`]) {
-      const name = contactName(jid)
-      if (!name.startsWith('lid:') && !name.startsWith('+')) return `@${name}`
-    }
-    return m
+export function withMentions(text: string, show: (jid: string, first: string) => string = (_jid, first) => `@${first}`): string {
+  return text.replace(MENTION, (m, digits: string) => {
+    const who = mentioned(digits)
+    return who ? show(who.jid, who.name.split(' ')[0]!) : m
   })
 }
 
