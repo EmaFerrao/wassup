@@ -62,9 +62,9 @@ const WORDMARK = [
 const spinnerFrame = () => SPINNER[Math.floor(Date.now() / 80) % SPINNER.length]!
 /**
  * The state of a message of mine, one cell in the time's own faint colour, told apart by shape alone: "∘" waiting to
- * leave, "›" sent, "✓" delivered, "◉" read.
+ * leave, "›" sent, "✓" delivered or read. Which was read the 👀 over the time of the last one says (renderMessages).
  */
-const tick = (status: number) => faint(status >= 4 ? '◉' : status >= 3 ? '✓' : status >= 2 ? '›' : '∘')
+const tick = (status: number) => faint(status >= 3 ? '✓' : status >= 2 ? '›' : '∘')
 /** At most this many 👀 over a group's name, however many of its members are online. */
 const EYES_MAX = 5
 /** How many of a chat's latest messages the panel draws at first, and how many more each scroll past the top adds. */
@@ -2157,6 +2157,8 @@ export class Ui {
     for (const r of store.listReactions(jid)) reactions.set(r.msg_id, [...(reactions.get(r.msg_id) ?? []), r])
     // Encrypted content for another message, stored before the client knew to drop it, isn't a message to show.
     const rows = store.listMessages(jid, this.shown.get(jid) ?? PAGE).filter(r => r.type !== 'secretEncrypted')
+    // The last of mine the other side has read (or played), which gets 👀 over its time.
+    const lastRead = this.ruleChar === '─' ? [...rows].reverse().find(r => r.from_me === 1 && (r.status ?? 0) >= 4)?.id : undefined
     this.rows = rows
     this.selected = rows.find(r => r.id === selectedId) ?? null
     const headers = new Set<number>(), texts = new Map<number, { start: number; end: number }>(), names = new Map<number, { jid: string; start: number; width: number }>()
@@ -2229,14 +2231,14 @@ export class Ui {
       const fetchMark = this.ruleChar === '─' ? '⤓' : 'v'
       const mediaHint = row.media_err && !row.media_path ? ` ${dim(t('unavailable'))}`
         : row.media_mime && !row.media_path ? ` {${this.green}-fg}${fetchMark}{/${this.green}-fg}` : ''
-      let stamped = false
+      let stamped = false, stampAt = -1
       if (type === 'deleted') out(dim(`⊘ ${t('deleted')}`), row)
       else if (type === 'image' || type === 'sticker' || type === 'gif' || type === 'video') {
         // An image or sticker with no caption carries the time to the right of its last row. Mine end where the text
         // would, short of the time's columns.
         const beside = (type === 'image' || type === 'sticker') && !row.text
         const from = lines.length
-        if (this.pushImage(row, push, images, lines, width, mine, beside ? stamp : undefined, undefined, textWidth)) { headers.add(map.length - 1); stamped = true }
+        if (this.pushImage(row, push, images, lines, width, mine, beside ? stamp : undefined, undefined, textWidth)) { stampAt = map.length - 1; headers.add(stampAt); stamped = true }
         for (let i = from; i < lines.length; i++) pictures.add(i)
         last = null
         if (type === 'video' || type === 'gif') out(`{magenta-fg}▶ ${type === 'gif' ? t('gif') : t('video')}{/magenta-fg}${mediaHint}`, row)
@@ -2282,14 +2284,14 @@ export class Ui {
             }
           }
           if (spans.length) mentions.set(at, spans)
-          if (withStamp) { headers.add(at); stamped = true }
+          if (withStamp) { headers.add(at); stamped = true; stampAt = at }
         })
       }
       const note = last as { at: number; line: string } | null
       if (bare && !stamped && note && visibleWidth(note.line) + 2 + visibleWidth(stamp) <= width) {
         const line = `${note.line}  ${stamp}`
         lines[note.at] = mine ? alignRight(line, width) : line
-        headers.add(note.at); stamped = true
+        headers.add(note.at); stamped = true; stampAt = note.at
       }
       if (!bare) {
         const rect = this.bubble(lines, bubbleFrom, lines.length, mine, width, row.id !== selectedId && row.id !== this.drag?.id, pictures)
@@ -2299,10 +2301,18 @@ export class Ui {
         let gap = rect ? (mine ? width - visibleWidth(stamp) : rect.end + 1) - visibleWidth(line) : 0
         gap -= Math.max(0, wrapWidth(`${line}${' '.repeat(Math.max(0, gap))}${stamp}`) - (width + 1))
         const tailed = `${line}${' '.repeat(Math.max(0, gap))}${stamp}`
-        if (!stamped && rect && !pictures.has(at) && gap >= 1 && visibleWidth(tailed) <= width) { lines[at] = tailed; headers.add(at); stamped = true }
+        if (!stamped && rect && !pictures.has(at) && gap >= 1 && visibleWidth(tailed) <= width) { lines[at] = tailed; headers.add(at); stamped = true; stampAt = at }
       }
       // On its own line the time goes straight in, flush right for mine, without passing through the wrapping.
-      if (!stamped) { const at = map.length; push(mine ? alignRight(stamp, width) : stamp, row); headers.add(at) }
+      if (!stamped) { stampAt = map.length; push(mine ? alignRight(stamp, width) : stamp, row); headers.add(stampAt) }
+      // 👀 over the time of the last of mine that was read, on the line above, centred on it: the blank line between
+      // messages, or one of the message's own, which stop short of the time's columns.
+      if (row.id === lastRead && stampAt > 0) {
+        const line = lines[stampAt]!, above = lines[stampAt - 1]!, sw = visibleWidth(stamp)
+        const col = visibleWidth(line) - sw + Math.max(0, Math.floor((sw - 2) / 2))
+        const pad = col - visibleWidth(above)
+        if (pad >= 1 || (pad === 0 && !above)) lines[stampAt - 1] = `${above}${' '.repeat(pad)}👀`
+      }
       // Reactions underneath, outside the bubble: each emoji, with how many when more than one person reacted with it.
       const rs = reactions.get(row.id)
       if (rs?.length) {
