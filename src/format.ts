@@ -100,6 +100,24 @@ export function fmtDay(ts: number): string {
   return `${d.getDate()} ${MONTHS[d.getMonth()]}${sameYear ? '' : ` ${d.getFullYear()}`}`
 }
 
+/** Whole calendar days from a moment to today: 0 today, 1 yesterday… */
+export function daysAgo(ts: number): number {
+  const d = new Date(ts * 1000), now = new Date()
+  d.setHours(0, 0, 0, 0); now.setHours(0, 0, 0, 0)
+  return Math.round((now.getTime() - d.getTime()) / 86400000)
+}
+
+const WEEKDAYS = t('weekdays').split(' ')
+
+/** When something was, short, for the chat list: the time today, "yesterday", the weekday this week, the date before. */
+export function fmtWhen(ts: number): string {
+  const d = new Date(ts * 1000), days = daysAgo(ts)
+  if (days <= 0) return fmtTime(ts)
+  if (days === 1) return t('yesterday')
+  if (days < 7) return WEEKDAYS[d.getDay()]!
+  return `${d.getDate()} ${MONTHS[d.getMonth()]}${d.getFullYear() === new Date().getFullYear() ? '' : ` ${d.getFullYear()}`}`
+}
+
 export function dayKey(ts: number): string {
   return new Date(ts * 1000).toDateString()
 }

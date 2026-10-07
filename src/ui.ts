@@ -6,7 +6,7 @@ import { store, type ChatRow, type MessageRow, type ReactionRow } from './db.js'
 import { chatName, contactName, shortName, canonicalJid, thumbPath, previewPath, hasPreviewImage, mediaFile, jidUser, withMentions, typeLabel, type ConnState } from './wa.js'
 import { inHerdr, reportHerdr, titleHerdr, tabNameHerdr, releaseHerdr, openChatHerdr, focusHerdr, focusNextChatHerdr, paneFocusedHerdr } from './herdr.js'
 import type { Backend } from './backend.js'
-import { waMarkup, clipTagged, esc, colorFor, setTheme, dim, faint, italic, padding, urlsIn, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, wrapWidth, fold, graphemes, wrapChars } from './format.js'
+import { waMarkup, clipTagged, esc, colorFor, setTheme, dim, faint, italic, padding, urlsIn, fmtTime, fmtDay, fmtWhen, daysAgo, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, wrapWidth, fold, graphemes, wrapChars } from './format.js'
 import { decode, cached, cellSize, halfBlocks, blockGrid, blockCell, detectImageMode, detectRgb, KittyImages, RgbPainter, type Decoded, type ImageMode, type RgbCell } from './image.js'
 import { logger, uiLog } from './log.js'
 import { patchBlessedDraw, patchBlessedUnicode } from './unicode.js'
@@ -52,7 +52,19 @@ interface ClinesBox extends blessed.Widgets.BoxElement {
 
 /** The sign that someone is typing, in their tab and the prompt: the classic braille dots spinner, a frame every 80 ms. */
 const SPINNER = [...'⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏']
+/** The app's name, over the chat list, in the rules' thin lines with round corners, like speech bubbles. */
+const APP = 'wassup'
+const WORDMARK = [
+  '╷ ╷ ╷ ╭─╮ ╭─╴ ╭─╴ ╷ ╷ ╭─╮',
+  '╰─┴─╯ ╰─┤ ╶─╯ ╶─╯ ╰─╯ ├─╯',
+  '                      ╵',
+]
 const spinnerFrame = () => SPINNER[Math.floor(Date.now() / 80) % SPINNER.length]!
+/**
+ * The state of a message of mine, one cell in the time's own faint colour, told apart by shape alone: "∘" waiting to
+ * leave, "›" sent, "✓" delivered, "◉" read.
+ */
+const tick = (status: number) => faint(status >= 4 ? '◉' : status >= 3 ? '✓' : status >= 2 ? '›' : '∘')
 /** At most this many 👀 over a group's name, however many of its members are online. */
 const EYES_MAX = 5
 /** How many of a chat's latest messages the panel draws at first, and how many more each scroll past the top adds. */
@@ -166,6 +178,18 @@ export class Ui {
   private pickerOpen = false
   private chats: ChatRow[] = []
   private filtered: ChatRow[] = []
+  /** The list's rows: a chat, or null for a day separator (only without a filter), which the selection skips. */
+  private pickerSlots: (ChatRow | null)[] = []
+  /** Each listed chat's last message, read when the list is built, so the live parts (typing, online) redraw cheaply. */
+  private pickerLast = new Map<string, MessageRow | undefined>()
+  /** The filter's words, folded, to underline them in the names. */
+  private pickerWords: string[] = []
+  /** The row selected before, to know which way the selection was going when it lands on a separator. */
+  private pickerAt = -1
+  /** Over the list: the app's name, big in the free space above a short list, or on one line, and the counts. */
+  private pickerHead!: blessed.Widgets.BoxElement
+  /** WhatsApp's green, in the palette: the app's name and the unread counts in the list. */
+  private green = 0
   private filter = ''
   private pickerFilterShown: string | undefined
   private focus: Focus = 'input'
@@ -284,6 +308,7 @@ export class Ui {
     // which the painter would take for a bubble.
     const offSelected = (n: number) => (n === this.selectedBg ? n - 2 : n)
     this.bubbleBg = this.dark ? { mine: offSelected(235), theirs: offSelected(236) } : { mine: offSelected(255), theirs: offSelected(254) }
+    this.green = nearest256(this.dark ? [0x25, 0xd3, 0x66] : [0x00, 0x80, 0x69])
     this.fgRgb = parseHex(caps.fg) ?? (this.dark ? [192, 192, 192] : [48, 48, 48])
     this.bgRgb = parseHex(caps.bg) ?? (this.dark ? [0, 0, 0] : [255, 255, 255])
     setTheme(this.dark)
@@ -352,9 +377,17 @@ export class Ui {
     this.picker = blessed.list({
       parent: this.screen, top: this.barRows, left: 0, right: 0, height: `100%-${this.bottom + this.barRows + 1}`, padding: { left: 1 }, hidden: true,
       tags: true, keys: true, mouse: true,
-      // The selected chat is marked as the active tab: bold and the theme's strongest color, without inverting.
-      style: { selected: { bold: true, fg: this.dark ? 'bright-white' : 'black' } } as unknown as blessed.Widgets.ListElementStyle,
+      // The selected chat is marked as the active tab, bold and in the theme's strongest color, over a bubble's
+      // background across the whole row (repainted in WhatsApp Web's colour where the terminal takes 24-bit colour).
+      style: { selected: { bold: true, fg: this.dark ? 'bright-white' : 'black', bg: this.bubbleBg.theirs } } as unknown as blessed.Widgets.ListElementStyle,
     })
+    // Rows aren't wrapped, as the messages' aren't: one with emoji, which blessed measures a cell too wide, would
+    // otherwise be cut at the edge, through the middle of the time's closing tag. Set as each row is made, before
+    // blessed first lays out its content.
+    const list = this.picker as unknown as { createItem: (content: string) => { wrap: boolean } }
+    const createItem = list.createItem.bind(list)
+    list.createItem = content => { const item = createItem(content); item.wrap = false; return item }
+    this.pickerHead = blessed.box({ parent: this.screen, top: this.barRows, left: 0, right: 0, height: 1, padding: { left: 1 }, tags: true, wrap: false, hidden: true })
     // Floating over the messages (status at the top right); created last so it stays on top.
     this.toast = blessed.box({ parent: this.screen, top: 0, left: 0, width: 1, height: 1, tags: true, hidden: true })
     // In single-chat mode the bar is gone and messages gain the line; status goes to the floating box, on the right.
@@ -452,8 +485,23 @@ export class Ui {
     this.picker.on('element wheelup', () => { this.picker.scroll(-1, true); this.screen.render() })
 
     this.picker.on('select', (_item, index) => this.pickChat(index))
-    // The click lands on the item (a child of the list) and arrives as 'element click', after blessed has already moved the selection.
-    this.picker.on('element click', () => this.pickChat((this.picker as unknown as { selected: number }).selected))
+    // The click lands on the item (a child of the list) and arrives as 'element click', after blessed has already
+    // moved the selection; on a day separator it opens nothing.
+    this.picker.on('element click', (el: blessed.Widgets.BlessedElement) => {
+      const i = this.picker.getItemIndex(el)
+      if (this.pickerSlots[i]) this.pickChat(i)
+    })
+    // The selection never rests on a day separator: it goes on past it the way it was going, or back when there's
+    // nothing further.
+    this.picker.on('select item', (_item, i: number) => {
+      if (this.pickerSlots[i] === null) {
+        const dir = i < this.pickerAt ? -1 : 1
+        const next = (d: number) => { for (let j = i + d; j >= 0 && j < this.pickerSlots.length; j += d) if (this.pickerSlots[j]) return j; return -1 }
+        const j = next(dir) >= 0 ? next(dir) : next(-dir)
+        if (j >= 0) return this.picker.select(j)
+      }
+      this.pickerAt = i
+    })
 
     this.tabsBar.on('click', (data: { x: number; y: number }) => {
       const x = data.x - num(this.tabsBar.aleft)
@@ -615,6 +663,7 @@ export class Ui {
     })
     this.wa.on('presence', (jid, on) => {
       if (on) this.online.add(jid); else this.online.delete(jid)
+      if (this.pickerOpen) { this.redrawPickerRows([jid]); this.screen.render() }
       if (jid === this.current) { this.drawInput(); this.screen.render() }
     })
     this.wa.on('messages', jid => { if (jid === '*' || jid === this.current) this.dirtyMessages = true; this.dirtyTabs = true; this.scheduleRender() })
@@ -714,12 +763,14 @@ export class Ui {
     if (this.typing.size && !this.typingTimer) {
       this.typingTimer = setInterval(() => {
         this.drawTabs()
+        this.redrawPickerRows(this.typing)
         if (this.current && this.typing.has(this.current)) this.drawInput()
         this.updateTitle()
         this.screen.render()
       }, 80)
     } else if (!this.typing.size && this.typingTimer) { clearInterval(this.typingTimer); this.typingTimer = undefined }
     this.drawTabs()
+    this.redrawPickerRows([jid])
     if (jid === this.current) this.drawInput()
     this.updateTitle()
     this.screen.render()
@@ -1439,6 +1490,7 @@ export class Ui {
     this.pickerOpen = true
     this.dirtyTabs = true
     this.picker.show()
+    this.pickerHead.show()
     this.msgBox.hide()
     this.refreshPicker()
     this.setFocus('picker')
@@ -1450,6 +1502,7 @@ export class Ui {
     this.dirtyTabs = true
     this.filter = ''
     this.picker.hide()
+    this.pickerHead.hide()
     this.msgBox.show()
     this.setFocus('input')
     if (render) this.renderNow()
@@ -1466,7 +1519,7 @@ export class Ui {
    * and 'tab' (Tab) open it in a new pane or tab; all three move the focus to where it already is, if it is.
    */
   private pickChat(index: number, how: 'here' | 'pane' | 'tab' = 'here') {
-    const jid = this.filtered[index]?.jid
+    const jid = this.pickerSlots[index]?.jid
     uiLog.info({ index, jid, how }, 'pick chat')
     if (jid) this.openChat(jid, how)
   }
@@ -1491,7 +1544,7 @@ export class Ui {
 
   private refreshPicker() {
     // Keep the selection on the same chat: WhatsApp events redraw the list all the time and used to reset it to the top.
-    const selectedJid = this.filtered[(this.picker as unknown as { selected: number }).selected]?.jid
+    const selectedJid = this.pickerSlots[(this.picker as unknown as { selected: number }).selected]?.jid
     const sameFilter = this.pickerFilterShown === this.filter
     this.pickerFilterShown = this.filter
     // Most recent at the bottom, like the messages; the default selection is the last one (the most recent).
@@ -1514,35 +1567,139 @@ export class Ui {
       return n.startsWith(words[0]!) ? 2 : 1
     }
     this.filtered = words.length ? [0, 1, 2].flatMap(r => matches.filter(c => rank(c) === r)) : this.chats
+    this.pickerWords = words
     const width = num(this.picker.width) - num(this.picker.iwidth) - 1
-    // Person or group name on the left and a snippet of the last message on the right, like in a chat list.
-    const nameW = Math.min(28, Math.max(12, Math.floor(width * 0.35)))
-    const items = this.filtered.map(c => {
-      const badge = c.unread > 0 ? ` (${c.unread})` : ''
-      const open = this.tabs.includes(c.jid) ? ' ·' : ''
-      const name = truncate(chatName(c.jid), nameW - strWidth(badge) - strWidth(open) - 1)
-      const left = `${c.unread > 0 ? `{bold}${esc(name)}{/bold}{red-fg}${badge}{/red-fg}` : esc(name)}${open}`
-      const last = store.lastMessage(c.jid)
-      let preview = ''
-      if (last) {
-        const who = last.from_me ? `${t('me')}: ` : c.is_group ? `${contactName(last.sender_jid).split(' ')[0]}: ` : ''
-        const kind: Record<string, string> = { image: t('image'), video: t('video'), gif: t('gif'), sticker: t('sticker'), document: t('file'), audio: t('audio'), voice: t('voice'), location: t('location'), contact: t('contact'), poll: t('poll') }
-        const body = last.type === 'text' ? last.text.replace(/\s+/g, ' ') : last.type === 'deleted' ? t('deleted') : `[${kind[last.type] ?? last.type}]${last.text ? ' ' + last.text.replace(/\s+/g, ' ') : ''}`
-        preview = truncate(`${fmtTime(last.ts)} ${who}${body}`, width - nameW - 2)
+    // Without a filter the chats go under day separators, like the messages: older, this week, yesterday, today, the
+    // most recent at the bottom. A filter orders them by how well they match, which no separator would follow.
+    const bucket = (ts: number) => { const d = daysAgo(ts); return d <= 0 ? t('today') : d === 1 ? t('yesterday') : d < 7 ? t('thisWeek') : t('older') }
+    const slots: (ChatRow | null)[] = [], items: string[] = []
+    let lastBucket = ''
+    this.pickerLast.clear()
+    for (const c of this.filtered) {
+      const b = bucket(c.last_ts)
+      if (!words.length && b !== lastBucket) {
+        lastBucket = b
+        slots.push(null)
+        items.push(dim(esc(`${this.ruleChar.repeat(2)} ${b} ${this.ruleChar.repeat(Math.max(2, width - strWidth(b) - 4))}`)))
       }
-      return `${left}${' '.repeat(Math.max(1, nameW - visibleWidth(left)))}${dim(esc(preview))}`
-    })
+      this.pickerLast.set(c.jid, store.lastMessage(c.jid))
+      slots.push(c)
+      items.push('')
+    }
+    this.pickerSlots = slots
+    slots.forEach((c, i) => { if (c) items[i] = this.pickerItem(c, width) })
     this.picker.setItems(items as unknown as string[])
     // List flush to the bottom when it's shorter than the panel, with a blank line separating it from the prompt.
     // Never shorter than one line: blessed skips an element of zero height altogether, leaving what was drawn there
-    // and the list's scroll state stale until the next refresh.
+    // and the list's scroll state stale until the next refresh. The app's name goes big in the free space above it
+    // when there's room for it and a blank line; otherwise on one line, which the list starts under.
     const panel = num(this.screen.height) - this.bottom - this.barRows - 1
-    const gap = Math.max(0, panel - Math.max(1, this.filtered.length))
-    this.picker.top = this.barRows + gap
-    this.picker.height = panel - gap
-    const keep = sameFilter ? this.filtered.findIndex(c => c.jid === selectedJid) : -1
-    this.picker.select(keep >= 0 ? keep : Math.max(0, this.filtered.length - 1))
+    const rows = Math.max(1, items.length)
+    const big = this.ruleChar === '─' && panel - rows >= WORDMARK.length + 1
+    const room = big ? panel : panel - 1
+    const gap = Math.max(0, room - rows)
+    this.picker.top = this.barRows + (big ? 0 : 1) + gap
+    this.picker.height = Math.max(1, room - gap)
+    this.drawPickerHead(big)
+    const keep = sameFilter ? slots.findIndex(c => c?.jid === selectedJid) : -1
+    this.pickerAt = keep >= 0 ? keep : Math.max(0, slots.length - 1)
+    this.picker.select(this.pickerAt)
     this.drawInput()
+  }
+
+  /**
+   * A chat's row in the list: its name in the colour it has as a sender in groups (bold with unread messages, the
+   * filter's words underlined), 👀 while the person is online and "·" when it has a tab; then a mark (the braille
+   * spinner while someone types there, my last message's state) and an excerpt of the last message; at the right
+   * edge, how long ago, and before it the unread count, both in WhatsApp's green.
+   */
+  private pickerItem(c: ChatRow, width: number): string {
+    const nameW = Math.min(28, Math.max(12, Math.floor(width * 0.35)))
+    const last = this.pickerLast.get(c.jid)
+    const typing = this.typing.has(c.jid)
+    const eyes = !c.is_group && this.online.has(c.jid) && this.ruleChar === '─' ? ' 👀' : ''
+    const open = this.tabs.includes(c.jid) ? ' ·' : ''
+    const name = truncate(chatName(c.jid), nameW - 1 - strWidth(eyes) - strWidth(open))
+    const color = colorFor(c.jid)
+    const named = `{${color}-fg}${this.underlineMatches(name)}{/${color}-fg}`
+    const left = `${c.unread > 0 ? `{bold}${named}{/bold}` : named}${eyes}${dim(open)}`
+    const mark = typing ? `{${this.green}-fg}${spinnerFrame()}{/${this.green}-fg}` : last?.from_me ? tick(last.status ?? 0) : ' '
+    const prefix = `${left}${' '.repeat(Math.max(1, nameW - visibleWidth(left)))}${mark} `
+    const ts = last?.ts ?? c.last_ts
+    const when = ts ? esc(fmtWhen(ts)) : ''
+    const right = c.unread > 0 ? `{${this.green}-fg}{bold}${c.unread}{/bold}  ${when}{/${this.green}-fg}` : faint(when)
+    const body = typing ? '' : last ? this.excerpt(last, !!c.is_group) : ''
+    const text = (s: string) => (typing ? `{${this.green}-fg}${esc(t('typingShort'))}{/${this.green}-fg}` : dim(esc(s)))
+    // The excerpt takes what's left; the time ends at the edge (a cell or so short with emoji in the row, which
+    // blessed measures a cell too wide, see padding).
+    let room = width - visibleWidth(prefix) - visibleWidth(right) - 2
+    for (let i = 0; i < 4; i++) {
+      const base = `${prefix}${text(truncate(body, Math.max(0, room)))}`
+      const fill = padding(`${base}${right}`, width)
+      if (fill >= 2 || room <= 0) return `${base}${' '.repeat(Math.max(1, fill))}${right}`
+      room -= 2 - fill
+    }
+    return `${prefix}${text('')}  ${right}`
+  }
+
+  /** The last message, for its chat's row: who wrote it, in a group, and the text or what it is, mentions by name. */
+  private excerpt(last: MessageRow, group: boolean): string {
+    const who = group && !last.from_me ? `${contactName(last.sender_jid).split(' ')[0]}: ` : ''
+    const kind: Record<string, string> = { image: t('image'), video: t('video'), gif: t('gif'), sticker: t('sticker'), document: t('file'), audio: t('audio'), voice: t('voice'), location: t('location'), contact: t('contact'), poll: t('poll') }
+    const text = withMentions(last.text).replace(/\s+/g, ' ')
+    const body = last.type === 'text' ? text : last.type === 'deleted' ? t('deleted') : kind[last.type] ? `[${kind[last.type]}]${last.text ? ` ${text}` : ''}` : typeLabel(last)
+    return `${who}${body}`
+  }
+
+  /** A chat's name with the filter's words underlined wherever they match, accents and case aside. */
+  private underlineMatches(name: string): string {
+    const chars = [...name]
+    if (!this.pickerWords.length) return esc(name)
+    // The folded name, with the character each of its letters came from.
+    let flat = ''
+    const owner: number[] = []
+    chars.forEach((ch, i) => { for (const f of fold(ch)) { flat += f; owner.push(i) } })
+    const marked = new Set<number>()
+    for (const w of this.pickerWords) {
+      for (let at = flat.indexOf(w); at >= 0; at = flat.indexOf(w, at + 1)) for (let k = at; k < at + w.length; k++) marked.add(owner[k]!)
+    }
+    let out = ''
+    chars.forEach((ch, i) => {
+      const on = marked.has(i), before = marked.has(i - 1)
+      if (on && !before) out += '{underline}'
+      if (!on && before) out += '{/underline}'
+      out += esc(ch)
+    })
+    return marked.has(chars.length - 1) ? `${out}{/underline}` : out
+  }
+
+  /**
+   * Over the list: the app's name in WhatsApp's green, big (WORDMARK) in the free space above a short list, with the
+   * counts at the right of its second row; on one line otherwise, the counts after it.
+   */
+  private drawPickerHead(big: boolean) {
+    const unread = this.chats.filter(c => c.unread > 0).length
+    const counts = dim(esc([t('chatsCount', this.chats.length), ...(unread ? [t('unreadCount', unread)] : [])].join(' · ')))
+    const green = (s: string) => `{${this.green}-fg}${esc(s)}{/${this.green}-fg}`
+    this.pickerHead.top = this.barRows
+    if (big) {
+      // The counts end where the rows' times end, a column short of the edge (see refreshPicker's width).
+      const w = num(this.pickerHead.width) - num(this.pickerHead.iwidth) - 1
+      const fill = w - strWidth(WORDMARK[1]!) - visibleWidth(counts)
+      this.pickerHead.height = WORDMARK.length
+      this.pickerHead.setContent(WORDMARK.map((l, i) => green(l) + (i === 1 && fill >= 2 ? ' '.repeat(fill) + counts : '')).join('\n'))
+    } else {
+      this.pickerHead.height = 1
+      this.pickerHead.setContent(`{bold}${green(APP)}{/bold}  ${counts}`)
+    }
+  }
+
+  /** Redraws the list rows of these chats from what was read when the list was built: the live parts change. */
+  private redrawPickerRows(jids: Iterable<string>) {
+    if (!this.pickerOpen) return
+    const want = new Set(jids)
+    const width = num(this.picker.width) - num(this.picker.iwidth) - 1
+    this.pickerSlots.forEach((c, i) => { if (c && want.has(c.jid)) this.picker.setItem(i as unknown as blessed.Widgets.BlessedElement, this.pickerItem(c, width)) })
   }
 
   // ---------- state ----------
@@ -1789,7 +1946,7 @@ export class Ui {
     // doesn't move.
     const typing = !this.pickerOpen && !!this.current && this.typing.has(this.current)
     const mark = typing ? spinnerFrame() : '❯'
-    const promptPlain = this.pickerOpen ? '/ ' : name ? `${name} ${mark} ` : `${mark} `
+    const promptPlain = this.pickerOpen ? `${APP} ${mark} ` : name ? `${name} ${mark} ` : `${mark} `
     const pw = this.promptWidth = strWidth(promptPlain)
     const target = this.pickerOpen ? null : this.replyTo ?? this.reactTo ?? this.editing
     const header = !target ? null : this.editing
@@ -1851,10 +2008,11 @@ export class Ui {
       return before + '{inverse}' + esc(under) + '{/inverse}' + esc(text(line.slice(col + 1)))
     }
     const visible = lines.slice(this.inputTop, this.inputTop + rowsAvail)
-    // The prompt says what the line does: the name and "❯" type, "/" filters the chats. The name is in
-    // the colour it has as a sender in groups (colorFor of the same jid; a group's own jid for a group).
-    const color = this.current ? colorFor(this.current) : 0
-    const prompt = this.pickerOpen ? '/ ' : name ? `{${color}-fg}${esc(name)}{/${color}-fg} ${mark} ` : `${mark} `
+    // The prompt says who the line talks to: the chat's name, in the colour it has as a sender in groups (colorFor
+    // of the same jid; a group's own jid for a group), or, with the chat list open, the app, in WhatsApp's green.
+    const color = this.pickerOpen ? this.green : this.current ? colorFor(this.current) : 0
+    const who = this.pickerOpen ? APP : name
+    const prompt = who ? `{${color}-fg}${esc(who)}{/${color}-fg} ${mark} ` : `${mark} `
     const out = visible.map((l, i) => (this.inputTop + i === 0 ? prompt : ' '.repeat(pw)) + render(l, this.inputTop + i))
     this.input.setContent(out.join('\n'))
     // The rule above shows 👀 over the name while the person of a one-to-one chat is online, and in a group one per
@@ -1991,10 +2149,8 @@ export class Ui {
       // My own messages stay flush right: I wrap the lines myself (blessed only wraps from the left) and push each
       // one to the edge; other people's stay on the left, wrapped the same way.
       const mine = row.from_me === 1
-      // The state after the time of mine, one cell in the time's own faint colour, told apart by shape alone:
-      // "∘" waiting to leave, "›" sent, "✓" delivered, "◉" read. One cell whatever the state, so the time stays put.
-      const status = row.status ?? 0
-      const ticks = !mine ? '' : faint(status >= 4 ? '◉' : status >= 3 ? '✓' : status >= 2 ? '›' : '∘')
+      // The state after the time of mine (tick): one cell whatever the state, so the time stays put.
+      const ticks = !mine ? '' : tick(row.status ?? 0)
       const stamp = mine ? `${faint(fmtTime(row.ts))} ${ticks}` : faint(fmtTime(row.ts))
       // Images, stickers, videos, GIFs and emoji on their own stand bare, with the time beside them; the rest go in a
       // bubble (see bubble), with the time outside it. Theirs in a bubble start a column in, for its spare column on
@@ -2324,8 +2480,9 @@ export class Ui {
    * After each frame, the half-block images in view get their exact colours, and the message bubbles theirs
    * (RgbPainter). An image cell is only taken when blessed's buffer still holds the half-block it was given there,
    * so whatever is drawn over an image (a notice, the reply header, the quick reactions, a dragged message) keeps
-   * its place; a bubble cell is any cell of the panel in one of the bubbles' greys, repainted with its own
-   * character, colour and attributes over the exact background.
+   * its place; a bubble cell is any cell of the panel (or, with the chat list open, of the list, where only the
+   * selected row has that background) in one of the bubbles' greys, repainted with its own character, colour and
+   * attributes over the exact background.
    */
   private paintRgb() {
     if (!this.rgbPaint) return
@@ -2357,27 +2514,31 @@ export class Ui {
           }
         }
       }
-      if (this.bubbleRgb) {
-        const bubbles = { [this.bubbleBg.mine]: this.bubbleRgb.mine, [this.bubbleBg.theirs]: this.bubbleRgb.theirs } as Record<number, string>
-        const x1 = x0 + num(this.msgBox.width) - num(this.msgBox.iwidth)
-        // blessed's attribute flags as SGR codes: bold, underline, blink, inverse, invisible, and italic (italic.ts).
-        const FLAGS: [number, number][] = [[1, 1], [2, 4], [4, 5], [8, 7], [16, 8], [32, 3]]
-        for (let y = y0; y < y0 + innerH; y++) {
-          const row = lines[y]
-          if (!row) continue
-          for (let x = x0; x < x1; x++) {
-            const held = row[x]
-            if (!held) continue
-            const rgb = bubbles[held[0] & 0x1ff]
-            // The second cell of a wide character holds blessed's marker: the character itself covers it.
-            if (!rgb || held[1] === '\u0003') continue
-            const flags = held[0] >> 18, fg = (held[0] >> 9) & 0x1ff
-            const codes = ['0', ...FLAGS.filter(([bit]) => flags & bit).map(([, code]) => String(code)), fg === 0x1ff ? '39' : `38;5;${fg}`, `48;2;${rgb}`]
-            cells.push({ x, y, ch: held[1] || ' ', w: Math.max(1, strWidth(held[1] || ' ')), sgr: codes.join(';') })
-          }
+    }
+    // The bubbles' cells: the message panel's, or, with the chat list open, the selected chat's row.
+    const box = this.pickerOpen ? this.picker : this.current && !this.showingQr ? this.msgBox : null
+    if (this.bubbleRgb && box) {
+      const lines = this.screenRows('lines')
+      const bubbles = { [this.bubbleBg.mine]: this.bubbleRgb.mine, [this.bubbleBg.theirs]: this.bubbleRgb.theirs } as Record<number, string>
+      const x0 = num(box.aleft) + num(box.ileft), y0 = num(box.atop) + num(box.itop)
+      const x1 = x0 + num(box.width) - num(box.iwidth), y1 = y0 + num(box.height) - num(box.iheight)
+      // blessed's attribute flags as SGR codes: bold, underline, blink, inverse, invisible, and italic (italic.ts).
+      const FLAGS: [number, number][] = [[1, 1], [2, 4], [4, 5], [8, 7], [16, 8], [32, 3]]
+      for (let y = y0; y < y1; y++) {
+        const row = lines[y]
+        if (!row) continue
+        for (let x = x0; x < x1; x++) {
+          const held = row[x]
+          if (!held) continue
+          const rgb = bubbles[held[0] & 0x1ff]
+          // The second cell of a wide character holds blessed's marker: the character itself covers it.
+          if (!rgb || held[1] === '\u0003') continue
+          const flags = held[0] >> 18, fg = (held[0] >> 9) & 0x1ff
+          const codes = ['0', ...FLAGS.filter(([bit]) => flags & bit).map(([, code]) => String(code)), fg === 0x1ff ? '39' : `38;5;${fg}`, `48;2;${rgb}`]
+          cells.push({ x, y, ch: held[1] || ' ', w: Math.max(1, strWidth(held[1] || ' ')), sgr: codes.join(';') })
         }
-        cells.sort((a, b) => a.y - b.y || a.x - b.x)
       }
+      cells.sort((a, b) => a.y - b.y || a.x - b.x)
     }
     this.rgbPaint.paint(cells, olines)
   }
