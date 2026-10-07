@@ -683,7 +683,10 @@ export class Ui {
     this.wa.on('messages', jid => { if (jid === '*' || jid === this.current) this.dirtyMessages = true; this.dirtyTabs = true; this.scheduleRender() })
     this.wa.on('notify', (jid, row) => {
       if (jid === this.current) {
-        this.wa.markRead(jid).catch(e => logger.warn({ e }, 'markRead'))
+        // Arriving in the chat in front of you, it's read only while you show as online (writing here lately): a
+        // focused pane or window with no one at it would take it as seen. Otherwise it waits, and the phone notifies,
+        // until you write, open the chat or come back to the terminal.
+        if (this.available) this.markReadIfSeen(jid)
         if (row.type === 'text' && reaction(row.text)) this.heartFor(r => r.id === row.id, row.text)
         return
       }
@@ -1254,6 +1257,16 @@ export class Ui {
    */
   private hasFocus: boolean | undefined
   private lastActiveSaved = 0
+
+  /**
+   * Marks the chat as read only while it's in front of you: in Herdr, with its pane focused (a pane it opened in the
+   * background for a new message stays unread until you go to it, see focusChanged); elsewhere, unless the terminal
+   * said it lost the focus. A read receipt from here tells the phone the chat was seen, and it doesn't notify.
+   */
+  private markReadIfSeen(jid: string) {
+    if (inHerdr ? this.hasFocus !== true : this.hasFocus === false) return
+    this.wa.markRead(jid).catch(e => logger.warn({ e }, 'markRead'))
+  }
   private lastPresenceTouch = 0
   /** The chat we told "typing" to, when we told it, and the deadline to say we stopped. */
   private composingJid: string | null = null
@@ -1305,7 +1318,12 @@ export class Ui {
   /** Something was written in a chat: keeps this device "available" while it has the focus; every 10 seconds is enough. */
   private noteWriting() {
     this.lastWrite = Date.now()
-    if (this.hasFocus !== false && this.lastWrite - this.lastPresenceTouch > 10000) { this.lastPresenceTouch = this.lastWrite; this.wa.touchPresence(process.pid) }
+    // Writing in a chat is having seen it: what arrived while you weren't online is read then, as often as the presence.
+    if (this.hasFocus !== false && this.lastWrite - this.lastPresenceTouch > 10000) {
+      this.lastPresenceTouch = this.lastWrite
+      this.wa.touchPresence(process.pid)
+      if (this.current) this.markReadIfSeen(this.current)
+    }
   }
 
   /** Records of the other terminals whose process is still alive. */
@@ -1352,7 +1370,7 @@ export class Ui {
     if (this.pickerOpen) this.closePicker(false)
     this.setFocus('input')
     this.renderNow()
-    this.wa.markRead(jid).catch(e => logger.warn({ e }, 'markRead'))
+    this.markReadIfSeen(jid)
   }
 
   /** Moves the active tab to the first position, next to the input, when typing starts in it. */
@@ -1398,7 +1416,7 @@ export class Ui {
     if (!this.tabs.length) return this.quit()
     this.renderNow()
     const jid = this.current
-    if (jid) this.wa.markRead(jid).catch(e => logger.warn({ e }, 'markRead'))
+    if (jid) this.markReadIfSeen(jid)
   }
 
   private drawTabs() {
