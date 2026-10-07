@@ -635,7 +635,7 @@ export class Ui {
       this.showingQr = false
       this.dirtyMessages = true
       for (const jid of this.tabs) this.wa.subscribePresence(jid)
-      if (Date.now() - this.lastActive < 120000) { this.lastPresenceTouch = Date.now(); this.wa.touchPresence() }
+      if (this.interacted && Date.now() - this.lastActive < 120000) { this.lastPresenceTouch = Date.now(); this.wa.touchPresence() }
       this.scheduleRender()
     } else if (state === 'closed') {
       this.connText = `{${FG.error}-fg}● ${esc(detail ?? t('disconnected'))}{/${FG.error}-fg}`
@@ -1110,6 +1110,8 @@ export class Ui {
   }
 
   private lastActive = Date.now()
+  /** A key or the mouse has been used here: until then, opening wassup doesn't make this device show as online. */
+  private interacted = false
   private lastActiveSaved = 0
   private lastPresenceTouch = 0
   /** The chat we told "typing" to, when we told it, and the deadline to say we stopped. */
@@ -1155,6 +1157,7 @@ export class Ui {
 
   /** Marks this terminal as the most recently used; saves at most every two seconds. */
   private touchActivity() {
+    this.interacted = true
     this.lastActive = Date.now()
     if (this.lastActive - this.lastActiveSaved > 2000) this.saveTabs()
     // Keeps the device "available" while the terminal is in use; every 10 seconds is enough.

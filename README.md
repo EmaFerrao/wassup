@@ -20,7 +20,8 @@ The first time, a QR code appears: on the phone, WhatsApp › Settings › Linke
 saved and later runs connect directly.
 
 While the terminal is in use the client announces itself "available" to WhatsApp, so the phone does not notify, just
-as with WhatsApp Web open. After 2 minutes idle it goes back to "unavailable".
+as with WhatsApp Web open. Opening it doesn't count: it takes a key or the mouse. After 2 minutes idle it goes back
+to "unavailable".
 
 Requirements: Node 22.13 or newer (it uses the SQLite built into Node).
 
