@@ -705,8 +705,9 @@ export class Ui {
   }
 
   /**
-   * Someone started or stopped typing: a braille spinner turns in their tab, before the name, and in the prompt of
-   * the active chat in the mark's place, on a clock that runs while anyone is typing.
+   * Someone started or stopped typing: a braille spinner turns in their tab, before the name, in the prompt of the
+   * active chat in the mark's place and in the window title (in Herdr, the agent's name), on a clock that runs while
+   * anyone is typing.
    */
   private onTyping(jid: string, active: boolean) {
     if (active) this.typing.add(jid); else this.typing.delete(jid)
@@ -714,6 +715,7 @@ export class Ui {
       this.typingTimer = setInterval(() => {
         this.drawTabs()
         if (this.current && this.typing.has(this.current)) this.drawInput()
+        this.updateTitle()
         this.screen.render()
       }, 80)
     } else if (!this.typing.size && this.typingTimer) { clearInterval(this.typingTimer); this.typingTimer = undefined }
@@ -1581,16 +1583,18 @@ export class Ui {
     this.screen.render()
   }
 
-  // Window title: the active chat, with a dot in front while there are unread messages in any chat.
+  // Window title: the active chat, with the typing spinner in front while someone types, or else a dot while there
+  // are unread messages in any chat.
   private titleShown = ''
   private updateTitle() {
     const unread = store.listChats().filter(c => c.unread > 0 && (this.fixed ? c.jid === this.current : !c.archived))
-    const title = `${unread.length ? '● ' : ''}${this.current ? chatName(this.current) : 'wassup'}`
+    const typing = [...this.typing].filter(jid => !this.fixed || jid === this.current).map(jid => chatName(jid))
+    const mark = typing.length ? `${spinnerFrame()} ` : unread.length ? '● ' : ''
+    const title = `${mark}${this.current ? chatName(this.current) : 'wassup'}`
     if (title !== this.titleShown) { this.titleShown = title; this.screen.title = title; titleHerdr(title) }
     // In Herdr, alone in its tab, the tab takes the chat's first name, with no state.
     if (inHerdr) tabNameHerdr(this.current ? shortName(this.current) : null)
     // In Herdr the same signal goes to the agent's status: someone typing is work in progress, unread asks for attention.
-    const typing = [...this.typing].filter(jid => !this.fixed || jid === this.current).map(jid => chatName(jid))
     if (typing.length) reportHerdr('working', t('typingWho', typing.join(', ')))
     else if (unread.length) reportHerdr('blocked', unread.map(c => `${chatName(c.jid)} (${c.unread})`).join(', '))
     else reportHerdr('idle')

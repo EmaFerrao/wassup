@@ -53,10 +53,10 @@ export function reportHerdr(state: HerdrState, message?: string) {
 }
 
 /**
- * The window's title ("● Fulano") goes on the agent (`display_agent`, what the sidebar shows for the pane in place
- * of "wassup"), the same whether wa is alone in its tab or in a pane of a split one. When wa is alone in its tab, the
- * tab's label also takes the chat's short name (a first name, no state, nothing for a bare number); the label that
- * was there is saved to restore it on exit. Pane labels are left alone. Requests queue up so they don't overtake each other.
+ * The window's title ("● Fulano", "⠋ Fulano" while they type) goes on the agent (`display_agent`, what the sidebar
+ * shows for the pane in place of "wassup"), the same whether wa is alone in its tab or in a pane of a split one. When
+ * wa is alone in its tab, the tab's label also takes the chat's short name (a first name, no state, nothing for a bare
+ * number); the label that was there is saved to restore it on exit. Pane labels are left alone. Requests queue up so they don't overtake each other.
  */
 let titleQueue: Promise<unknown> = Promise.resolve()
 let lastTab: string | null | undefined
@@ -66,7 +66,8 @@ let tabOriginal: Promise<string | null | undefined> | undefined
 export function titleHerdr(title: string) {
   if (!inHerdr || title === lastTitle) return
   lastTitle = title
-  titleQueue = titleQueue.then(() => pane('pane.report_metadata', { display_agent: title }))
+  // While the typing spinner turns a title comes every 80 ms: one overtaken by a later one in the queue isn't sent.
+  titleQueue = titleQueue.then(() => { if (title === lastTitle) return pane('pane.report_metadata', { display_agent: title }) })
 }
 
 export function tabNameHerdr(name: string | null) {
