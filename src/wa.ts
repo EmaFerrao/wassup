@@ -73,6 +73,37 @@ export function contactName(jid: string): string {
   return `+${jidUser(jid)}`
 }
 
+/**
+ * "@" mentions as WhatsApp sends them, by number (a lid's or a phone's), with the person's name in place of the
+ * number when it's known: "@110827554213968" becomes "@Ana Costa".
+ */
+export function withMentions(text: string): string {
+  // Only an "@" that starts a word: not one inside an address ("x@123456.pt").
+  return text.replace(/(?<![\p{L}\p{N}._%+-])@(\d{6,})(?!\d)/gu, (m, d: string) => {
+    for (const jid of [canonicalJid(`${d}@lid`), `${d}@s.whatsapp.net`]) {
+      const name = contactName(jid)
+      if (!name.startsWith('lid:') && !name.startsWith('+')) return `@${name}`
+    }
+    return m
+  })
+}
+
+/**
+ * The words for a message of a kind the client has no drawing of its own for (stored as "[kind]"): a pin, an album's
+ * announcement, a round video, a message still on its way, a group invite, a business message, or anything else.
+ */
+export function typeLabel(row: Pick<MessageRow, 'type' | 'raw'>): string {
+  switch (row.type) {
+    case 'pinInChat': return row.raw.includes('"UNPIN_FOR_ALL"') ? t('unpinned') : t('pinned')
+    case 'album': return t('album')
+    case 'ptv': return t('videoNote')
+    case 'placeholder': return t('waitingMessage')
+    case 'groupInvite': return t('groupInvite')
+    case 'interactive': case 'template': return t('businessMessage')
+    default: return t('unsupported')
+  }
+}
+
 export function chatName(jid: string): string {
   const chat = store.getChat(jid)
   if (chat?.name) return chat.name
@@ -294,6 +325,8 @@ export function parseMessage(m: WAMessage, meJid: string): Parsed | null {
     }
     case 'senderKeyDistributionMessage':
     case 'messageContextInfo':
+    // Encrypted content for another message (targetMessageKey), not a message of its own.
+    case 'secretEncryptedMessage':
       return null
     default:
       p.type = ctype.replace(/Message$/, '')
