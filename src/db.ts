@@ -145,6 +145,8 @@ const q = {
   getMessage: db.prepare(`SELECT * FROM messages WHERE chat_jid = ? AND id = ?`),
   findMessage: db.prepare(`SELECT * FROM messages WHERE id = ? LIMIT 1`),
   listMessages: db.prepare(`SELECT * FROM (SELECT * FROM messages WHERE chat_jid = ? ORDER BY ts DESC LIMIT ?) ORDER BY ts ASC`),
+  countMessages: db.prepare(`SELECT COUNT(*) AS n FROM messages WHERE chat_jid = ?`),
+  oldestMessage: db.prepare(`SELECT * FROM messages WHERE chat_jid = ? ORDER BY ts ASC LIMIT 1`),
   listMedia: db.prepare(`SELECT * FROM messages WHERE chat_jid = ? AND media_mime IS NOT NULL ORDER BY ts ASC`),
   unreadIncoming: db.prepare(`SELECT * FROM messages WHERE chat_jid = ? AND from_me = 0 ORDER BY ts DESC LIMIT ?`),
   setMedia: db.prepare(`UPDATE messages SET media_path = ?, media_w = ?, media_h = ?, media_err = 0 WHERE chat_jid = ? AND id = ?`),
@@ -226,8 +228,15 @@ export const store = {
   findMessage(id: string): MessageRow | undefined {
     return q.findMessage.get(id) as unknown as MessageRow | undefined
   },
+  /** The chat's latest `limit` messages, oldest first; -1 for all of them. */
   listMessages(chat: string, limit = 300): MessageRow[] {
     return q.listMessages.all(chat, limit) as unknown as MessageRow[]
+  },
+  countMessages(chat: string): number {
+    return (q.countMessages.get(chat) as { n: number }).n
+  },
+  oldestMessage(chat: string): MessageRow | undefined {
+    return q.oldestMessage.get(chat) as unknown as MessageRow | undefined
   },
   listMedia(chat: string): MessageRow[] {
     return q.listMedia.all(chat) as unknown as MessageRow[]

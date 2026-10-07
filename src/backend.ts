@@ -20,5 +20,7 @@ export interface Backend extends EventEmitter<WaEvents> {
   touchPresence(): void
   ensureMedia(row: MessageRow): void
   downloadAll(chatJid: string): Promise<{ copied: number; pending: number }>
+  /** Asks the phone for messages older than the oldest stored for this chat; resolves with how many came, 0 for none. */
+  fetchOlder(chatJid: string): Promise<number>
   stop(): Promise<void>
 }

@@ -52,6 +52,8 @@ interface ClinesBox extends blessed.Widgets.BoxElement {
 
 /** How long the rainbow fade lasts after the person stops typing. */
 const FADE_MS = 1500
+/** How many of a chat's latest messages the panel draws at first, and how many more each scroll past the top adds. */
+const PAGE = 300
 /** The notice for a message in another chat: time to appear, stay, and disappear, in milliseconds. */
 const NOTICE = { fadeIn: 400, hold: 6000, fadeOut: 800 }
 
@@ -190,6 +192,15 @@ export class Ui {
   private pointer: { x: number; y: number } | undefined
   /** Drawn messages, in order; the selected one (click or arrows in the panel) and the one being replied to or reacted to. */
   private rows: MessageRow[] = []
+  /** Per chat, how many of its latest messages the panel draws (-1: all of them); leaving the chat resets it. */
+  private shown = new Map<string, number>()
+  /** Chats whose older history is being asked of the phone, and those the phone has nothing older for. */
+  private olderPending = new Set<string>()
+  private olderDone = new Set<string>()
+  /** The chat the panel last drew, so a redraw of the same one can keep the view where it was. */
+  private renderedJid: string | undefined
+  /** Whether that drawing had the line saying older messages are on their way. */
+  private loadingDrawn = false
   private selected: MessageRow | null = null
   private replyTo: MessageRow | null = null
   /** My own message open in the input for editing (Backspace or Delete with an empty line). */
@@ -364,7 +375,8 @@ export class Ui {
     this.msgBox.removeAllListeners('wheeldown')
     this.msgBox.removeAllListeners('wheelup')
     this.msgBox.on('wheeldown', () => { this.msgBox.scroll(1); this.screen.render() })
-    this.msgBox.on('wheelup', () => { this.msgBox.scroll(-1); this.screen.render() })
+    // Reaching the top with the wheel or PgUp brings older messages (loadOlder); ↑ on the first message does the same.
+    this.msgBox.on('wheelup', () => { this.msgBox.scroll(-1); if (this.msgBox.childBase === 0) this.loadOlder(); this.screen.render() })
     this.picker.removeAllListeners('element wheeldown')
     this.picker.removeAllListeners('element wheelup')
     this.picker.on('element wheeldown', () => { this.picker.scroll(1, true); this.screen.render() })
@@ -692,7 +704,7 @@ export class Ui {
       if (this.current) return this.closeTab(this.active)
       return this.quit()
     }
-    if (k === 'pageup') { this.msgBox.scroll(-(this.innerHeight() - 1)); return this.screen.render() }
+    if (k === 'pageup') { this.msgBox.scroll(-(this.innerHeight() - 1)); if (this.msgBox.childBase === 0) this.loadOlder(); return this.screen.render() }
     if (k === 'pagedown') { this.msgBox.scroll(this.innerHeight() - 1); return this.screen.render() }
     // Tab cycles through the open tabs; with the picker open it goes back to the active tab. New chats open with "/".
     // With text in the input, Tab accepts the suggestion in view: the emoji list, or the model's; with no text, it
@@ -976,6 +988,8 @@ export class Ui {
   private moveSelection(dir: -1 | 1) {
     if (!this.current || !this.rows.length) return
     const i = this.selected ? this.rows.findIndex(r => r.id === this.selected!.id) : this.rows.length
+    // ↑ on the first message drawn: nothing above yet, so older ones are brought in; the selection stays put.
+    if (dir === -1 && i === 0) { this.loadOlder(); return void this.screen.render() }
     const next = i + dir
     this.select(next >= this.rows.length ? null : this.rows[Math.max(0, next)]!)
     this.renderNow()
@@ -1163,6 +1177,7 @@ export class Ui {
     if (i !== this.active) {
       this.stopComposing()
       const prev = this.current
+      if (prev) this.shown.delete(prev)
       this.active = i; this.atBottom = true; this.dirtyMessages = true; this.selected = this.replyTo = this.reactTo = null; this.quickFor = undefined
       // A message correction isn't a draft: it's dropped. Everything else stays saved in the chat being left.
       if (this.editing) { this.editing = null; this.inputValue = ''; this.cursor = 0 }
@@ -1790,6 +1805,13 @@ export class Ui {
   private renderMessages() {
     const jid = this.current
     if (!jid) return
+    // Scrolled up in the same chat, the message at the top of the view stays where it is when lines come or go
+    // above it (older history, a reaction, an image's real height); at the bottom, the view follows the bottom.
+    const pin = !this.atBottom && this.renderedJid === jid ? this.topAnchor() : null
+    const wasAtTop = this.msgBox.childBase === 0
+    // While the phone is asked for older messages, a line at the very top says so.
+    const loading = this.olderPending.has(jid)
+    const loadingNew = loading && !(this.loadingDrawn && this.renderedJid === jid)
     const isGroup = jid.endsWith('@g.us')
     const width = num(this.msgBox.width) - num(this.msgBox.iwidth)
     const lines: string[] = []
@@ -1809,13 +1831,17 @@ export class Ui {
     }
     const reactions = new Map<string, ReactionRow[]>()
     for (const r of store.listReactions(jid)) reactions.set(r.msg_id, [...(reactions.get(r.msg_id) ?? []), r])
-    const rows = store.listMessages(jid)
+    const rows = store.listMessages(jid, this.shown.get(jid) ?? PAGE)
     this.rows = rows
     this.selected = rows.find(r => r.id === selectedId) ?? null
     const headers = new Set<number>(), texts = new Map<number, { start: number; end: number }>(), names = new Map<number, { jid: string; width: number }>()
     // The text under the highlight is about to change.
     this.textSel = undefined
     let lastDay = ''
+    if (loading) {
+      const label = t('loadingOlder')
+      push(dim(`${' '.repeat(Math.max(0, Math.floor((width - strWidth(label)) / 2)))}${esc(label)}`), null)
+    }
 
     for (const row of rows) {
       const day = dayKey(row.ts)
@@ -1921,6 +1947,62 @@ export class Ui {
     this.images = images
     this.msgBox.setContent(lines.join('\n'))
     if (this.atBottom) this.msgBox.setScrollPerc(100)
+    // The waiting line has just appeared above the oldest message in view: the view goes up the line or two to show it.
+    else if (loadingNew && (wasAtTop || pin?.id === rows[0]?.id)) this.msgBox.scrollTo(0)
+    else if (pin) { const first = this.firstLineOf(pin.id); if (first != null) this.msgBox.scrollTo(first - pin.offset) }
+    this.renderedJid = jid
+    this.loadingDrawn = loading
+  }
+
+  /** The message at the top of the view, and how far its first line is from the top (negative when it starts above). */
+  private topAnchor(): { id: string; offset: number } | null {
+    const rtof = this.msgBox._clines?.rtof
+    if (!rtof) return null
+    const base = this.msgBox.childBase
+    for (let y = base; y < base + this.innerHeight(); y++) {
+      const orig = rtof[y]
+      if (orig == null) break
+      const row = this.lineMap[orig]
+      if (!row) continue
+      const first = this.firstLineOf(row.id)
+      return first == null ? null : { id: row.id, offset: first - base }
+    }
+    return null
+  }
+
+  /** The drawn line where a message starts. */
+  private firstLineOf(id: string): number | undefined {
+    const orig = this.lineMap.findIndex(r => r?.id === id)
+    return orig < 0 ? undefined : this.msgBox._clines?.ftor?.[orig]?.[0]
+  }
+
+  /**
+   * Scrolling past the top of a chat: first the stored messages the panel doesn't draw yet, another page each time;
+   * once all of them are drawn, up to 50 more asked of the phone, until it has nothing older. The view stays on the
+   * message that was at the top (renderMessages), so what arrives lands above it.
+   */
+  private loadOlder() {
+    const jid = this.current
+    if (!jid) return
+    const limit = this.shown.get(jid) ?? PAGE
+    if (limit !== -1 && store.countMessages(jid) > limit) {
+      this.shown.set(jid, limit + PAGE)
+      this.dirtyMessages = true
+      return this.renderNow()
+    }
+    this.shown.set(jid, -1)
+    if (this.olderPending.has(jid) || this.olderDone.has(jid)) return
+    this.olderPending.add(jid)
+    this.dirtyMessages = true
+    this.renderNow()
+    this.wa.fetchOlder(jid)
+      .then(n => { if (!n) this.olderDone.add(jid) })
+      .catch(e => logger.warn({ e: String(e), jid }, 'fetchOlder'))
+      .finally(() => {
+        this.olderPending.delete(jid)
+        // The waiting line goes, with or without anything new, and what arrived lands above the message at the top.
+        if (jid === this.current) { this.dirtyMessages = true; this.scheduleRender() }
+      })
   }
 
   /**

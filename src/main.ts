@@ -35,6 +35,7 @@ class BackendProxy extends EventEmitter<WaEvents> implements Backend {
   touchPresence() { this.inner?.touchPresence() }
   ensureMedia(row: MessageRow) { this.inner?.ensureMedia(row) }
   downloadAll(jid: string) { return this.ready().downloadAll(jid) }
+  async fetchOlder(jid: string) { return this.ready().fetchOlder(jid) }
   async stop() { this.server?.close(); await this.inner?.stop() }
 
   /** Connects to whatever server exists; if there's none, this process becomes the server. */

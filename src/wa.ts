@@ -5,7 +5,7 @@ import makeWASocket, {
   Browsers, BufferJSON, DisconnectReason, downloadMediaMessage, fetchLatestBaileysVersion, getContentType,
   isJidBroadcast, isJidGroup, isJidNewsletter, isJidStatusBroadcast, jidNormalizedUser, makeCacheableSignalKeyStore,
   normalizeMessageContent, toNumber, useMultiFileAuthState,
-  type AnyMessageContent, type GroupMetadata, type WAMessage, type WAMessageKey, type WASocket, type proto,
+  proto, type AnyMessageContent, type GroupMetadata, type WAMessage, type WAMessageKey, type WASocket,
 } from 'baileys'
 import type { Boom } from '@hapi/boom'
 import { dirs } from './config.js'
@@ -385,16 +385,22 @@ export class Wa extends EventEmitter<WaEvents> {
       }
     })
 
-    sock.ev.on('messaging-history.set', ({ chats, contacts, messages, lidPnMappings, progress }) => {
+    sock.ev.on('messaging-history.set', ({ chats, contacts, messages, lidPnMappings, progress, syncType, peerDataRequestSessionId }) => {
+      let stored = 0
       store.transaction(() => {
         for (const m of lidPnMappings ?? []) store.setLid(jidNormalizedUser(m.lid), jidNormalizedUser(m.pn))
         for (const c of contacts) this.upsertContact(c)
         for (const c of chats) this.upsertChat(c)
-        for (const m of messages) if (!storeReaction(m, this.me)) this.storeMessage(m, false)
+        for (const m of messages) if (!storeReaction(m, this.me) && this.storeMessage(m, false)) stored++
       })
       this.emit('chats')
       this.emit('messages', '*')
-      this.emit('status', t('historyProgress', messages.length, chats.length, progress != null ? ` (${progress}%)` : ''))
+      // An answer to fetchOlder goes back to whoever asked; the progress line is only for the syncs WhatsApp starts.
+      const asked = peerDataRequestSessionId ? this.older.get(peerDataRequestSessionId) : undefined
+      if (asked) { this.older.delete(peerDataRequestSessionId!); asked(stored) }
+      if (syncType !== proto.HistorySync.HistorySyncType.ON_DEMAND) {
+        this.emit('status', t('historyProgress', messages.length, chats.length, progress != null ? ` (${progress}%)` : ''))
+      }
     })
 
     sock.ev.on('messaging-history.status', ({ status }) => {
@@ -683,6 +689,31 @@ export class Wa extends EventEmitter<WaEvents> {
       this.downloading.delete(k)
       this.emit('messages', row.chat_jid)
     }
+  }
+
+  /** Pending fetchOlder requests, by the session id the phone answers with. */
+  private older = new Map<string, (stored: number) => void>()
+
+  /**
+   * Asks the phone for up to 50 messages older than the oldest stored for this chat: WhatsApp's on-demand history,
+   * which only reaches back past what this device already holds (anchored anywhere else, the phone answers empty).
+   * Resolves with how many came, 0 once the phone has nothing older; fails if it doesn't answer within 30 s, so a
+   * later try can ask again.
+   */
+  async fetchOlder(chatJid: string): Promise<number> {
+    const sock = this.sock
+    if (!sock || this.state !== 'open') throw new Error(t('notConnectedYet'))
+    const oldest = store.oldestMessage(chatJid)
+    if (!oldest) return 0
+    const { key } = JSON.parse(oldest.raw, BufferJSON.reviver) as WAMessage
+    const session = await sock.fetchMessageHistory(50, { remoteJid: key.remoteJid, fromMe: key.fromMe, id: key.id }, oldest.ts)
+    const stored = await new Promise<number>((resolve, reject) => {
+      const timer = setTimeout(() => { this.older.delete(session); reject(new Error('fetchOlder: no answer from the phone')) }, 30000)
+      this.older.set(session, n => { clearTimeout(timer); resolve(n) })
+    })
+    // Only what lands before the old anchor counts: messages that were already here don't move it.
+    const now = store.oldestMessage(chatJid)
+    return now && now.ts < oldest.ts ? stored : 0
   }
 
   /** Copies all the chat's attachments to ~/Downloads/wa/<chat>/, downloading whatever is missing. */
