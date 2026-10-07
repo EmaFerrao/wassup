@@ -692,6 +692,8 @@ export class Ui {
         if (row.type === 'text' && reaction(row.text)) this.heartFor(r => r.id === row.id, row.text)
         return
       }
+      // An archived chat stays quiet: no tab or pane opens for it, no notice, no bell.
+      if (store.getChat(jid)?.archived) return
       // In Herdr the new chat opens in a pane or tab of its own, in the background, by the same rule as a new tab: only
       // the most recently used terminal, and never if it's already open in another. Until the new one registers, the
       // request is remembered.
