@@ -53,8 +53,8 @@ background colour to pick light or dark shades.
   a message: typing replies to it, `:` reacts, Delete opens one of yours for editing. In a group, a click on a
   member's name opens the chat with them. The `☺` next to a message under the pointer opens its quick reactions; a
   double click, dragging it to the right, or → with it selected, starts a reply.
-- **Input**: grows with the text up to half the screen; the rule above it says `online` while you show as online;
-  Enter sends, Shift+Enter or Ctrl+J start a new line, and pasting several lines keeps them. Ctrl-U clears,
+- **Input**: grows with the text up to half the screen; the rule above it shows 👀 near its right end while you show as
+  online; Enter sends, Shift+Enter or Ctrl+J start a new line, and pasting several lines keeps them. Ctrl-U clears,
   Shift-Backspace deletes a word (with the Kitty keyboard protocol). `:` and two letters open the emoji list; ↑/↓,
   Enter, Tab, → or a click pick one.
 - Esc closes, in order: the filter, the list, the active tab. Closing the last tab quits. Ctrl-C quits at once;
