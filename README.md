@@ -54,7 +54,8 @@ background colour to pick light or dark shades.
   Enter sends, Shift+Enter or Ctrl+J start a new line, and pasting several lines keeps them. Ctrl-U clears,
   Shift-Backspace deletes a word (with the Kitty keyboard protocol). `:` and two letters open the emoji list; ↑/↓,
   Enter, Tab, → or a click pick one.
-- Esc closes, in order: the filter, the list, the active tab. Closing the last tab quits. Ctrl-C quits at once.
+- Esc closes, in order: the filter, the list, the active tab. Closing the last tab quits. Ctrl-C quits at once;
+  Ctrl-R redraws the screen.
 - **Several terminals**: the first process is the server with the WhatsApp connection; the next ones connect to it
   through a socket and are interface only, each with its own tabs. If the server ends, another one takes over.
 - **Single chat**: `wa <name>` opens only that chat, without the tab bar or notices from others; the `/` list swaps

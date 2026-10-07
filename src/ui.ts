@@ -724,6 +724,9 @@ export class Ui {
     // otherwise, with suggestions open, the first would accept the emoji and the second would send the message.
     if (key.name === 'enter' && key.sequence === '\r') return
     if (k === 'C-c') return this.quit()
+    // Ctrl+R redraws the whole screen, for whatever left marks on it (a glyph wider than its cell, a message
+    // written straight to the terminal): blessed forgets what it believes is there and paints everything again.
+    if (k === 'C-r') return this.redraw()
     if (k === 'paste') return this.paste(ch)
     // ESC closes, in order: the reply or reaction in progress, the selection, the picker filter, the picker, the
     // active tab, the program.
@@ -1738,11 +1741,9 @@ export class Ui {
     // above the input says which message (`headerBox`), so the input itself keeps its rows for the text.
     const w = num(this.input.width) - num(this.input.iwidth) - 1
     const name = this.pickerOpen || !this.current ? null : shortName(this.current, true)
-    // Groups end the prompt in "✻"; one-to-one chats in "◉" while the person is online, the mark of a message read,
-    // and in "○", the same circle empty, when they aren't or don't share it. While the other person
-    // is typing, the mark is a braille spinner, a frame every 80 ms,
-    // turned by the typing timer's redraws. "✻" isn't in JetBrains Mono, Ghostty's default: Ghostty takes it from
-    // DejaVu Sans Mono, as it does wherever Claude Code shows it. All of them one cell, so the text doesn't move.
+    // The prompt ends in "❯", groups and one-to-one chats alike. While the other person is typing, the mark is a
+    // braille spinner, a frame every 80 ms, turned by the typing timer's redraws; one cell either way, so the text
+    // doesn't move.
     const typing = !this.pickerOpen && !!this.current && this.typing.has(this.current)
     const mark = typing ? spinnerFrame() : '❯'
     const promptPlain = this.pickerOpen ? '/ ' : name ? `${name} ${mark} ` : `${mark} `
@@ -2257,6 +2258,26 @@ export class Ui {
       ? `${this.ruleChar.repeat(labelCol)}${label}${this.ruleChar.repeat(tail)}`
       : this.ruleChar.repeat(width)
     this.ruleTop.setContent(faint(esc(rule)))
+    // The eyes span 3n - 1 cells (two each, a space between), centred over the name, with a space on either side.
+    const n = this.promptName?.eyes ?? 0
+    const col = this.promptName ? this.promptName.col + Math.max(0, Math.floor((this.promptName.width - (3 * n - 1)) / 2)) : -1
+    const fits = n > 0 && this.ruleChar === '─' && col >= 1 && col + 3 * n <= labelCol
+    this.eyesBoxes.forEach((box, k) => {
+      if (!fits || k >= n) return void box.hide()
+      box.top = num(this.screen.height) - this.bottom
+      box.left = col - 1 + 3 * k
+      box.show()
+    })
+  }
+
+  private redraw() {
+    this.screen.program.clear()
+    this.screen.realloc()
+    this.dirtyMessages = true
+    this.dirtyTabs = true
+    this.drawRules()
+    this.drawInput()
+    this.renderNow()
   }
 
   private openMedia(row: MessageRow) {
