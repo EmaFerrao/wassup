@@ -200,17 +200,21 @@ export function blockCell(idx: Int16Array, cols: number, r: number, c: number): 
   return { ch: '▀', fg: top, bg: bottom, fgAt: ti, bgAt: bi }
 }
 
-/** One image cell to paint in 24-bit colour, at its screen position (0-based). */
-export interface RgbCell { x: number; y: number; ch: string; fg: string; bg: string | null }
+/**
+ * One cell to paint in 24-bit colour, at its screen position (0-based): its character, the SGR parameters that
+ * draw it (from a reset, so nothing carries over) and how many cells the character takes (2 for a wide one).
+ */
+export interface RgbCell { x: number; y: number; ch: string; sgr: string; w: number }
 
 /** blessed's frame buffer: per row, per cell, the attribute code and the character. */
 type CellRows = ([number, string][] | undefined)[]
 
 /**
- * 24-bit colour for half-block images, on terminals that confirmed it (or with WA_COLORS=truecolor). blessed keeps
- * colours to the 256-colour palette, so it still draws the images as halfBlocks lines; after each frame this
- * repaints their cells straight on the terminal with the exact averages, cursor and attributes saved and restored
- * around it, as the Kitty placements are.
+ * 24-bit colour, on terminals that confirmed it (or with WA_COLORS=truecolor), for half-block images and message
+ * bubbles. blessed keeps colours to the 256-colour palette, so it still draws them in it; after each frame this
+ * repaints their cells straight on the terminal with the exact colours, cursor and attributes saved and restored
+ * around it, as the Kitty placements are. Images and bubbles go through the one painter, so they never fight
+ * over a cell.
  *
  * Only what changed is written, or the typing animation, at 25 frames a second, would send megabytes: a cell is
  * repainted when blessed has just rewritten it (its content in the previous frame buffer differs, snapshot taken
@@ -218,7 +222,7 @@ type CellRows = ([number, string][] | undefined)[]
  * terminal's own line insert and delete moves the painting with it; the previous buffer's row is then another
  * array, which counts as rewritten too.
  */
-export class RgbBlocks {
+export class RgbPainter {
   /** What was painted at each screen cell (y * 65536 + x), and the previous buffer's rows that held it. */
   private painted = new Map<number, string>()
   private rows = new Map<number, unknown>()
@@ -227,30 +231,35 @@ export class RgbBlocks {
 
   constructor(private write: (s: string) => void) {}
 
-  snapshot(olines: CellRows) {
+  /**
+   * `lines` is the frame about to be drawn: blessed writes a wide character again whenever its row is redrawn, even
+   * unchanged (it leaves "\0" in its copy for that), so in those rows it no longer counts as still painted.
+   */
+  snapshot(olines: CellRows, lines: CellRows) {
     this.before.clear()
     for (const key of this.painted.keys()) {
       const y = Math.floor(key / 65536), row = olines[y]
       if (!row || row !== this.rows.get(y)) continue
       const cell = row[key % 65536]
-      if (cell) this.before.set(key, `${cell[0]}|${cell[1]}`)
+      if (!cell || (cell[1] === '\0' && (lines[y] as { dirty?: boolean } | undefined)?.dirty)) continue
+      this.before.set(key, `${cell[0]}|${cell[1]}`)
     }
   }
 
-  /** After blessed draws: `cells` are the image cells now in view, with blessed's own copy matching; `olines` its buffer as drawn. */
+  /** After blessed draws: `cells` are the cells now in view to paint, with blessed's own copy matching; `olines` its buffer as drawn. */
   paint(cells: RgbCell[], olines: CellRows) {
     const now = new Map<number, string>()
-    let out = '', lastY = -1, lastX = -2, fg = '', bg: string | null | undefined
+    let out = '', lastY = -1, nextX = -1, sgr = ''
     for (const c of cells) {
-      const key = c.y * 65536 + c.x, sig = `${c.ch}${c.fg}/${c.bg}`
+      const key = c.y * 65536 + c.x, sig = `${c.ch}\u0000${c.sgr}`
       now.set(key, sig)
       const cell = olines[c.y]?.[c.x]
       if (this.painted.get(key) === sig && cell && this.before.get(key) === `${cell[0]}|${cell[1]}`) continue
-      if (c.y !== lastY || c.x !== lastX + 1) out += `\x1b[${c.y + 1};${c.x + 1}H`
-      if (c.fg !== fg) { out += `\x1b[38;2;${c.fg}m`; fg = c.fg }
-      if (c.bg !== bg) { out += c.bg ? `\x1b[48;2;${c.bg}m` : '\x1b[49m'; bg = c.bg }
+      if (c.y !== lastY || c.x !== nextX) out += `\x1b[${c.y + 1};${c.x + 1}H`
+      if (c.sgr !== sgr) { out += `\x1b[${c.sgr}m`; sgr = c.sgr }
       out += c.ch
-      lastY = c.y; lastX = c.x
+      // A wide character moves the terminal's cursor two cells on.
+      lastY = c.y; nextX = c.x + c.w
     }
     this.painted = now
     this.rows.clear()
@@ -259,7 +268,7 @@ export class RgbBlocks {
   }
 }
 
-/** 24-bit colour for images: WA_COLORS=truecolor|256 forces it; otherwise what the terminal confirmed when probed. */
+/** 24-bit colour for images and bubbles: WA_COLORS=truecolor|256 forces it; otherwise what the terminal confirmed when probed. */
 export function detectRgb(confirmed: boolean): boolean {
   const forced = process.env.WA_COLORS
   return forced === 'truecolor' ? true : forced === '256' ? false : confirmed
