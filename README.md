@@ -79,7 +79,9 @@ names in the user's language.
 On startup the client asks the terminal what it can do, assuming nothing from `TERM`. In terminals with the Kitty
 graphics protocol (Ghostty, Kitty, WezTerm, Konsole) images, stickers and thumbnails are shown for real inside the
 panel; elsewhere, and inside Herdr (which doesn't pass the placements through), they are drawn with coloured
-half-blocks. `WA_IMAGES=kitty|blocks|none` forces the mode.
+half-blocks, each the average colour of the area it covers: in 24-bit colour when the terminal confirms it (XTGETTCAP
+or DECRQSS; Herdr does), in the 256-colour palette otherwise. `WA_IMAGES=kitty|blocks|none` forces the mode, and
+`WA_COLORS=truecolor|256` the colours.
 
 ## Writing suggestions
 
@@ -111,7 +113,7 @@ History starts with what WhatsApp sends to new devices. `WA_FULL_HISTORY=1` asks
 | `src/db.ts` | SQLite schema and queries (`node:sqlite`) |
 | `src/ui.ts` | blessed interface: panels, keyboard, mouse, message rendering |
 | `src/format.ts` | WhatsApp markup, dates, colours, line wrapping |
-| `src/image.ts` | Decoding, half-blocks, Kitty graphics protocol |
+| `src/image.ts` | Decoding, half-blocks (24-bit or 256 colours), Kitty graphics protocol |
 | `src/term.ts` | Probing the terminal's capabilities |
 | `src/kittykeys.ts`, `src/paste.ts` | Kitty keyboard protocol and bracketed paste, read before blessed |
 | `src/herdr.ts` | Agent state, titles and tabs in Herdr |
