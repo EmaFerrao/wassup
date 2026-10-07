@@ -118,6 +118,27 @@ export async function paneFocusedHerdr(): Promise<boolean | undefined> {
   return pane?.focused
 }
 
+/**
+ * Moves the focus to the next pane running wassup in this workspace, in the order Herdr shows them (tabs by number,
+ * then the panes of each tab in its own order), from the last back to the first. Panes are told apart by the agent
+ * wassup reports in them. Resolves false when there's no other.
+ */
+export async function focusNextChatHerdr(): Promise<boolean> {
+  if (!inHerdr) return false
+  const ws = env.HERDR_WORKSPACE_ID ?? null
+  const tabs = (await call('tab.list', { workspace_id: ws }) as { tabs?: { tab_id: string; number: number }[] } | undefined)?.tabs ?? []
+  const panes = (await call('pane.list', { workspace_id: ws }) as { panes?: { pane_id: string; tab_id: string; agent?: string }[] } | undefined)?.panes ?? []
+  const order = new Map(tabs.map(t => [t.tab_id, t.number]))
+  const ring = panes.map((p, i) => ({ ...p, i })).filter(p => p.agent === 'wassup')
+    .sort((a, b) => (order.get(a.tab_id) ?? 0) - (order.get(b.tab_id) ?? 0) || a.i - b.i)
+  const at = ring.findIndex(p => p.pane_id === env.HERDR_PANE_ID)
+  if (ring.length < 2 || at < 0) return false
+  const next = ring[(at + 1) % ring.length]!
+  await call('tab.focus', { tab_id: next.tab_id })
+  await call('pane.focus', { pane_id: next.pane_id })
+  return true
+}
+
 /** Switches to the Herdr tab, and the pane in it, where the conversation is already open. */
 export function focusHerdr(tabId: string, paneId?: string) {
   if (!inHerdr) return
