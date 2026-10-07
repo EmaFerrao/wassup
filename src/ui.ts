@@ -1802,12 +1802,13 @@ export class Ui {
   }
 
   // Window title: the active chat, with the typing spinner in front while someone types, or else a dot while there
-  // are unread messages in any chat.
+  // are unread messages in any chat. In Herdr, where the title is the agent's name, no spinner: the agent's status
+  // says it ("working").
   private titleShown = ''
   private updateTitle() {
     const unread = store.listChats().filter(c => c.unread > 0 && (this.fixed ? c.jid === this.current : !c.archived))
     const typing = [...this.typing].filter(jid => !this.fixed || jid === this.current).map(jid => chatName(jid))
-    const mark = typing.length ? `${spinnerFrame()} ` : unread.length ? '● ' : ''
+    const mark = typing.length && !inHerdr ? `${spinnerFrame()} ` : unread.length ? '● ' : ''
     const title = `${mark}${this.current ? chatName(this.current) : 'wassup'}`
     if (title !== this.titleShown) { this.titleShown = title; this.screen.title = title; titleHerdr(title) }
     // In Herdr, alone in its tab, the tab takes the chat's first name, with no state.
