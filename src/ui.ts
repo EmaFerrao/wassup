@@ -1836,8 +1836,8 @@ export class Ui {
     // The selected message gets the background at full width, whoever it's from: the lines arrive here already
     // wrapped to the panel's width, and get padded with spaces up to the edge.
     const decorate = (line: string, row: MessageRow | null) => {
-      if (row && row.id === this.drag?.id && this.drag.dx) line = clipTagged(' '.repeat(this.drag.dx) + line, width - 1)
-      if (row && row.id === selectedId) line = `{${this.selectedBg}-bg}${line}${' '.repeat(padding(line, width - 1))}{/${this.selectedBg}-bg}`
+      if (row && row.id === this.drag?.id && this.drag.dx) line = clipTagged(' '.repeat(this.drag.dx) + line, width)
+      if (row && row.id === selectedId) line = `{${this.selectedBg}-bg}${line}${' '.repeat(padding(line, width))}{/${this.selectedBg}-bg}`
       return line
     }
     const push = (line: string, row: MessageRow | null) => {
@@ -1868,13 +1868,16 @@ export class Ui {
       // My own messages stay flush right: I wrap the lines myself (blessed only wraps from the left) and push each
       // one to the edge; other people's stay on the left, wrapped the same way.
       const mine = row.from_me === 1
-      // The ticks always take two cells, so the time sits in the same column whatever the message's state.
-      const ticks = !mine ? '' : (row.status ?? 0) >= 4 ? '{cyan-fg}✓✓{/cyan-fg}' : (row.status ?? 0) >= 3 ? '✓✓' : (row.status ?? 0) >= 2 ? '✓ ' : `${dim('○')} `
+      // The state after the time of mine, one cell in the time's own faint colour, told apart by shape alone:
+      // "∘" waiting to leave, "›" sent, "✓" delivered, "◉" read. One cell whatever the state, so the time stays put.
+      const status = row.status ?? 0
+      const ticks = !mine ? '' : faint(status >= 4 ? '◉' : status >= 3 ? '✓' : status >= 2 ? '›' : '∘')
       const stamp = mine ? `${faint(fmtTime(row.ts))} ${ticks}` : faint(fmtTime(row.ts))
-      // One column of margin on the right: blessed wraps the line if a closing tag lands on the last column. Mine
-      // stop short of the columns the time and ticks take, with two cells of gap, so no line of theirs (text,
-      // quote, reactions) runs into them; the line that carries the time is the only one reaching the edge.
-      const textWidth = mine ? Math.max(1, width - 1 - 2 - visibleWidth(stamp)) : width - 1
+      // Lines go up to the panel's last column: with wrap off, blessed neither wraps nor cuts a line that fills it,
+      // closing tags included. Mine stop short of the columns the time and its mark take, with two cells of gap,
+      // so no line of theirs (text, quote, reactions) runs into them; the line that carries the time is the only
+      // one reaching the edge.
+      const textWidth = mine ? Math.max(1, width - 2 - visibleWidth(stamp)) : width
       // The last line `out` wrote for this message, as given, so the time can be appended to it afterwards.
       let last: { at: number; line: string } | null = null
       const out = (line: string, r: MessageRow | null) => {
@@ -1924,9 +1927,9 @@ export class Ui {
         const wrapped = waMarkup(row.text).split('\n').flatMap(l => wrapTagged(l, textWidth))
         wrapped.forEach((l, i) => {
           const tw = visibleWidth(l)
-          const withStamp = i === wrapped.length - 1 && tw + 2 + visibleWidth(stamp) <= width - 1
+          const withStamp = i === wrapped.length - 1 && tw + 2 + visibleWidth(stamp) <= width
           const line = withStamp ? `${l}  ${stamp}` : l
-          const edge = withStamp ? width - 1 : textWidth
+          const edge = withStamp ? width : textWidth
           const at = map.length
           push(mine ? alignRight(line, edge) : line, row)
           const start = mine ? padding(line, edge) : 0
@@ -1935,14 +1938,13 @@ export class Ui {
         })
       }
       const note = last as { at: number; line: string } | null
-      if (!stamped && note && visibleWidth(note.line) + 2 + visibleWidth(stamp) <= width - 1) {
+      if (!stamped && note && visibleWidth(note.line) + 2 + visibleWidth(stamp) <= width) {
         const line = `${note.line}  ${stamp}`
-        lines[note.at] = decorate(mine ? alignRight(line, width - 1) : line, row)
+        lines[note.at] = decorate(mine ? alignRight(line, width) : line, row)
         headers.add(note.at); stamped = true
       }
-      // On its own line the time goes straight in, not through the wrapping, which would drop the space that
-      // keeps a single tick in the first tick's column.
-      if (!stamped) { const at = map.length; push(mine ? alignRight(stamp, width - 1) : stamp, row); headers.add(at) }
+      // On its own line the time goes straight in, flush right for mine, without passing through the wrapping.
+      if (!stamped) { const at = map.length; push(mine ? alignRight(stamp, width) : stamp, row); headers.add(at) }
       // Reactions underneath: each emoji with who reacted, or just the count when there were several.
       const rs = reactions.get(row.id)
       if (rs?.length) {
@@ -2041,12 +2043,12 @@ export class Ui {
     // in between) has to paint, and a chat full of photos scrolls at the cost of those cells. In Kitty, with
     // real pixels, its natural size up to 60 columns is enough. The height never exceeds the panel.
     const maxRows = row.type === 'sticker' ? 8 : Math.max(4, this.innerHeight() - 2)
-    const limit = mine && stamp ? Math.max(1, width - 1 - 2 - visibleWidth(stamp)) : width - 1
+    const limit = mine && stamp ? Math.max(1, width - 2 - visibleWidth(stamp)) : width
     const { cols, rows } = this.kitty
       ? cellSize(w, h, Math.min(limit, 60), Math.min(maxRows, 18))
       : cellSize(w, h, Math.min(limit, 40), maxRows, true)
     const pad = mine ? Math.max(0, limit - cols) : 0
-    const tail = stamp && pad + cols + 2 + visibleWidth(stamp) <= width - 1 ? `  ${stamp}` : ''
+    const tail = stamp && pad + cols + 2 + visibleWidth(stamp) <= width ? `  ${stamp}` : ''
     // The image's rows, the last one followed by the time; a blank row is only spaces up to where the time starts.
     const blank = tail ? ' '.repeat(pad + cols) : ''
     if (!d) {
