@@ -6,9 +6,10 @@ import { store, type ChatRow, type MessageRow, type ReactionRow } from './db.js'
 import { chatName, contactName, shortName, canonicalJid, thumbPath, previewPath, hasPreviewImage, mediaFile, jidUser, withMentions, typeLabel, pinTarget, type ConnState } from './wa.js'
 import { inHerdr, reportHerdr, titleHerdr, tabNameHerdr, releaseHerdr, openChatHerdr, focusHerdr, focusNextChatHerdr, paneFocusedHerdr } from './herdr.js'
 import type { Backend } from './backend.js'
-import { waMarkup, clipTagged, esc, colorFor, setTheme, dim, faint, italic, padding, urlsIn, fmtTime, fmtDay, fmtWhen, daysAgo, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, wrapWidth, fold, graphemes, wrapChars } from './format.js'
+import { waMarkup, clipTagged, esc, colorFor, setTheme, dim, faint, italic, padding, fmtTime, fmtDay, fmtWhen, daysAgo, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, wrapWidth, fold, graphemes, wrapChars } from './format.js'
 import { decode, cached, cellSize, halfBlocks, blockGrid, blockCell, detectImageMode, detectRgb, KittyImages, RgbPainter, type Decoded, type ImageMode, type RgbCell } from './image.js'
 import { logger, uiLog } from './log.js'
+import { linksIn, showLinks } from './links.js'
 import { patchBlessedDraw, patchBlessedUnicode } from './unicode.js'
 import type { TermCaps } from './term.js'
 import { emojify, completeEmoji } from './emoji.js'
@@ -1054,8 +1055,9 @@ export class Ui {
     while (b + 1 < xi + cols.end && (ch(b + 1) || line[b + 1]?.[1] === '\x03')) b++
     let run = ''
     for (let cx = a; cx <= b; cx++) run += ch(cx)
-    // Punctuation stuck to the link ("(https://…)") is in the run but not in the URL, and vice versa.
-    return urlsIn(row.text).find(u => u.includes(run) || run.includes(u)) ?? null
+    // Punctuation stuck to the link ("(https://…)") is in the run but not in the link, and vice versa. The run is
+    // the link as shown (clean and short); what's copied is the whole clean link.
+    return linksIn(row.text).find(l => l.shown.includes(run) || run.includes(l.shown))?.url ?? null
   }
 
   // ---------- reactions ----------
@@ -1705,7 +1707,7 @@ export class Ui {
   private excerpt(last: MessageRow, group: boolean): string {
     const who = group && !last.from_me ? `${contactName(last.sender_jid).split(' ')[0]}: ` : ''
     const kind: Record<string, string> = { image: t('image'), video: t('video'), gif: t('gif'), sticker: t('sticker'), document: t('file'), audio: t('audio'), voice: t('voice'), location: t('location'), contact: t('contact'), poll: t('poll') }
-    const text = withMentions(last.text).replace(/\s+/g, ' ')
+    const text = showLinks(withMentions(last.text)).replace(/\s+/g, ' ')
     const body = last.type === 'text' ? text : last.type === 'deleted' ? t('deleted') : kind[last.type] ? `[${kind[last.type]}]${last.text ? ` ${text}` : ''}` : typeLabel(last)
     return `${who}${body}`
   }
@@ -2248,7 +2250,7 @@ export class Ui {
         const [who, text] = row.quoted.split('\t')
         // Who it was from only matters in groups; one-on-one the other person is obvious, and mine don't carry a name either.
         const author = who === this.wa.me || !row.chat_jid.endsWith('@g.us') ? '' : `${esc(contactName(who ?? ''))}: `
-        out(dim(`│ ${author}${esc(truncate(withMentions(text ?? ''), width - 6))}`), row)
+        out(dim(`│ ${author}${esc(truncate(showLinks(withMentions(text ?? '')), width - 6))}`), row)
       }
 
       const type = row.type

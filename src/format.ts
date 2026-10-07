@@ -1,6 +1,7 @@
 import blessed from 'blessed'
 import { t } from './i18n.js'
 import { tameEmoji } from './unicode.js'
+import { URL_RE, cleanUrl, shortUrl } from './links.js'
 
 export const strWidth = (s: string): number => (blessed as unknown as { unicode: { strWidth: (s: string) => number } }).unicode.strWidth(s)
 
@@ -14,16 +15,10 @@ export function esc(s: string): string {
   return tameEmoji(s).replace(/[{}]/g, m => (m === '{' ? '{open}' : '{close}'))
 }
 
-const URL_RE = /(https?:\/\/[^\s<>"')\]]+)/g
-
-/** The URLs in a message's text, as written. */
-export function urlsIn(text: string): string[] {
-  return text.match(URL_RE) ?? []
-}
-
 /**
  * Converts WhatsApp markup into blessed tags: *bold*, _italic_ (for real, via the patch in italic.ts),
- * ~strikethrough~ (gray), `mono` and ```blocks``` (yellow), "> quote" lines (gray) and URLs (blue underline).
+ * ~strikethrough~ (gray), `mono` and ```blocks``` (yellow), "> quote" lines (gray) and URLs (blue underline, clean
+ * of tracking and shortened, see links.ts).
  */
 export function waMarkup(text: string): string {
   const blocks: string[] = []
@@ -32,7 +27,7 @@ export function waMarkup(text: string): string {
     return `\u0000${blocks.length - 1}\u0000`
   })
   s = s.replace(/`([^`\n]+)`/g, '{yellow-fg}$1{/yellow-fg}')
-  s = s.replace(URL_RE, `{underline}{${LINK}-fg}$1{/${LINK}-fg}{/underline}`)
+  s = s.replace(URL_RE, (_m, url: string) => `{underline}{${LINK}-fg}${shortUrl(cleanUrl(url))}{/${LINK}-fg}{/underline}`)
   const inline = (ch: string, open: string, close: string) => {
     const c = ch.replace(/[*~_]/g, '\\$&')
     s = s.replace(new RegExp(`(^|[\\s(\\[{>])${c}(\\S(?:[^${c}\\n]*?\\S)?)${c}(?=$|[\\s.,!?;:)\\]}])`, 'gm'), `$1${open}$2${close}`)

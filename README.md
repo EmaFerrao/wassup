@@ -90,7 +90,10 @@ WhatsApp markup is shown with terminal attributes: `*bold*`, `_italic_`, `~strik
 When sending, write the markup as on the phone. `:name:` codes are replaced by the emoji as soon as the second `:` is
 typed, with names in Portuguese and in English (`:thumbsup:` 👍, `:kissing_heart:` 😘, `:coffee:` ☕ …; the list is in
 `src/emoji.ts`), and classic smileys surrounded by spaces too (`:)`, `;)`, `<3` …). The suggestion list only shows the
-names in the user's language.
+names in the user's language. Links are shown without what only tracks who shared them (`fbclid`, `utm_…`, `igsh`,
+`si` and the many others in [ClearURLs](https://github.com/ClearURLs/Rules)' rules, redirections through a site
+undone) and shortened (`instagram.com/p/DeNKVAJuamr`, a long path cut in the middle); a click copies the whole clean
+link.
 
 ### Images
 
@@ -131,6 +134,7 @@ History starts with what WhatsApp sends to new devices. `WA_FULL_HISTORY=1` asks
 | `src/db.ts` | SQLite schema and queries (`node:sqlite`) |
 | `src/ui.ts` | blessed interface: panels, keyboard, mouse, message rendering |
 | `src/format.ts` | WhatsApp markup, dates, colours, line wrapping |
+| `src/links.ts`, `src/clearurls/` | Links cleaned of tracking and shortened; ClearURLs' rules (LGPL-3.0, from [ClearURLs/Rules](https://github.com/ClearURLs/Rules) at 11086f4, 2026-03-25) |
 | `src/image.ts` | Decoding, half-blocks (24-bit or 256 colours), Kitty graphics protocol |
 | `src/term.ts` | Probing the terminal's capabilities |
 | `src/kittykeys.ts`, `src/paste.ts` | Kitty keyboard protocol and bracketed paste, read before blessed |
