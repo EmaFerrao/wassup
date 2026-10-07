@@ -44,14 +44,15 @@ background colour to pick light or dark shades.
   notice over it and the bell.
 - **Chats**: `/` opens the list, most recent at the bottom, with an excerpt of the last message; typing filters it,
   ignoring accents and case; Enter, Tab, → or a click opens.
-- **Messages**: yours on the right, each in a bubble (images and stickers bare) with WhatsApp Web's colours where the
-  terminal takes 24-bit colour (yours, on a dark theme, toned down to the brightness of theirs) and two discreet greys
-  otherwise, a link's preview image inside it above the text; each day starts with a separator and a blank line. Mouse
-  wheel or PgUp/PgDn; scrolling past the top brings older messages, first the stored ones and then from the phone, and
-  Ctrl+↓ or Ctrl+PgDn goes back to the latest. Clicking an attachment opens it with `xdg-open`, downloading it first
-  if needed. ↑ selects a message: typing replies to it, `:` reacts, Delete opens one of yours for editing. In a group,
-  a click on a member's name opens the chat with them. The `☺` next to a message under the pointer opens its quick
-  reactions; a double click, dragging it to the right, or → with it selected, starts a reply.
+- **Messages**: yours on the right, each in a bubble with WhatsApp Web's colours where the terminal takes 24-bit
+  colour (yours, on a dark theme, toned down to the brightness of theirs) and two discreet greys otherwise, with the
+  time and its state outside it and a link's preview image inside it above the text; images, stickers, videos, GIFs
+  and emoji on their own go bare; each day starts with a separator and a blank line. Mouse wheel or PgUp/PgDn;
+  scrolling past the top brings older messages, first the stored ones and then from the phone, and Ctrl+↓ or Ctrl+PgDn
+  goes back to the latest. Clicking an attachment opens it with `xdg-open`, downloading it first if needed. ↑ selects
+  a message: typing replies to it, `:` reacts, Delete opens one of yours for editing. In a group, a click on a
+  member's name opens the chat with them. The `☺` next to a message under the pointer opens its quick reactions; a
+  double click, dragging it to the right, or → with it selected, starts a reply.
 - **Input**: grows with the text up to half the screen; the rule above it says `online` while you show as online;
   Enter sends, Shift+Enter or Ctrl+J start a new line, and pasting several lines keeps them. Ctrl-U clears,
   Shift-Backspace deletes a word (with the Kitty keyboard protocol). `:` and two letters open the emoji list; ↑/↓,
