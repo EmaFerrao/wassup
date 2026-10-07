@@ -625,7 +625,7 @@ export class Ui {
     if (active) this.typing.set(jid, null)
     else if (this.typing.has(jid)) this.typing.set(jid, Date.now())
     // The input is redrawn while the active chat's person types, and once more when their entry goes, so the
-    // prompt's pencil gives way to the "❯" again.
+    // rainbow on the prompt's name gives way to its plain colour again.
     const mine = () => !!this.current && this.typing.has(this.current)
     const frame = (input: boolean) => { this.drawTabs(); if (input) this.drawInput(); this.screen.render() }
     if (this.typing.size && !this.typingTimer) {
@@ -1665,20 +1665,17 @@ export class Ui {
 
   private drawInput() {
     // One line at minimum (grows with the text), the prompt on the first ("Ema ❯ ": the chat's first name, with the
-    // rainbow across it and "✎" against it in place of the " ❯" while they type, or just "❯ " for a chat known only by a
+    // rainbow across it while they type; "Lourinhasaurus ∴ " for a group; just "❯ " for a chat known only by a
     // number), text wrapped by word (never mid-word) and continuation indented under the text.
     // When the text has more lines than fit, the ones around the cursor are shown, with the cursor on the bottom one whenever possible. With
     // "chats" open, the same line is used to type the filter. When replying, reacting or editing, the line
     // above the input says which message (`headerBox`), so the input itself keeps its rows for the text.
     const w = num(this.input.width) - num(this.input.iwidth) - 1
     const name = this.pickerOpen || !this.current ? null : shortName(this.current)
-    // The typing state is looked up here too, so the prompt's width matches what's drawn below.
-    const typing = !this.pickerOpen && this.current ? this.typing.get(this.current) : undefined
-    // The pencil sits against the name ("Ema✎"), the "❯" a cell away ("Ema ❯"); the prompt keeps its width either
-    // way, so the text doesn't shift when they start or stop.
-    const mark = typing !== undefined ? '✎' : '❯'
-    const promptMark = (n: string | null) => n ? (typing !== undefined ? `${n}${mark}  ` : `${n} ${mark} `) : `${mark} `
-    const promptPlain = this.pickerOpen ? '/ ' : promptMark(name)
+    // Groups end the prompt in "∴", three dots like three people; one-to-one chats in "❯". Both are one cell wide
+    // in common monospace fonts (a glyph a font lacks falls back to another and may overflow its cell).
+    const mark = this.current?.endsWith('@g.us') ? '∴' : '❯'
+    const promptPlain = this.pickerOpen ? '/ ' : name ? `${name} ${mark} ` : `${mark} `
     const pw = this.promptWidth = strWidth(promptPlain)
     const target = this.pickerOpen ? null : this.replyTo ?? this.reactTo ?? this.editing
     const header = !target ? null : this.editing
@@ -1740,10 +1737,10 @@ export class Ui {
       return before + '{inverse}' + esc(under) + '{/inverse}' + esc(text(line.slice(col + 1)))
     }
     const visible = lines.slice(this.inputTop, this.inputTop + rowsAvail)
-    // The prompt says what the line does: the name and "❯" type, "/" filters the chats; while the other person
-    // types, the mark is a pencil against the name and the rainbow runs across both alike.
-    const plain = promptMark(name), body = plain.trimEnd()
-    const prompt = this.pickerOpen ? '/ ' : `${typing !== undefined ? this.rainbow(body, typing) : esc(body)}${plain.slice(body.length)}`
+    // The prompt says what the line does: the name and "❯" or "∴" type, "/" filters the chats; while the other
+    // person types, the rainbow runs across the name.
+    const typing = !this.pickerOpen && this.current ? this.typing.get(this.current) : undefined
+    const prompt = this.pickerOpen ? '/ ' : name ? `${typing !== undefined ? this.rainbow(name, typing) : esc(name)} ${mark} ` : `${mark} `
     const out = visible.map((l, i) => (this.inputTop + i === 0 ? prompt : ' '.repeat(pw)) + render(l, this.inputTop + i))
     this.input.setContent(out.join('\n'))
     // The header (reply, react, edit) floats on the line right above the input.
