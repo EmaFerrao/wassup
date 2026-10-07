@@ -168,11 +168,6 @@ export function wrapWidth(s: string): number {
   return wrapUnits(stripTags(s))
 }
 
-/**
- * Wraps a line with tags into lines of width ≤ `width`, by words (or by characters when the word doesn't
- * fit), measured as blessed measures it (`wrapUnits`). Tags stay where they were; blessed keeps their
- * state across lines.
- */
 /** Cuts a tagged line to `width` visible columns, letting tags through and closing whatever is open at the end. */
 export function clipTagged(s: string, width: number): string {
   let out = '', w = 0
@@ -189,13 +184,33 @@ export function clipTagged(s: string, width: number): string {
   return out + '{/}'
 }
 
+/**
+ * Wraps a line with tags into lines of width ≤ `width`, by words (or by characters when the word doesn't fit),
+ * measured as blessed measures it (`wrapUnits`). Each line stands on its own: what's open where it breaks (blessed's
+ * tags, innermost last, and the italic's raw SGR) is closed at its end and opened again at the start of the next, so
+ * what's added after a line's text (a bubble's spare cells, the time, a mark) doesn't carry on an underline or a
+ * colour from a link cut in two.
+ */
 export function wrapTagged(s: string, width: number): string[] {
   const lines: string[] = []
-  let cur = '', curW = 0
-  const newline = () => { lines.push(cur.replace(/\s+$/, '')); cur = ''; curW = 0 }
+  const open: string[] = []
+  let italic = false
+  const track = (tag: string) => {
+    if (tag === '\x1b[3m') italic = true
+    else if (tag === '\x1b[23m' || tag === '\x1b[0m' || tag === '\x1b[m') italic = false
+    else if (tag === '{/}') open.length = 0
+    else if (tag.startsWith('{/')) { const i = open.lastIndexOf(tag.slice(2, -1)); if (i >= 0) open.splice(i, 1) }
+    else if (tag.startsWith('{')) open.push(tag.slice(1, -1))
+  }
+  let start = '', cur = '', curW = 0
+  const newline = () => {
+    lines.push(cur.replace(/\s+$/, '') + (italic ? '\x1b[23m' : '') + [...open].reverse().map(t => `{/${t}}`).join(''))
+    start = cur = open.map(t => `{${t}}`).join('') + (italic ? '\x1b[3m' : '')
+    curW = 0
+  }
   const emit = (piece: string, w: number) => {
     if (curW + w <= width) { cur += piece; curW += w; return }
-    if (w <= width) { newline(); cur = piece; curW = w; return }
+    if (w <= width) { newline(); cur += piece; curW = w; return }
     for (const ch of piece) {
       const cw = wrapUnits(ch)
       if (curW + cw > width) newline()
@@ -206,7 +221,7 @@ export function wrapTagged(s: string, width: number): string[] {
     if (!tok) continue
     if (TAG_RE.test(tok)) {
       if (tok === '{open}' || tok === '{close}') emit(tok, 1)
-      else cur += tok
+      else { cur += tok; track(tok) }
       continue
     }
     for (const piece of tok.split(/(\s+)/)) {
@@ -215,7 +230,7 @@ export function wrapTagged(s: string, width: number): string[] {
       emit(piece, wrapUnits(piece))
     }
   }
-  if (cur || !lines.length) lines.push(cur.replace(/\s+$/, ''))
+  if (cur !== start || !lines.length) lines.push(cur.replace(/\s+$/, ''))
   return lines
 }
 
