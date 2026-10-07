@@ -53,6 +53,8 @@ interface ClinesBox extends blessed.Widgets.BoxElement {
 /** The sign that someone is typing, in their tab and the prompt: the classic braille dots spinner, a frame every 80 ms. */
 const SPINNER = [...'⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏']
 const spinnerFrame = () => SPINNER[Math.floor(Date.now() / 80) % SPINNER.length]!
+/** At most this many 👀 over a group's name, however many of its members are online. */
+const EYES_MAX = 5
 /** How many of a chat's latest messages the panel draws at first, and how many more each scroll past the top adds. */
 const PAGE = 300
 /** The notice for a message in another chat: time to appear, stay, and disappear, in milliseconds. */
@@ -134,6 +136,17 @@ export class Ui {
   /** The faint rule above the input, across the whole width, which also says when this device shows as online. */
   private ruleTop!: blessed.Widgets.BoxElement
   private ruleChar = '─'
+  /** Where the prompt's name sits (screen column and width) and how many 👀 go on the rule above it; null for none. */
+  private promptName: { col: number; width: number; eyes: number } | null = null
+  /**
+   * The 👀 over the name, each in a small box of its own floating over the rule: blessed leaves the last cell of a
+   * line blank when it holds a wide character, which inside the rule lost its last dash, and counts each emoji one
+   * cell too wide, which cut the third of three in one box. One per box, " 👀" four cells wide, every three cells:
+   * each box's blank last cell lies under the next one's leading space, so the rule reads "── 👀 👀 👀 ──".
+   */
+  private eyesBoxes: blessed.Widgets.BoxElement[] = []
+  /** Per group, how many of its followed members are online, for as many 👀 (up to EYES_MAX). */
+  private groupOnline = new Map<string, number>()
   private ghostTimer: NodeJS.Timeout | undefined
   private ghostAbort: AbortController | undefined
   /** Right-arrow presses with the next suggestion still on the way: accepted on arrival, one per arrow, so → → → correct in a chain. */
@@ -212,7 +225,7 @@ export class Ui {
   /** What's left unsent in each chat: switching tabs swaps the input, so nothing goes to the wrong person. */
   private drafts = new Map<string, { value: string; cursor: number }>()
   private reactTo: MessageRow | null = null
-  /** Columns the prompt takes on the input's first line ("Ema ◉ "), and the continuation lines' indent. */
+  /** Columns the prompt takes on the input's first line ("Ema ❯ "), and the continuation lines' indent. */
   private promptWidth = 2
   private images: ImageSlot[] = []
   private mode: ImageMode
@@ -307,6 +320,7 @@ export class Ui {
     this.ruleChar = caps.utf8 ? '─' : '-'
     // No wrapping: the rule fills its width, and with the space around "online" blessed would break it there.
     this.ruleTop = blessed.box({ parent: this.screen, top: `100%-${this.bottom}`, left: 0, right: 0, height: 1, tags: true, wrap: false })
+    this.eyesBoxes = Array.from({ length: EYES_MAX }, () => blessed.box({ parent: this.screen, top: 0, left: 0, width: 4, height: 1, wrap: false, hidden: true, content: ' 👀' }))
     this.drawRules()
     this.picker = blessed.list({
       parent: this.screen, top: this.barRows, left: 0, right: 0, height: `100%-${this.bottom + this.barRows + 1}`, padding: { left: 1 }, hidden: true,
@@ -564,6 +578,10 @@ export class Ui {
     this.wa.on('chats', () => { this.dirtyTabs = true; if (this.pickerOpen) this.refreshPicker(); this.scheduleRender() })
     this.wa.on('typing', (jid, who) => this.onTyping(jid, who.length > 0))
     this.wa.on('available', on => { this.available = on; this.drawRules(); this.screen.render() })
+    this.wa.on('groupOnline', (jid, n) => {
+      this.groupOnline.set(jid, n)
+      if (jid === this.current) { this.drawInput(); this.screen.render() }
+    })
     this.wa.on('presence', (jid, on) => {
       if (on) this.online.add(jid); else this.online.delete(jid)
       if (jid === this.current) { this.drawInput(); this.screen.render() }
@@ -628,7 +646,7 @@ export class Ui {
     // that clears it. Typing ends as if they'd stopped; online comes back once open, from the presence
     // subscriptions renewed below.
     for (const jid of [...this.typing]) this.onTyping(jid, false)
-    if (this.online.size) { this.online.clear(); this.drawInput() }
+    if (this.online.size || this.groupOnline.size) { this.online.clear(); this.groupOnline.clear(); this.drawInput() }
     if (state === 'qr' && this.wa.qr) {
       QRCode.toString(this.wa.qr, { type: 'terminal', small: true }, (err, qr) => {
         if (err) { logger.error({ err }, 'qr'); return }
@@ -1710,9 +1728,9 @@ export class Ui {
   }
 
   private drawInput() {
-    // One line at minimum (grows with the text), the prompt on the first ("Ema ◉ ": the chat's first name, in the
-    // colour it has in groups, with a braille spinner for the mark while they type, "Ema ○ " while they're not
-    // online; "Lourinhasaurus ✻ " for a group; just "◉ " or "○ " for a chat known only by a number), text wrapped
+    // One line at minimum (grows with the text), the prompt on the first ("Ema ❯ ": the chat's first name, in the
+    // colour it has in groups, with a braille spinner for the mark while they type and 👀 above it on the rule while
+    // they're online; "Lourinhasaurus ❯ " for a group; just "❯ " for a chat known only by a number), text wrapped
     // by word (never mid-word) and continuation indented under the text.
     // When the text has more lines than fit, the ones around the cursor are shown, with the cursor on the bottom one whenever possible. With
     // "chats" open, the same line is used to type the filter. When replying, reacting or editing, the line
@@ -1725,7 +1743,7 @@ export class Ui {
     // turned by the typing timer's redraws. "✻" isn't in JetBrains Mono, Ghostty's default: Ghostty takes it from
     // DejaVu Sans Mono, as it does wherever Claude Code shows it. All of them one cell, so the text doesn't move.
     const typing = !this.pickerOpen && !!this.current && this.typing.has(this.current)
-    const mark = typing ? spinnerFrame() : this.current?.endsWith('@g.us') ? '✻' : this.online.has(this.current!) ? '◉' : '○'
+    const mark = typing ? spinnerFrame() : '❯'
     const promptPlain = this.pickerOpen ? '/ ' : name ? `${name} ${mark} ` : `${mark} `
     const pw = this.promptWidth = strWidth(promptPlain)
     const target = this.pickerOpen ? null : this.replyTo ?? this.reactTo ?? this.editing
@@ -1788,7 +1806,7 @@ export class Ui {
       return before + '{inverse}' + esc(under) + '{/inverse}' + esc(text(line.slice(col + 1)))
     }
     const visible = lines.slice(this.inputTop, this.inputTop + rowsAvail)
-    // The prompt says what the line does: the name and "◉", "○" or "✻" type, "/" filters the chats. The name is in
+    // The prompt says what the line does: the name and "❯" type, "/" filters the chats. The name is in
     // the colour it has as a sender in groups (colorFor of the same jid; a group's own jid for a group).
     const color = this.current ? colorFor(this.current) : 0
     const prompt = this.pickerOpen ? '/ ' : name ? `{${color}-fg}${esc(name)}{/${color}-fg} ${mark} ` : `${mark} `
@@ -2214,12 +2232,17 @@ export class Ui {
     this.rgbBlocks.paint(cells, olines)
   }
 
-  /** The rule above the input; while this device shows as online, it says so near its right end. */
+  /**
+   * The rule above the input: "online" near its right end while this device shows as online, and 👀 centred over
+   * the prompt's name while the person of the chat is online, or one per member online in a group (only with a
+   * UTF-8 locale: it's a two-cell emoji from the emoji font), in eyesBoxes.
+   */
   private drawRules() {
     const width = Math.max(0, num(this.screen.width))
     const label = ` ${t('online')} `, tail = 2
-    const rule = this.available && width >= label.length + tail + 4
-      ? `${this.ruleChar.repeat(width - label.length - tail)}${label}${this.ruleChar.repeat(tail)}`
+    const labelCol = this.available && width >= label.length + tail + 4 ? width - label.length - tail : width
+    const rule = labelCol < width
+      ? `${this.ruleChar.repeat(labelCol)}${label}${this.ruleChar.repeat(tail)}`
       : this.ruleChar.repeat(width)
     this.ruleTop.setContent(faint(esc(rule)))
   }

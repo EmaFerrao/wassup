@@ -151,6 +151,7 @@ const q = {
   findMessage: db.prepare(`SELECT * FROM messages WHERE id = ? LIMIT 1`),
   listMessages: db.prepare(`SELECT * FROM (SELECT * FROM messages WHERE chat_jid = ? ORDER BY ts DESC LIMIT ?) ORDER BY ts ASC`),
   countMessages: db.prepare(`SELECT COUNT(*) AS n FROM messages WHERE chat_jid = ?`),
+  recentSenders: db.prepare(`SELECT sender_jid FROM messages WHERE chat_jid = ? AND from_me = 0 AND sender_jid <> '' GROUP BY sender_jid ORDER BY MAX(ts) DESC LIMIT ?`),
   oldestMessage: db.prepare(`SELECT * FROM messages WHERE chat_jid = ? ORDER BY ts ASC LIMIT 1`),
   listMedia: db.prepare(`SELECT * FROM messages WHERE chat_jid = ? AND media_mime IS NOT NULL ORDER BY ts ASC`),
   unreadIncoming: db.prepare(`SELECT * FROM messages WHERE chat_jid = ? AND from_me = 0 ORDER BY ts DESC LIMIT ?`),
@@ -246,6 +247,10 @@ export const store = {
   /** The chat's latest `limit` messages, oldest first; -1 for all of them. */
   listMessages(chat: string, limit = 300): MessageRow[] {
     return q.listMessages.all(chat, limit) as unknown as MessageRow[]
+  },
+  /** The other people who wrote in a chat, most recent first. */
+  recentSenders(chat: string, limit: number): string[] {
+    return (q.recentSenders.all(chat, limit) as { sender_jid: string }[]).map(r => r.sender_jid)
   },
   countMessages(chat: string): number {
     return (q.countMessages.get(chat) as { n: number }).n
