@@ -10,8 +10,8 @@ export const lang: Lang = /^pt/i.test(locale) ? 'pt' : 'en'
 
 const STRINGS = {
   help: {
-    pt: 'Tab muda de tab (com texto, aceita a sugestão) · / conversas · Esc fecha · PgUp/PgDn histórico · ↑ ou clique selecciona mensagem, escrever responde, : reage · :fixe: emoji',
-    en: 'Tab switches tabs (with text, accepts the suggestion) · / chats · Esc closes · PgUp/PgDn history · ↑ or click selects a message, typing replies, : reacts · :thumbsup: emoji',
+    pt: 'Tab muda de tab (com texto, aceita a sugestão) · / conversas · Esc fecha · PgUp/PgDn histórico, Ctrl+↓ fim · ↑ ou clique selecciona mensagem, escrever responde, : reage · :fixe: emoji',
+    en: 'Tab switches tabs (with text, accepts the suggestion) · / chats · Esc closes · PgUp/PgDn history, Ctrl+↓ end · ↑ or click selects a message, typing replies, : reacts · :thumbsup: emoji',
   },
   connecting: { pt: 'a ligar…', en: 'connecting…' },
   waitingQr: { pt: 'à espera do QR', en: 'waiting for the QR' },

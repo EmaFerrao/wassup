@@ -706,6 +706,13 @@ export class Ui {
     }
     if (k === 'pageup') { this.msgBox.scroll(-(this.innerHeight() - 1)); if (this.msgBox.childBase === 0) this.loadOlder(); return this.screen.render() }
     if (k === 'pagedown') { this.msgBox.scroll(this.innerHeight() - 1); return this.screen.render() }
+    // Ctrl+↓ or Ctrl+PgDn: straight to the latest message, leaving any selection.
+    if ((k === 'C-down' || k === 'C-pagedown') && !this.pickerOpen && this.current) {
+      if (this.selected) this.select(null)
+      this.atBottom = true
+      this.dirtyMessages = true
+      return this.renderNow()
+    }
     // Tab cycles through the open tabs; with the picker open it goes back to the active tab. New chats open with "/".
     // With text in the input, Tab accepts the suggestion in view: the emoji list, or the model's; with no text, it
     // switches tabs. The right arrow, with the cursor already at the end, does the same as Tab; mid-text it keeps
