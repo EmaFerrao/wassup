@@ -139,7 +139,12 @@ const q = {
       media_name = COALESCE(excluded.media_name, messages.media_name),
       media_w = COALESCE(excluded.media_w, messages.media_w),
       media_h = COALESCE(excluded.media_h, messages.media_h),
-      status = COALESCE(excluded.status, messages.status),
+      -- A state only moves forward (see setStatus): another copy of the message mustn't take it back.
+      status = CASE
+        WHEN excluded.status IS NULL THEN messages.status
+        WHEN messages.status IS NULL THEN excluded.status
+        WHEN excluded.status = 0 THEN CASE WHEN messages.status <= 1 THEN 0 ELSE messages.status END
+        ELSE MAX(messages.status, excluded.status) END,
       raw = excluded.raw`),
   hasMessage: db.prepare(`SELECT 1 FROM messages WHERE chat_jid = ? AND id = ?`),
   getMessage: db.prepare(`SELECT * FROM messages WHERE chat_jid = ? AND id = ?`),
@@ -151,7 +156,17 @@ const q = {
   unreadIncoming: db.prepare(`SELECT * FROM messages WHERE chat_jid = ? AND from_me = 0 ORDER BY ts DESC LIMIT ?`),
   setMedia: db.prepare(`UPDATE messages SET media_path = ?, media_w = ?, media_h = ?, media_err = 0 WHERE chat_jid = ? AND id = ?`),
   setMediaErr: db.prepare(`UPDATE messages SET media_err = 1 WHERE chat_jid = ? AND id = ?`),
-  setStatus: db.prepare(`UPDATE messages SET status = ? WHERE chat_jid = ? AND id = ?`),
+  setStatus: db.prepare(`UPDATE messages SET status = CASE
+      WHEN :s = 0 THEN CASE WHEN COALESCE(status, 0) <= 1 THEN 0 ELSE status END
+      ELSE MAX(COALESCE(status, 0), :s) END
+    WHERE chat_jid = :chat AND id = :id`),
+  markReadBefore: db.prepare(`UPDATE messages SET status = 4 WHERE chat_jid = ? AND from_me = 1 AND status IN (2, 3) AND ts <= ?`),
+  // Startup repair, safe to repeat: one-to-one, my sent or delivered messages before one of mine that was read;
+  // groups, my pending messages followed by any other message in the group, which the server must have taken.
+  repairRead: db.prepare(`UPDATE messages SET status = 4 WHERE from_me = 1 AND status IN (2, 3) AND chat_jid NOT LIKE '%@g.us'
+    AND ts <= (SELECT MAX(n.ts) FROM messages n WHERE n.chat_jid = messages.chat_jid AND n.from_me = 1 AND n.status >= 4)`),
+  repairGroupPending: db.prepare(`UPDATE messages SET status = 2 WHERE from_me = 1 AND status = 1 AND chat_jid LIKE '%@g.us'
+    AND EXISTS (SELECT 1 FROM messages n WHERE n.chat_jid = messages.chat_jid AND n.ts > messages.ts)`),
   setType: db.prepare(`UPDATE messages SET type = ?, text = ? WHERE chat_jid = ? AND id = ?`),
   lastMessage: db.prepare(`SELECT * FROM messages WHERE chat_jid = ? ORDER BY ts DESC LIMIT 1`),
   setReaction: db.prepare(`
@@ -250,8 +265,21 @@ export const store = {
   setMediaErr(chat: string, id: string) {
     q.setMediaErr.run(chat, id)
   },
+  /**
+   * A message's delivery state, which only moves forward: receipts arrive out of order (a delivery receipt from
+   * another of their devices after the read one), and taking the last as it came put read messages back to
+   * delivered or sent. The error state is the exception, and only replaces pending, so a failed send still shows.
+   */
   setStatus(chat: string, id: string, status: number) {
-    q.setStatus.run(status, chat, id)
+    q.setStatus.run({ s: status, chat, id })
+  },
+  /** Someone who read one of my messages read the ones before it too: my sent or delivered ones up to `ts` become read. */
+  markReadBefore(chat: string, ts: number) {
+    q.markReadBefore.run(chat, ts)
+  },
+  /** The same rules on what's already stored; returns how many messages moved. */
+  repairStatuses(): { read: number; groupSent: number } {
+    return { read: Number(q.repairRead.run().changes), groupSent: Number(q.repairGroupPending.run().changes) }
   },
   setType(chat: string, id: string, type: string, text: string) {
     q.setType.run(type, text, chat, id)

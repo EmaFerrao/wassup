@@ -303,7 +303,24 @@ export class Wa extends EventEmitter<WaEvents> {
   private stopped = false
 
   async start() {
+    // Only the server process writes, so the stored delivery states are put right here, once per start.
+    const fixed = store.repairStatuses()
+    if (fixed.read || fixed.groupSent) logger.info(fixed, 'delivery states repaired')
     await this.connect()
+  }
+
+  /**
+   * Read receipts in one-to-one chats: whoever read one of my messages read the earlier ones too, which a receipt
+   * that went missing or arrived out of order would otherwise leave behind. Takes my messages read now, per chat,
+   * and moves my sent or delivered ones up to the latest of them to read, once per chat and batch.
+   */
+  private settleReads(rows: Iterable<MessageRow | undefined | null>) {
+    const latest = new Map<string, number>()
+    for (const r of rows) {
+      if (!r || !r.from_me || (r.status ?? 0) < 4 || this.isGroup(r.chat_jid)) continue
+      latest.set(r.chat_jid, Math.max(latest.get(r.chat_jid) ?? 0, r.ts))
+    }
+    for (const [chat, ts] of latest) store.markReadBefore(chat, ts)
   }
 
   /**
@@ -405,7 +422,13 @@ export class Wa extends EventEmitter<WaEvents> {
         for (const m of lidPnMappings ?? []) store.setLid(jidNormalizedUser(m.lid), jidNormalizedUser(m.pn))
         for (const c of contacts) this.upsertContact(c)
         for (const c of chats) this.upsertChat(c)
-        for (const m of messages) if (!storeReaction(m, this.me) && this.storeMessage(m, false)) stored++
+        const rows: MessageRow[] = []
+        for (const m of messages) {
+          if (storeReaction(m, this.me)) continue
+          const row = this.storeMessage(m, false)
+          if (row) { stored++; rows.push(row) }
+        }
+        this.settleReads(rows)
       })
       this.emit('chats')
       this.emit('messages', '*')
@@ -446,14 +469,17 @@ export class Wa extends EventEmitter<WaEvents> {
       const touched = new Set<string>()
       const reactions: Reaction[] = []
       store.transaction(() => {
+        const rows: MessageRow[] = []
         for (const m of messages) {
           const reacted = storeReaction(m, this.me)
           if (reacted) { touched.add(reacted.chatJid); if (type === 'notify') reactions.push(reacted); continue }
           const row = this.storeMessage(m, type === 'notify')
           if (!row) continue
+          rows.push(row)
           touched.add(row.chat_jid)
           if (type === 'notify' && !row.from_me) this.emit('notify', row.chat_jid, row)
         }
+        this.settleReads(rows)
       })
       for (const jid of touched) this.emit('messages', jid)
       for (const r of reactions) this.emit('reaction', r.chatJid, r.msgId, r.senderJid, r.emoji)
@@ -462,11 +488,35 @@ export class Wa extends EventEmitter<WaEvents> {
 
     sock.ev.on('messages.update', updates => {
       const touched = new Set<string>()
-      for (const u of updates) {
-        if (!u.key.id || !u.key.remoteJid) continue
-        const chatJid = canonicalJid(u.key.remoteJid, u.key.remoteJidAlt)
-        if (u.update.status != null) { store.setStatus(chatJid, u.key.id, u.update.status); touched.add(chatJid) }
-      }
+      store.transaction(() => {
+        const rows: (MessageRow | undefined)[] = []
+        for (const u of updates) {
+          if (!u.key.id || !u.key.remoteJid) continue
+          const chatJid = canonicalJid(u.key.remoteJid, u.key.remoteJidAlt)
+          if (u.update.status == null) continue
+          store.setStatus(chatJid, u.key.id, u.update.status)
+          rows.push(store.getMessage(chatJid, u.key.id))
+          touched.add(chatJid)
+        }
+        this.settleReads(rows)
+      })
+      for (const jid of touched) this.emit('messages', jid)
+    })
+
+    // Receipts in groups come one participant at a time, here rather than in messages.update. Any of them for a
+    // message of mine means the server took it: it leaves pending for sent. Delivered and read in a group need
+    // every participant, which isn't tracked.
+    sock.ev.on('message-receipt.update', receipts => {
+      const touched = new Set<string>()
+      store.transaction(() => {
+        for (const { key } of receipts) {
+          if (!key.id || !key.remoteJid || !this.isGroup(key.remoteJid)) continue
+          const row = store.getMessage(key.remoteJid, key.id)
+          if (!row?.from_me || (row.status ?? 0) >= 2) continue
+          store.setStatus(key.remoteJid, key.id, 2)
+          touched.add(key.remoteJid)
+        }
+      })
       for (const jid of touched) this.emit('messages', jid)
     })
 
