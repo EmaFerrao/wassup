@@ -27,6 +27,8 @@ export interface WaEvents {
   reaction: [chatJid: string, msgId: string, senderJid: string, emoji: string]
   /** Whether the person of a one-to-one chat is online, as far as WhatsApp lets this device know. */
   presence: [chatJid: string, online: boolean]
+  /** Whether this device shows as online to the others: from activity in a terminal until two idle minutes. */
+  available: [on: boolean]
   /** Only from the remote client: the server process disappeared. */
   lost: []
 }
@@ -402,7 +404,7 @@ export class Wa extends EventEmitter<WaEvents> {
         this.me = jidNormalizedUser(sock.user?.id ?? '')
         if (sock.user?.lid) store.setLid(jidNormalizedUser(sock.user.lid), this.me)
         // Baileys announces "unavailable" on connect; it's activity in the terminal that sets it back to available.
-        this.available = false
+        this.markAvailable(false)
         this.setState('open', this.me)
         this.refreshGroups().catch(e => logger.warn({ e }, 'refreshGroups'))
         this.resolveLidContacts().catch(e => logger.warn({ e }, 'resolveLidContacts'))
@@ -411,6 +413,7 @@ export class Wa extends EventEmitter<WaEvents> {
         const loggedOut = code === DisconnectReason.loggedOut
         logger.warn({ code, err: lastDisconnect?.error?.message }, 'connection closed')
         this.dropOnline()
+        this.markAvailable(false)
         if (this.stopped) return
         if (code === DisconnectReason.connectionReplaced) {
           // Another instance connected with these credentials. Reconnecting here would just kick it out and get kicked out again.
@@ -709,12 +712,19 @@ export class Wa extends EventEmitter<WaEvents> {
 
   private setAvailable(on: boolean) {
     if (on === this.available || !this.sock) return
-    this.available = on
+    this.markAvailable(on)
     const sock = this.sock
     sock.sendPresenceUpdate(on ? 'available' : 'unavailable')
       .then(() => { if (on) for (const jid of this.subscribed) sock.presenceSubscribe(jid).catch(e => logger.warn({ e, jid }, 'presenceSubscribe')) })
       .catch(e => logger.warn({ e }, 'sendPresenceUpdate'))
     if (!on) this.dropOnline()
+  }
+
+  /** Records this device's own presence and tells the terminals, which show it in the cursor. */
+  private markAvailable(on: boolean) {
+    if (on === this.available) return
+    this.available = on
+    this.emit('available', on)
   }
 
   private setOnline(chatJid: string, on: boolean) {
@@ -742,6 +752,8 @@ export class Wa extends EventEmitter<WaEvents> {
     this.subscribed.add(chatJid)
     this.sock?.presenceSubscribe(chatJid).catch(e => logger.warn({ e, chatJid }, 'presenceSubscribe'))
     if (this.online.get(chatJid)) this.emit('presence', chatJid, true)
+    // And this device's own presence, which such a terminal doesn't know either.
+    this.emit('available', this.available)
   }
 
   async markRead(chatJid: string) {

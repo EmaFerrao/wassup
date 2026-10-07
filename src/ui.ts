@@ -229,6 +229,14 @@ export class Ui {
   private typing = new Set<string>()
   /** One-to-one chats whose person is online right now, for the prompt's mark. */
   private online = new Set<string>()
+  /**
+   * Whether this device shows as online to the others, and the input cursor's blink that says so: while online it
+   * blinks, drawn and hidden on a clock of its own (the terminal's blink attribute can't be confirmed when probing),
+   * and each key brings it back lit; while not, it stays lit.
+   */
+  private available = false
+  private cursorOn = true
+  private blinkTimer: NodeJS.Timeout | undefined
   private typingTimer: NodeJS.Timeout | undefined
   private fgRgb: Rgb
   private bgRgb: Rgb
@@ -375,7 +383,7 @@ export class Ui {
 
   private bindEvents() {
     this.bindDiagnostics()
-    this.screen.on('keypress', (ch: string, key: blessed.Widgets.Events.IKeyEventArg) => this.onKey(ch, key))
+    this.screen.on('keypress', (ch: string, key: blessed.Widgets.Events.IKeyEventArg) => { if (this.available) this.restartBlink(); this.onKey(ch, key) })
     // The picker list has its position and height calculated by hand: it's recomputed when the terminal resizes.
     this.screen.on('resize', () => { this.dirtyMessages = true; this.dirtyTabs = true; this.drawRules(); if (this.pickerOpen) this.refreshPicker(); this.scheduleRender() })
     this.screen.on('prerender', () => this.rgbBlocks?.snapshot(this.screenRows('olines')))
@@ -549,6 +557,7 @@ export class Ui {
     this.wa.on('connection', (state, detail) => this.onConnection(state, detail))
     this.wa.on('chats', () => { this.dirtyTabs = true; if (this.pickerOpen) this.refreshPicker(); this.scheduleRender() })
     this.wa.on('typing', (jid, who) => this.onTyping(jid, who.length > 0))
+    this.wa.on('available', on => { this.available = on; this.restartBlink() })
     this.wa.on('presence', (jid, on) => {
       if (on) this.online.add(jid); else this.online.delete(jid)
       if (jid === this.current) { this.drawInput(); this.screen.render() }
@@ -1738,16 +1747,18 @@ export class Ui {
     this.inputLines = lines
     this.inputTop = Math.max(0, Math.min(row - (rowsAvail - 1), lines.length - rowsAvail))
     const showCursor = this.focus === 'input' || this.focus === 'picker'
+    // The cursor is a cell in reverse video, left plain in the blink's off half.
+    const caret = (s: string) => this.cursorOn ? `{inverse}${s}{/inverse}` : s
     const render = (line: string[], r: number) => {
       if (!showCursor || r !== row) return esc(text(line))
       const before = esc(text(line.slice(0, col)))
       if (ghostNext) {
         // The cursor sits on the suggestion's first letter, with no empty cell in between; the rest follows in italic.
         const g = graphemes(ghostNext)
-        return before + dim(italic('{inverse}' + esc(g[0]!) + '{/inverse}' + esc(g.slice(1).join(''))))
+        return before + dim(italic(caret(esc(g[0]!)) + esc(g.slice(1).join(''))))
       }
       const under = line[col] == null || line[col] === '\n' ? ' ' : line[col]!
-      return before + '{inverse}' + esc(under) + '{/inverse}' + esc(text(line.slice(col + 1)))
+      return before + caret(esc(under)) + esc(text(line.slice(col + 1)))
     }
     const visible = lines.slice(this.inputTop, this.inputTop + rowsAvail)
     // The prompt says what the line does: the name and "◉", "○" or "✻" type, "/" filters the chats. The name is in
@@ -2180,6 +2191,20 @@ export class Ui {
     const line = faint(this.ruleChar.repeat(Math.max(0, num(this.screen.width))))
     this.ruleTop.setContent(line)
     this.ruleBottom.setContent(line)
+  }
+
+  /** Lights the cursor and restarts its blink from there, or stops it lit when this device isn't online. */
+  private restartBlink() {
+    this.cursorOn = true
+    if (this.blinkTimer) { clearInterval(this.blinkTimer); this.blinkTimer = undefined }
+    if (this.available) {
+      this.blinkTimer = setInterval(() => {
+        this.cursorOn = !this.cursorOn
+        if (this.focus === 'input' || this.focus === 'picker') { this.drawInput(); this.screen.render() }
+      }, 530)
+    }
+    this.drawInput()
+    this.screen.render()
   }
 
   private openMedia(row: MessageRow) {
