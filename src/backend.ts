@@ -22,6 +22,8 @@ export interface Backend extends EventEmitter<WaEvents> {
   /** This terminal (its pid) gained or lost the focus. */
   setFocus(terminal: number, focused: boolean): void
   ensureMedia(row: MessageRow): void
+  /** Fetches a link preview's image, if it has one (see Wa.ensurePreview). */
+  ensurePreview(row: MessageRow): void
   downloadAll(chatJid: string): Promise<{ copied: number; pending: number }>
   /** Asks the phone for messages older than the oldest stored for this chat; resolves with how many came, 0 for none. */
   fetchOlder(chatJid: string): Promise<number>

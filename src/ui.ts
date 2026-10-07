@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import QRCode from 'qrcode'
 import { store, type ChatRow, type MessageRow, type ReactionRow } from './db.js'
-import { chatName, contactName, shortName, canonicalJid, thumbPath, mediaFile, jidUser, type ConnState } from './wa.js'
+import { chatName, contactName, shortName, canonicalJid, thumbPath, previewPath, hasPreviewImage, mediaFile, jidUser, type ConnState } from './wa.js'
 import { inHerdr, reportHerdr, titleHerdr, tabNameHerdr, releaseHerdr, openChatHerdr, focusHerdr, focusNextChatHerdr, paneFocusedHerdr } from './herdr.js'
 import type { Backend } from './backend.js'
 import { waMarkup, clipTagged, esc, colorFor, setTheme, dim, faint, italic, padding, urlsIn, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, wrapWidth, fold, graphemes, wrapChars } from './format.js'
@@ -26,7 +26,7 @@ const QUICK = ['👍', '❤️', '😂', '😮', '😢', '🙏', '⋯']
 type Focus = 'picker' | 'messages' | 'input'
 
 /** An image in the panel: ready (with pixels) or just reserved, waiting to be downloaded and decoded once it becomes visible. */
-interface ImageSlot { row: MessageRow; origLine: number; cols: number; rows: number; pad: number; path?: string; d?: Decoded }
+interface ImageSlot { row: MessageRow; origLine: number; cols: number; rows: number; pad: number; path?: string; d?: Decoded; src?: string }
 
 /** What each terminal keeps in `state`: its tabs, the process that holds them, and the last interaction. */
 interface TerminalState { tabs: string[]; active: number; pid?: number; lastActive?: number; herdrTab?: string; herdrPane?: string }
@@ -2030,6 +2030,10 @@ export class Ui {
       else if (type === 'poll') for (const l of row.text.split('\n')) out(`{yellow-fg}${esc(l)}{/yellow-fg}`, row)
       else if (type !== 'text') out(dim(esc(row.text || `[${type}]`)), row)
 
+      // A link's preview image, inside the bubble above the text, as WhatsApp Web shows it.
+      if (type === 'text' && hasPreviewImage(row) && !fs.existsSync(`${previewPath(row.chat_jid, row.id)}.none`)) {
+        this.pushImage(row, push, images, lines, width, mine, undefined, { src: previewPath(row.chat_jid, row.id), maxCols: 30, maxRows: 8 })
+      }
       // The time goes at the end of the message's last line, like in a WhatsApp bubble, when it fits there with
       // two cells of gap: the last text line, or, with no text, the note that stands for it (deleted, audio, file…),
       // or beside an image's last row (above). Otherwise it gets its own line.
@@ -2142,39 +2146,44 @@ export class Ui {
    * right of the image's last row: mine stop short of the time's columns, like the text does, so the row reaches the
    * edge; the other side's are flush left and the time follows. Returns whether the stamp was placed.
    */
-  private pushImage(row: MessageRow, push: (l: string, r: MessageRow | null) => void, images: ImageSlot[], lines: string[], width: number, mine = false, stamp?: string): boolean {
-    if (this.mode === 'none') { push(dim(`[${row.type}]`), row); return false }
-    if (row.media_err && !this.imagePathFor(row)) { push(dim(t('mediaUnavailable', row.type)), row); return false }
-    const path = this.imagePathFor(row)
+  private pushImage(row: MessageRow, push: (l: string, r: MessageRow | null) => void, images: ImageSlot[], lines: string[], width: number, mine = false, stamp?: string, preview?: { src: string; maxCols: number; maxRows: number }): boolean {
+    if (this.mode === 'none') { if (!preview) push(dim(`[${row.type}]`), row); return false }
+    if (!preview && row.media_err && !this.imagePathFor(row)) { push(dim(t('mediaUnavailable', row.type)), row); return false }
+    // A link preview has its own file (fetched by ensurePreview when it comes into view) and a smaller frame.
+    const path = preview ? (fs.existsSync(preview.src) ? preview.src : null) : this.imagePathFor(row)
     const d = path ? cached(path) : undefined
-    if (d instanceof Error) { push(dim(t('mediaUnreadable', row.type, esc(d.message))), row); return false }
+    if (d instanceof Error) { if (!preview) push(dim(t('mediaUnreadable', row.type, esc(d.message))), row); return false }
     // Size: from the pixels if we already have them, otherwise from the dimensions the message carries, otherwise a default rectangle.
-    const w = d?.w ?? row.media_w ?? 4, h = d?.h ?? row.media_h ?? 3
+    const w = d?.w ?? (preview ? 4 : row.media_w ?? 4), h = d?.h ?? (preview ? 3 : row.media_h ?? 3)
     // In block mode the image takes up to 40 columns: each cell is a color pair the terminal (and a multiplexer
     // in between) has to paint, and a chat full of photos scrolls at the cost of those cells. In Kitty, with
     // real pixels, its natural size up to 60 columns is enough. The height never exceeds the panel.
-    const maxRows = row.type === 'sticker' ? 8 : Math.max(4, this.innerHeight() - 2)
-    const limit = mine && stamp ? Math.max(1, width - 2 - visibleWidth(stamp)) : width
-    const { cols, rows } = this.kitty
+    const maxRows = preview ? preview.maxRows : row.type === 'sticker' ? 8 : Math.max(4, this.innerHeight() - 2)
+    const limit = Math.min(mine && stamp ? Math.max(1, width - 2 - visibleWidth(stamp)) : width, preview?.maxCols ?? width)
+    const edge = mine && stamp ? Math.max(1, width - 2 - visibleWidth(stamp)) : width
+    const { cols, rows: fullRows } = this.kitty
       ? cellSize(w, h, Math.min(limit, 60), Math.min(maxRows, 18))
       : cellSize(w, h, Math.min(limit, 40), maxRows, true)
-    const pad = mine ? Math.max(0, limit - cols) : 0
+    // A preview still on its way takes one line, not the frame of an image whose size isn't known yet.
+    const rows = preview && !d ? 1 : fullRows
+    const pad = mine ? Math.max(0, edge - cols) : 0
     const tail = stamp && pad + cols + 2 + visibleWidth(stamp) <= width ? `  ${stamp}` : ''
     // The image's rows, the last one followed by the time; a blank row is only spaces up to where the time starts.
     const blank = tail ? ' '.repeat(pad + cols) : ''
     if (!d) {
-      images.push({ row, origLine: lines.length, cols, rows, pad })
-      const label = `${' '.repeat(pad)}${dim(`[${row.type}${path ? ` ${t('loading')}` : row.media_path ? '' : ` ${t('downloading')}`}]`)}`
+      images.push({ row, origLine: lines.length, cols, rows, pad, src: preview?.src })
+      const what = preview ? t('linkPreview') : row.type
+      const label = `${' '.repeat(pad)}${dim(`[${what}${path ? ` ${t('loading')}` : !preview && row.media_path ? '' : ` ${t('downloading')}`}]`)}`
       push(rows === 1 ? label + tail : label, row)
       for (let i = 1; i < rows; i++) push(i === rows - 1 ? blank + tail : '', row)
       return !!tail
     }
     if (this.kitty) {
-      images.push({ row, origLine: lines.length, cols, rows, d, pad, path: path! })
+      images.push({ row, origLine: lines.length, cols, rows, d, pad, path: path!, src: preview?.src })
       for (let i = 0; i < rows; i++) push(i === rows - 1 ? blank + tail : '', row)
     } else {
       // The slot is kept for the click, which has to land on the image's own cells; without a path, placeImages skips it.
-      images.push({ row, origLine: lines.length, cols, rows, d, pad })
+      images.push({ row, origLine: lines.length, cols, rows, d, pad, src: preview?.src })
       halfBlocks(d, cols, rows).forEach((l, i, all) => push(' '.repeat(pad) + l + (i === all.length - 1 ? tail : ''), row))
     }
     return !!tail
@@ -2235,6 +2244,12 @@ export class Ui {
       const span = this.imageSpan(img)
       if (!span || span.bottom <= base || span.top >= base + innerH) continue
       const row = store.getMessage(img.row.chat_jid, img.row.id) ?? img.row
+      // A link preview: its own file, fetched by the server when it isn't there yet.
+      if (img.src) {
+        if (!fs.existsSync(img.src)) { this.wa.ensurePreview(row); continue }
+        if (!cached(img.src)) decode(img.src).then(() => { if (this.current === row.chat_jid) { this.dirtyMessages = true; this.scheduleRender() } })
+        continue
+      }
       const path = this.imagePathFor(row)
       if (path && !cached(path)) {
         uiLog.info({ id: row.id, path }, 'decode visible image')

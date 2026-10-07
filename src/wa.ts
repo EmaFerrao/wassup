@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 import fs from 'node:fs'
 import path from 'node:path'
 import makeWASocket, {
-  Browsers, BufferJSON, DisconnectReason, downloadMediaMessage, fetchLatestBaileysVersion, getContentType,
+  Browsers, BufferJSON, DisconnectReason, downloadContentFromMessage, downloadMediaMessage, fetchLatestBaileysVersion, getContentType,
   isJidBroadcast, isJidGroup, isJidNewsletter, isJidStatusBroadcast, jidNormalizedUser, makeCacheableSignalKeyStore,
   normalizeMessageContent, toNumber, useMultiFileAuthState,
   proto, type AnyMessageContent, type GroupMetadata, type WAMessage, type WAMessageKey, type WASocket,
@@ -130,6 +130,14 @@ export function mediaDir(chatJid: string): string {
 }
 export function thumbPath(chatJid: string, id: string): string {
   return path.join(mediaDir(chatJid), `${id}.thumb.jpg`)
+}
+/** A link's preview image, and the mark left when it has none to get (`.none`), so it isn't asked for again. */
+export function previewPath(chatJid: string, id: string): string {
+  return path.join(mediaDir(chatJid), `${id}.link.jpg`)
+}
+/** Whether a message's link preview carries an image, to fetch (thumbnailDirectPath) or inline (jpegThumbnail). */
+export function hasPreviewImage(row: MessageRow): boolean {
+  return row.raw.includes('"matchedText"') && (row.raw.includes('"thumbnailDirectPath"') || row.raw.includes('"jpegThumbnail"'))
 }
 /** Where a message's attachment is on disk: `media_path` is kept relative to the media folder, so the folder can move. */
 export function mediaFile(row: MessageRow): string | null {
@@ -813,6 +821,47 @@ export class Wa extends EventEmitter<WaEvents> {
     store.clearUnread(chatJid)
     this.emit('chats')
     if (keys.length && this.sock) await this.sock.readMessages(keys).catch(e => logger.warn({ e }, 'readMessages'))
+  }
+
+  /** Link previews being fetched, by chat and message. */
+  private previewing = new Set<string>()
+
+  /**
+   * Gets a link preview's image in the background, in the same queue as the attachments: the full-size one the
+   * sender's phone uploaded (encrypted, at thumbnailDirectPath), or else the small one inside the message. When
+   * neither comes (the upload expired, an old message), a `.none` mark stops it being asked for again.
+   * Notifies via 'messages' when done either way.
+   */
+  ensurePreview(row: MessageRow) {
+    const k = `${row.chat_jid}/${row.id}`, file = previewPath(row.chat_jid, row.id)
+    if (this.previewing.has(k) || !this.sock || fs.existsSync(file) || fs.existsSync(`${file}.none`)) return
+    this.previewing.add(k)
+    this.downloadQueue = this.downloadQueue.then(() => this.previewOne(row, file))
+  }
+
+  private async previewOne(row: MessageRow, file: string) {
+    let buf: Buffer | undefined
+    try {
+      const raw = JSON.parse(row.raw, BufferJSON.reviver) as WAMessage
+      const x = normalizeMessageContent(raw.message)?.extendedTextMessage
+      if (x?.thumbnailDirectPath && x.mediaKey?.length) {
+        try {
+          const stream = await downloadContentFromMessage({ mediaKey: x.mediaKey, directPath: x.thumbnailDirectPath, url: undefined }, 'thumbnail-link')
+          const chunks: Buffer[] = []
+          for await (const c of stream) chunks.push(c as Buffer)
+          buf = Buffer.concat(chunks)
+        } catch (e) { logger.warn({ e: (e as Error)?.message, id: row.id }, 'link preview download failed') }
+      }
+      if (!buf?.length && x?.jpegThumbnail?.length) buf = Buffer.from(x.jpegThumbnail)
+      fs.mkdirSync(mediaDir(row.chat_jid), { recursive: true })
+      if (buf?.length) fs.writeFileSync(file, buf)
+      else fs.writeFileSync(`${file}.none`, '')
+    } catch (e) {
+      logger.warn({ e: (e as Error)?.message, id: row.id }, 'link preview')
+    } finally {
+      this.previewing.delete(`${row.chat_jid}/${row.id}`)
+      this.emit('messages', row.chat_jid)
+    }
   }
 
   /**

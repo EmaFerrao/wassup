@@ -68,6 +68,7 @@ const STRINGS = {
   unknownOp: { pt: 'operação desconhecida: {0}', en: 'unknown operation: {0}' },
   group: { pt: 'grupo {0}', en: 'group {0}' },
   loading: { pt: 'a carregar…', en: 'loading…' },
+  linkPreview: { pt: 'pré-visualização', en: 'preview' },
   loadingOlder: { pt: 'a carregar mensagens anteriores…', en: 'loading earlier messages…' },
 } as const
 
