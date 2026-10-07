@@ -2161,10 +2161,13 @@ export class Ui {
       // The state after the time of mine (tick): one cell whatever the state, so the time stays put.
       const ticks = !mine ? '' : tick(row.status ?? 0)
       const stamp = mine ? `${faint(fmtTime(row.ts))} ${ticks}` : faint(fmtTime(row.ts))
-      // Images, stickers, videos, GIFs and emoji on their own stand bare, with the time beside them; the rest go in a
-      // bubble (see bubble), with the time outside it. Theirs in a bubble start a column in, for its spare column on
-      // the left: the panel's own left column is padding, which takes no background.
-      const bare = row.type === 'image' || row.type === 'sticker' || row.type === 'video' || row.type === 'gif' || (row.type === 'text' && emojiOnly(row.text))
+      // Messages go in a bubble (see bubble), with the time outside it, except emoji on their own, which stand bare
+      // with the time beside them. The pictures of images, stickers, videos and GIFs stay out of it too (`pictures`,
+      // their rows), while what comes with them (the sender's name, a quote, the caption, the video's note) goes in.
+      // Theirs in a bubble start a column in, for its spare column on the left: the panel's own left column is
+      // padding, which takes no background.
+      const bare = row.type === 'text' && emojiOnly(row.text)
+      const pictures = new Set<number>()
       const indent = mine || bare ? 0 : 1, ind = ' '.repeat(indent)
       // Lines go up to the panel's last column: with wrap off, blessed neither wraps nor cuts a line that fills it,
       // closing tags included. Mine stop short of the columns the time and its mark take, with two cells of gap,
@@ -2205,9 +2208,12 @@ export class Ui {
       let stamped = false
       if (type === 'deleted') out(dim(`⊘ ${t('deleted')}`), row)
       else if (type === 'image' || type === 'sticker' || type === 'gif' || type === 'video') {
-        // An image or sticker with no caption carries the time to the right of its last row.
-        const bare = (type === 'image' || type === 'sticker') && !row.text
-        if (this.pushImage(row, push, images, lines, width, mine, bare ? stamp : undefined)) { headers.add(map.length - 1); stamped = true }
+        // An image or sticker with no caption carries the time to the right of its last row. Mine end where the text
+        // would, short of the time's columns.
+        const beside = (type === 'image' || type === 'sticker') && !row.text
+        const from = lines.length
+        if (this.pushImage(row, push, images, lines, width, mine, beside ? stamp : undefined, undefined, textWidth)) { headers.add(map.length - 1); stamped = true }
+        for (let i = from; i < lines.length; i++) pictures.add(i)
         last = null
         if (type === 'video' || type === 'gif') out(`{magenta-fg}▶ ${type === 'gif' ? t('gif') : t('video')}{/magenta-fg}${mediaHint}`, row)
       } else if (type === 'document') {
@@ -2222,11 +2228,10 @@ export class Ui {
 
       // A link's preview image, inside the bubble above the text, as WhatsApp Web shows it.
       if (type === 'text' && hasPreviewImage(row) && !fs.existsSync(`${previewPath(row.chat_jid, row.id)}.none`)) {
-        this.pushImage(row, push, images, lines, width, mine, undefined, { src: previewPath(row.chat_jid, row.id), maxCols: 30, maxRows: 8, edge: textWidth, indent })
+        this.pushImage(row, push, images, lines, width, mine, undefined, { src: previewPath(row.chat_jid, row.id), maxCols: 30, maxRows: 8, indent }, textWidth)
       }
-      // Bare, the time goes at the end of the message's last line when it fits there with two cells of gap: the
-      // last text line, or, with no text, the note that stands for it (a video's), or beside an image's last row
-      // (above). Otherwise it gets its own line.
+      // Bare, the time goes at the end of the message's last line when it fits there with two cells of gap; beside an
+      // image's last row it went in above. Otherwise it gets its own line.
       if (row.text && (type === 'text' || type === 'image' || type === 'video' || type === 'gif' || type === 'document')) {
         // Mentions by first name, in the colour the person's name has in groups; where each lands is kept for a click.
         const marks = new Map<string, { jid: string; width: number }>()
@@ -2263,14 +2268,14 @@ export class Ui {
         headers.add(note.at); stamped = true
       }
       if (!bare) {
-        const rect = this.bubble(lines, bubbleFrom, lines.length, mine, width, row.id !== selectedId && row.id !== this.drag?.id)
+        const rect = this.bubble(lines, bubbleFrom, lines.length, mine, width, row.id !== selectedId && row.id !== this.drag?.id, pictures)
         // In a bubble, the time goes outside it on its last line: right after it for theirs, against the edge for
         // mine (a cell or so short when that line's emoji would take it past, see padding).
         const at = lines.length - 1, line = lines[at] ?? ''
         let gap = rect ? (mine ? width - visibleWidth(stamp) : rect.end + 1) - visibleWidth(line) : 0
         gap -= Math.max(0, wrapWidth(`${line}${' '.repeat(Math.max(0, gap))}${stamp}`) - (width + 1))
         const tailed = `${line}${' '.repeat(Math.max(0, gap))}${stamp}`
-        if (rect && gap >= 1 && visibleWidth(tailed) <= width) { lines[at] = tailed; headers.add(at); stamped = true }
+        if (!stamped && rect && !pictures.has(at) && gap >= 1 && visibleWidth(tailed) <= width) { lines[at] = tailed; headers.add(at); stamped = true }
       }
       // On its own line the time goes straight in, flush right for mine, without passing through the wrapping.
       if (!stamped) { const at = map.length; push(mine ? alignRight(stamp, width) : stamp, row); headers.add(at) }
@@ -2361,7 +2366,7 @@ export class Ui {
    * right of the image's last row: mine stop short of the time's columns, like the text does, so the row reaches the
    * edge; the other side's are flush left and the time follows. Returns whether the stamp was placed.
    */
-  private pushImage(row: MessageRow, push: (l: string, r: MessageRow | null) => void, images: ImageSlot[], lines: string[], width: number, mine = false, stamp?: string, preview?: { src: string; maxCols: number; maxRows: number; edge: number; indent: number }): boolean {
+  private pushImage(row: MessageRow, push: (l: string, r: MessageRow | null) => void, images: ImageSlot[], lines: string[], width: number, mine = false, stamp?: string, preview?: { src: string; maxCols: number; maxRows: number; indent: number }, textEdge?: number): boolean {
     if (this.mode === 'none') { if (!preview) push(dim(`[${row.type}]`), row); return false }
     if (!preview && row.media_err && !this.imagePathFor(row)) { push(dim(t('mediaUnavailable', row.type)), row); return false }
     // A link preview has its own file (fetched by ensurePreview when it comes into view) and a smaller frame.
@@ -2375,8 +2380,8 @@ export class Ui {
     // real pixels, its natural size up to 60 columns is enough. The height never exceeds the panel.
     const maxRows = preview ? preview.maxRows : row.type === 'sticker' ? 8 : Math.max(4, this.innerHeight() - 2)
     const limit = Math.min(mine && stamp ? Math.max(1, width - 2 - visibleWidth(stamp)) : width, preview?.maxCols ?? width)
-    // Mine end where the text ends: short of the time beside the image, and for a preview, of the message's time.
-    const edge = preview?.edge ?? (mine && stamp ? Math.max(1, width - 2 - visibleWidth(stamp)) : width)
+    // Mine end where the text ends (`textEdge`), short of the message's time, beside the image or not.
+    const edge = textEdge ?? (mine && stamp ? Math.max(1, width - 2 - visibleWidth(stamp)) : width)
     const { cols, rows: fullRows } = this.kitty
       ? cellSize(w, h, Math.min(limit, 60), Math.min(maxRows, 18))
       : cellSize(w, h, Math.min(limit, 40), maxRows, true)
@@ -2410,16 +2415,17 @@ export class Ui {
    * with a spare column on each side. Only tags and spaces are added around each line's own content, never inside
    * it, so no column moves (clicks, selection and images keep their places). The background is opened in three runs,
    * before, over and after the content: an image line ends in a full reset, which would leave the spare cells after
-   * it bare. Returns the rectangle's columns [start, end), also with `paint` off (the selected message, whose own
-   * background spans the whole width, or one being dragged), so the time goes in the same place.
+   * it bare. The lines in `skip` (a picture's rows) are left as they are, out of the rectangle and its measure.
+   * Returns the rectangle's columns [start, end), also with `paint` off (the selected message, whose own background
+   * spans the whole width, or one being dragged), so the time goes in the same place.
    */
-  private bubble(lines: string[], from: number, to: number, mine: boolean, width: number, paint: boolean): { start: number; end: number } | null {
+  private bubble(lines: string[], from: number, to: number, mine: boolean, width: number, paint: boolean, skip = new Set<number>()): { start: number; end: number } | null {
     if (to <= from) return null
     const spans = lines.slice(from, to).map(l => {
       const start = l.length - l.trimStart().length
       return { start, end: Math.max(start, visibleWidth(l)) }
     })
-    const used = spans.filter(sp => sp.end > sp.start)
+    const used = spans.filter((sp, i) => sp.end > sp.start && !skip.has(from + i))
     if (!used.length) return null
     const minStart = Math.min(...used.map(sp => sp.start)), maxEnd = Math.max(...used.map(sp => sp.end))
     const bStart = Math.max(0, minStart - 1)
@@ -2428,6 +2434,7 @@ export class Ui {
     const bg = mine ? this.bubbleBg.mine : this.bubbleBg.theirs
     const on = (s: string) => (s ? `{${bg}-bg}${s}{/${bg}-bg}` : '')
     for (let i = from; i < to; i++) {
+      if (skip.has(i)) continue
       const sp = spans[i - from]!, line = lines[i]!
       const blank = sp.end <= sp.start
       const start = blank ? bStart : Math.max(sp.start, bStart), end = blank ? bStart : sp.end
