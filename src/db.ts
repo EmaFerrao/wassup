@@ -169,7 +169,7 @@ const q = {
   repairGroupPending: db.prepare(`UPDATE messages SET status = 2 WHERE from_me = 1 AND status = 1 AND chat_jid LIKE '%@g.us'
     AND EXISTS (SELECT 1 FROM messages n WHERE n.chat_jid = messages.chat_jid AND n.ts > messages.ts)`),
   setType: db.prepare(`UPDATE messages SET type = ?, text = ? WHERE chat_jid = ? AND id = ?`),
-  lastMessage: db.prepare(`SELECT * FROM messages WHERE chat_jid = ? ORDER BY ts DESC LIMIT 1`),
+  lastMessage: db.prepare(`SELECT * FROM messages WHERE chat_jid = ? AND type != 'secretEncrypted' ORDER BY ts DESC LIMIT 1`),
   setReaction: db.prepare(`
     INSERT INTO reactions (chat_jid, msg_id, sender_jid, emoji, ts) VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(chat_jid, msg_id, sender_jid) DO UPDATE SET emoji = excluded.emoji, ts = excluded.ts WHERE excluded.ts >= reactions.ts`),

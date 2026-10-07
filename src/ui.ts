@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import QRCode from 'qrcode'
 import { store, type ChatRow, type MessageRow, type ReactionRow } from './db.js'
-import { chatName, contactName, shortName, canonicalJid, thumbPath, previewPath, hasPreviewImage, mediaFile, jidUser, type ConnState } from './wa.js'
+import { chatName, contactName, shortName, canonicalJid, thumbPath, previewPath, hasPreviewImage, mediaFile, jidUser, withMentions, typeLabel, type ConnState } from './wa.js'
 import { inHerdr, reportHerdr, titleHerdr, tabNameHerdr, releaseHerdr, openChatHerdr, focusHerdr, focusNextChatHerdr, paneFocusedHerdr } from './herdr.js'
 import type { Backend } from './backend.js'
 import { waMarkup, clipTagged, esc, colorFor, setTheme, dim, faint, italic, padding, urlsIn, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, wrapWidth, fold, graphemes, wrapChars } from './format.js'
@@ -1965,7 +1965,8 @@ export class Ui {
     }
     const reactions = new Map<string, ReactionRow[]>()
     for (const r of store.listReactions(jid)) reactions.set(r.msg_id, [...(reactions.get(r.msg_id) ?? []), r])
-    const rows = store.listMessages(jid, this.shown.get(jid) ?? PAGE)
+    // Encrypted content for another message, stored before the client knew to drop it, isn't a message to show.
+    const rows = store.listMessages(jid, this.shown.get(jid) ?? PAGE).filter(r => r.type !== 'secretEncrypted')
     this.rows = rows
     this.selected = rows.find(r => r.id === selectedId) ?? null
     const headers = new Set<number>(), texts = new Map<number, { start: number; end: number }>(), names = new Map<number, { jid: string; start: number; width: number }>()
@@ -2026,7 +2027,7 @@ export class Ui {
         const [who, text] = row.quoted.split('\t')
         // Who it was from only matters in groups; one-on-one the other person is obvious, and mine don't carry a name either.
         const author = who === this.wa.me || !row.chat_jid.endsWith('@g.us') ? '' : `${esc(contactName(who ?? ''))}: `
-        out(dim(`│ ${author}${esc(truncate(text ?? '', width - 6))}`), row)
+        out(dim(`│ ${author}${esc(truncate(withMentions(text ?? ''), width - 6))}`), row)
       }
 
       const type = row.type
@@ -2047,7 +2048,8 @@ export class Ui {
       } else if (type === 'location') out(`{yellow-fg}📍 ${waMarkup(row.text)}{/yellow-fg}`, row)
       else if (type === 'contact') out(`{yellow-fg}👤 ${esc(row.text)}{/yellow-fg}`, row)
       else if (type === 'poll') for (const l of row.text.split('\n')) out(`{yellow-fg}${esc(l)}{/yellow-fg}`, row)
-      else if (type !== 'text') out(dim(esc(row.text || `[${type}]`)), row)
+      // Kinds without a drawing of their own are stored as "[kind]": they're named instead (typeLabel).
+      else if (type !== 'text') out(dim(esc(row.text && row.text !== `[${type}]` ? row.text : typeLabel(row))), row)
 
       // A link's preview image, inside the bubble above the text, as WhatsApp Web shows it.
       if (type === 'text' && hasPreviewImage(row) && !fs.existsSync(`${previewPath(row.chat_jid, row.id)}.none`)) {
@@ -2057,7 +2059,7 @@ export class Ui {
       // last text line, or, with no text, the note that stands for it (a video's), or beside an image's last row
       // (above). Otherwise it gets its own line.
       if (row.text && (type === 'text' || type === 'image' || type === 'video' || type === 'gif' || type === 'document')) {
-        const wrapped = waMarkup(row.text).split('\n').flatMap(l => wrapTagged(l, wrapAt))
+        const wrapped = waMarkup(withMentions(row.text)).split('\n').flatMap(l => wrapTagged(l, wrapAt))
         wrapped.forEach((l, i) => {
           const tw = visibleWidth(l)
           const withStamp = bare && i === wrapped.length - 1 && tw + 2 + visibleWidth(stamp) <= width

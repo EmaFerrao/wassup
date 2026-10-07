@@ -69,6 +69,14 @@ const STRINGS = {
   group: { pt: 'grupo {0}', en: 'group {0}' },
   loading: { pt: 'a carregar…', en: 'loading…' },
   linkPreview: { pt: 'pré-visualização', en: 'preview' },
+  pinned: { pt: '📌 fixou uma mensagem', en: '📌 pinned a message' },
+  unpinned: { pt: '📌 desafixou uma mensagem', en: '📌 unpinned a message' },
+  album: { pt: 'álbum', en: 'album' },
+  videoNote: { pt: 'mensagem de vídeo', en: 'video message' },
+  waitingMessage: { pt: 'à espera desta mensagem', en: 'waiting for this message' },
+  groupInvite: { pt: 'convite para um grupo', en: 'group invite' },
+  businessMessage: { pt: 'mensagem de empresa', en: 'business message' },
+  unsupported: { pt: 'mensagem não suportada', en: 'unsupported message' },
   loadingOlder: { pt: 'a carregar mensagens anteriores…', en: 'loading earlier messages…' },
 } as const
 
