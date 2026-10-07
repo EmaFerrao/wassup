@@ -113,10 +113,12 @@ export function cellSize(w: number, h: number, maxCols: number, maxRows: number,
  * stray dots. No dithering: with half-cells this big and a palette of six levels per channel, Floyd–Steinberg's
  * carried error showed up as saturated dots that weren't in the picture.
  */
-export function blockColors(d: Decoded, cols: number, rows: number): Int16Array {
+export function blockColors(d: Decoded, cols: number, rows: number): { idx: Int16Array; rgb: Uint8Array } {
   const W = cols, H = rows * 2
   const sx = d.rw / W, sy = d.rh / H
   const out = new Int16Array(W * H).fill(-1)
+  // The average itself, three bytes per half-cell, for terminals that take 24-bit colour (RgbBlocks).
+  const rgb = new Uint8Array(W * H * 3)
   for (let y = 0; y < H; y++) {
     const y0 = Math.min(d.rh - 1, Math.floor(y * sy)), y1 = Math.max(y0 + 1, Math.min(d.rh, Math.floor((y + 1) * sy)))
     for (let x = 0; x < W; x++) {
@@ -130,14 +132,31 @@ export function blockColors(d: Decoded, cols: number, rows: number): Int16Array 
       }
       // Transparent below a quarter of opacity, the same threshold as one pixel had.
       if (sa / ((y1 - y0) * (x1 - x0)) < 64) continue
-      out[y * W + x] = nearest256([sr / sa, sg / sa, sb / sa])
+      const i = y * W + x, avg: [number, number, number] = [sr / sa, sg / sa, sb / sa]
+      out[i] = nearest256(avg)
+      rgb[i * 3] = Math.round(avg[0]); rgb[i * 3 + 1] = Math.round(avg[1]); rgb[i * 3 + 2] = Math.round(avg[2])
     }
   }
-  return out
+  return { idx: out, rgb }
 }
 
-/** halfBlocks' lines per image and size: averaging reads every pixel, too much to redo on each redraw. */
-const blockCache = new WeakMap<Decoded, Map<string, string[]>>()
+/** An image's half-cells at one size: palette indices, 24-bit averages, and the lines halfBlocks draws from them. */
+export interface BlockGrid { idx: Int16Array; rgb: Uint8Array; lines: string[] }
+
+/** Grids per image and size: averaging reads every pixel, too much to redo on each redraw. */
+const blockCache = new WeakMap<Decoded, Map<string, BlockGrid>>()
+
+export function blockGrid(d: Decoded, cols: number, rows: number): BlockGrid {
+  const key = `${cols}x${rows}`
+  const sizes = blockCache.get(d) ?? new Map<string, BlockGrid>()
+  blockCache.set(d, sizes)
+  const hit = sizes.get(key)
+  if (hit) return hit
+  const { idx, rgb } = blockColors(d, cols, rows)
+  const grid = { idx, rgb, lines: blockLines(idx, cols, rows) }
+  sizes.set(key, grid)
+  return grid
+}
 
 /**
  * Rows of ▀ half-blocks, two pixel rows per line, coloured by blockColors in the 256-colour palette blessed keeps
@@ -146,13 +165,11 @@ const blockCache = new WeakMap<Decoded, Map<string, string[]>>()
  * SGR pair per cell did.
  */
 export function halfBlocks(d: Decoded, cols: number, rows: number): string[] {
-  const key = `${cols}x${rows}`
-  const sizes = blockCache.get(d) ?? new Map<string, string[]>()
-  blockCache.set(d, sizes)
-  const hit = sizes.get(key)
-  if (hit) return hit
+  return blockGrid(d, cols, rows).lines
+}
+
+function blockLines(px: Int16Array, cols: number, rows: number): string[] {
   const out: string[] = []
-  const px = blockColors(d, cols, rows)
   for (let r = 0; r < rows; r++) {
     let line = '', fg = -1, bg = -1
     for (let c = 0; c < cols; c++) {
@@ -167,8 +184,85 @@ export function halfBlocks(d: Decoded, cols: number, rows: number): string[] {
     }
     out.push(line + '\x1b[0m')
   }
-  sizes.set(key, out)
   return out
+}
+
+/**
+ * The cell blockLines puts at column `c` of row `r`: its glyph, its palette colours (-1 is the terminal's own) and
+ * the half-cells they come from (-1 for none), or null where both halves are transparent and nothing is drawn.
+ */
+export function blockCell(idx: Int16Array, cols: number, r: number, c: number): { ch: string; fg: number; bg: number; fgAt: number; bgAt: number } | null {
+  const ti = r * 2 * cols + c, bi = (r * 2 + 1) * cols + c
+  const top = idx[ti]!, bottom = idx[bi]!
+  if (top < 0 && bottom < 0) return null
+  if (bottom < 0) return { ch: '▀', fg: top, bg: -1, fgAt: ti, bgAt: -1 }
+  if (top < 0) return { ch: '▄', fg: bottom, bg: -1, fgAt: bi, bgAt: -1 }
+  return { ch: '▀', fg: top, bg: bottom, fgAt: ti, bgAt: bi }
+}
+
+/** One image cell to paint in 24-bit colour, at its screen position (0-based). */
+export interface RgbCell { x: number; y: number; ch: string; fg: string; bg: string | null }
+
+/** blessed's frame buffer: per row, per cell, the attribute code and the character. */
+type CellRows = ([number, string][] | undefined)[]
+
+/**
+ * 24-bit colour for half-block images, on terminals that confirmed it (or with WA_COLORS=truecolor). blessed keeps
+ * colours to the 256-colour palette, so it still draws the images as halfBlocks lines; after each frame this
+ * repaints their cells straight on the terminal with the exact averages, cursor and attributes saved and restored
+ * around it, as the Kitty placements are.
+ *
+ * Only what changed is written, or the typing animation, at 25 frames a second, would send megabytes: a cell is
+ * repainted when blessed has just rewritten it (its content in the previous frame buffer differs, snapshot taken
+ * on 'prerender') or when the colour due there isn't the one painted last. A row blessed scrolled with the
+ * terminal's own line insert and delete moves the painting with it; the previous buffer's row is then another
+ * array, which counts as rewritten too.
+ */
+export class RgbBlocks {
+  /** What was painted at each screen cell (y * 65536 + x), and the previous buffer's rows that held it. */
+  private painted = new Map<number, string>()
+  private rows = new Map<number, unknown>()
+  /** Before blessed draws: the previous buffer's content of each painted cell still in place. */
+  private before = new Map<number, string>()
+
+  constructor(private write: (s: string) => void) {}
+
+  snapshot(olines: CellRows) {
+    this.before.clear()
+    for (const key of this.painted.keys()) {
+      const y = Math.floor(key / 65536), row = olines[y]
+      if (!row || row !== this.rows.get(y)) continue
+      const cell = row[key % 65536]
+      if (cell) this.before.set(key, `${cell[0]}|${cell[1]}`)
+    }
+  }
+
+  /** After blessed draws: `cells` are the image cells now in view, with blessed's own copy matching; `olines` its buffer as drawn. */
+  paint(cells: RgbCell[], olines: CellRows) {
+    const now = new Map<number, string>()
+    let out = '', lastY = -1, lastX = -2, fg = '', bg: string | null | undefined
+    for (const c of cells) {
+      const key = c.y * 65536 + c.x, sig = `${c.ch}${c.fg}/${c.bg}`
+      now.set(key, sig)
+      const cell = olines[c.y]?.[c.x]
+      if (this.painted.get(key) === sig && cell && this.before.get(key) === `${cell[0]}|${cell[1]}`) continue
+      if (c.y !== lastY || c.x !== lastX + 1) out += `\x1b[${c.y + 1};${c.x + 1}H`
+      if (c.fg !== fg) { out += `\x1b[38;2;${c.fg}m`; fg = c.fg }
+      if (c.bg !== bg) { out += c.bg ? `\x1b[48;2;${c.bg}m` : '\x1b[49m'; bg = c.bg }
+      out += c.ch
+      lastY = c.y; lastX = c.x
+    }
+    this.painted = now
+    this.rows.clear()
+    for (const key of now.keys()) { const y = Math.floor(key / 65536); this.rows.set(y, olines[y]) }
+    if (out) this.write(`\x1b7${out}\x1b[0m\x1b8`)
+  }
+}
+
+/** 24-bit colour for images: WA_COLORS=truecolor|256 forces it; otherwise what the terminal confirmed when probed. */
+export function detectRgb(confirmed: boolean): boolean {
+  const forced = process.env.WA_COLORS
+  return forced === 'truecolor' ? true : forced === '256' ? false : confirmed
 }
 
 export type ImageMode = 'kitty' | 'blocks' | 'none'

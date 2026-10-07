@@ -7,7 +7,7 @@ import { chatName, contactName, shortName, canonicalJid, thumbPath, mediaFile, j
 import { inHerdr, reportHerdr, titleHerdr, tabNameHerdr, releaseHerdr, openChatHerdr, focusHerdr } from './herdr.js'
 import type { Backend } from './backend.js'
 import { waMarkup, clipTagged, esc, colorFor, setTheme, dim, faint, italic, padding, urlsIn, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, wrapWidth, fold, graphemes, wrapChars } from './format.js'
-import { decode, cached, cellSize, halfBlocks, detectImageMode, KittyImages, type Decoded, type ImageMode } from './image.js'
+import { decode, cached, cellSize, halfBlocks, blockGrid, blockCell, detectImageMode, detectRgb, KittyImages, RgbBlocks, type Decoded, type ImageMode, type RgbCell } from './image.js'
 import { logger, uiLog } from './log.js'
 import { patchBlessedDraw, patchBlessedUnicode } from './unicode.js'
 import type { TermCaps } from './term.js'
@@ -213,6 +213,8 @@ export class Ui {
   private images: ImageSlot[] = []
   private mode: ImageMode
   private kitty: KittyImages | undefined
+  /** Half-block images repainted in 24-bit colour, when the terminal takes it. */
+  private rgbBlocks: RgbBlocks | undefined
   private connText = t('connecting')
   private transient = ''
   private transientTimer: NodeJS.Timeout | undefined
@@ -264,6 +266,7 @@ export class Ui {
     if (caps.utf8) (this.screen.program as unknown as { tput: { brokenACS: boolean } }).tput.brokenACS = true
     const program = this.screen.program as unknown as { _write: (s: string) => void }
     if (this.mode === 'kitty') this.kitty = new KittyImages(s => program._write(s))
+    if (this.mode === 'blocks' && detectRgb(caps.truecolor)) this.rgbBlocks = new RgbBlocks(s => program._write(s))
     // Only with the terminal confirming the protocol: it's what lets Shift+Backspace be distinguished, for deleting words.
     if (caps.kittyKeyboard) this.disableKittyKeyboard = enableKittyKeyboard((this.screen.program as unknown as { input: Parameters<typeof enableKittyKeyboard>[0] }).input, s => program._write(s))
     // Outside the Kitty translator: pasted text doesn't go through it.
@@ -369,7 +372,8 @@ export class Ui {
     this.screen.on('keypress', (ch: string, key: blessed.Widgets.Events.IKeyEventArg) => this.onKey(ch, key))
     // The picker list has its position and height calculated by hand: it's recomputed when the terminal resizes.
     this.screen.on('resize', () => { this.dirtyMessages = true; this.dirtyTabs = true; if (this.pickerOpen) this.refreshPicker(); this.scheduleRender() })
-    this.screen.on('render', () => { this.loadVisibleImages(); this.placeImages() })
+    this.screen.on('prerender', () => this.rgbBlocks?.snapshot(this.screenRows('olines')))
+    this.screen.on('render', () => { this.loadVisibleImages(); this.placeImages(); this.paintRgb() })
 
     // The mouse wheel scrolls one line per notch (by default blessed jumps half the panel, or two list entries).
     this.msgBox.removeAllListeners('wheeldown')
@@ -2119,6 +2123,50 @@ export class Ui {
       const row = num(this.msgBox.atop) + num(this.msgBox.itop) + (visTop - base) + 1
       this.kitty.place(img.path, img.d, col + img.pad, row, img.cols, visBottom - visTop, (visTop - top) / img.rows, (visBottom - top) / img.rows)
     }
+  }
+
+  /** blessed's frame buffers: `lines` is the frame being built, `olines` the one last drawn to the terminal. */
+  private screenRows(which: 'lines' | 'olines'): ([number, string][] | undefined)[] {
+    return (this.screen as unknown as Record<string, ([number, string][] | undefined)[]>)[which] ?? []
+  }
+
+  /**
+   * After each frame, the half-block images in view get their exact colours (RgbBlocks). A cell is only taken when
+   * blessed's buffer still holds the half-block it was given there, so whatever is drawn over an image (a notice,
+   * the reply header, the quick reactions, a dragged message) keeps its place.
+   */
+  private paintRgb() {
+    if (!this.rgbBlocks) return
+    const olines = this.screenRows('olines')
+    const cells: RgbCell[] = []
+    const clines = this.msgBox._clines
+    if (this.current && !this.pickerOpen && !this.showingQr && clines?.ftor) {
+      const lines = this.screenRows('lines')
+      const base = this.msgBox.childBase, innerH = this.innerHeight()
+      const x0 = num(this.msgBox.aleft) + num(this.msgBox.ileft), y0 = num(this.msgBox.atop) + num(this.msgBox.itop)
+      const rgbAt = (rgb: Uint8Array, i: number) => `${rgb[i * 3]};${rgb[i * 3 + 1]};${rgb[i * 3 + 2]}`
+      for (const img of this.images) {
+        if (!img.d) continue
+        const top = clines.ftor[img.origLine]?.[0]
+        if (top == null) continue
+        const visTop = Math.max(top, base), visBottom = Math.min(top + img.rows, base + innerH)
+        if (visTop >= visBottom) continue
+        const grid = blockGrid(img.d, img.cols, img.rows)
+        for (let ln = visTop; ln < visBottom; ln++) {
+          const y = y0 + ln - base, row = lines[y]
+          if (!row) continue
+          for (let c = 0; c < img.cols; c++) {
+            const cell = blockCell(grid.idx, img.cols, ln - top, c)
+            if (!cell) continue
+            const x = x0 + img.pad + c, held = row[x]
+            const attr = held?.[0] ?? -1
+            if (held?.[1] !== cell.ch || attr >> 18 !== 0 || ((attr >> 9) & 0x1ff) !== (cell.fg < 0 ? 0x1ff : cell.fg) || (attr & 0x1ff) !== (cell.bg < 0 ? 0x1ff : cell.bg)) continue
+            cells.push({ x, y, ch: cell.ch, fg: rgbAt(grid.rgb, cell.fgAt), bg: cell.bgAt < 0 ? null : rgbAt(grid.rgb, cell.bgAt) })
+          }
+        }
+      }
+    }
+    this.rgbBlocks.paint(cells, olines)
   }
 
   private openMedia(row: MessageRow) {

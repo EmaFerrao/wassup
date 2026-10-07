@@ -22,12 +22,18 @@ export interface TermCaps {
   fg: string | null
   /** Terminal's default background color, in `#rrggbb`, if it answered OSC 11. */
   bg: string | null
+  /** 24-bit colour: the terminal confirmed the RGB or Tc capability (XTGETTCAP), or echoed a 24-bit SGR back (DECRQSS). */
+  truecolor: boolean
 }
 
 const DA1_RE = /\x1b\[\?[\d;]*c/
 const XTVERSION_RE = /\x1bP>\|([^\x1b]*)\x1b\\/
 const KITTY_KBD_RE = /\x1b\[\?\d+u/
 const KITTY_OK_RE = /\x1b_Gi=31;OK\x1b\\/
+/** XTGETTCAP reply confirming RGB or Tc (`DCS 1 + r <hex name>`): `0 + r` would mean the terminal doesn't have it. */
+const XTGETTCAP_RGB_RE = /\x1bP1\+r(?:524742|5463)/i
+/** DECRQSS reply carrying the 24-bit colour back, in any of the forms terminals write it (`38;2;1;2;3`, `38:2::1:2:3`). */
+const DECRQSS_RGB_RE = /\x1bP1\$r[^\x1b]*38[:;]2[:;]+1[:;]2[:;]3/
 /** Reply to OSC 10/11: `OSC 1x ; rgb:rrrr/gggg/bbbb ST`, with 1 to 4 digits per component. */
 const OSC_COLOR_RE = /\x1b\](1[01]);rgba?:([0-9a-f]+)\/([0-9a-f]+)\/([0-9a-f]+)/gi
 /** Terminals whose XTVERSION identification authorizes us to send the Kitty graphics query. */
@@ -84,7 +90,7 @@ function ask(query: string, timeoutMs: number): Promise<string> {
 }
 
 export async function probeTerminal(timeoutMs = 600): Promise<TermCaps> {
-  const caps: TermCaps = { kittyGraphics: false, utf8: localeIsUtf8(), answersQueries: false, version: null, kittyKeyboard: false, fg: null, bg: null }
+  const caps: TermCaps = { kittyGraphics: false, utf8: localeIsUtf8(), answersQueries: false, version: null, kittyKeyboard: false, fg: null, bg: null, truecolor: false }
   if (!process.stdin.isTTY || !process.stdout.isTTY) return caps
 
   // 1. Identification: XTVERSION and Kitty keyboard protocol query (CSI, harmless) and DA1.
@@ -99,7 +105,14 @@ export async function probeTerminal(timeoutMs = 600): Promise<TermCaps> {
   // and the UI falls back to the theme's own.
   Object.assign(caps, parseColors(await ask('\x1b]10;?\x1b\\\x1b]11;?\x1b\\', timeoutMs)))
 
-  // 3. Kitty graphics query (APC, id 31, 1×1 px image), only for those who identified as capable.
+  // 3. 24-bit colour, asked of the terminal itself: XTGETTCAP for the RGB and Tc terminfo capabilities (Herdr,
+  // which doesn't answer DECRQSS, confirms both), and DECRQSS on an SGR set to a 24-bit colour, for terminals that
+  // answer that one instead. Both are DCS strings, which a terminal that doesn't know them swallows.
+  const hex = (s: string) => Buffer.from(s).toString('hex')
+  const rgb = await ask(`\x1bP+q${hex('RGB')};${hex('Tc')}\x1b\\\x1b[38;2;1;2;3m\x1bP$qm\x1b\\\x1b[0m`, timeoutMs)
+  caps.truecolor = XTGETTCAP_RGB_RE.test(rgb) || DECRQSS_RGB_RE.test(rgb)
+
+  // 4. Kitty graphics query (APC, id 31, 1×1 px image), only for those who identified as capable.
   if (caps.version && KITTY_TERMS.test(caps.version)) {
     const second = await ask('\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\', timeoutMs)
     caps.kittyGraphics = KITTY_OK_RE.test(second)
