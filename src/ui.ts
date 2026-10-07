@@ -260,6 +260,8 @@ export class Ui {
   private reactTo: MessageRow | null = null
   /** Columns the prompt takes on the input's first line ("Ema ❯ "), and the continuation lines' indent. */
   private promptWidth = 2
+  /** How wide the chat's name is at the start of the prompt (0 with none), where a click opens the chat list. */
+  private promptNameWidth = 0
   private images: ImageSlot[] = []
   private mode: ImageMode
   private kitty: KittyImages | undefined
@@ -601,6 +603,9 @@ export class Ui {
     // Clicking the input places the cursor at the clicked position (or at the end of the line, if the click lands past the text).
     this.input.on('click', (data: { x: number; y: number }) => {
       if (this.textSelected()) return
+      // A click on the chat's name in the prompt (on its first line, while it's in view) opens the chat list.
+      const nameX = data.x - num(this.input.aleft) - num(this.input.ileft)
+      if (this.inputTop + data.y - num(this.input.atop) - num(this.input.itop) === 0 && nameX >= 0 && nameX < this.promptNameWidth) return this.openPicker()
       if (!this.pickerOpen) this.setFocus('input')
       {
         const x = data.x - num(this.input.aleft) - num(this.input.ileft) - this.promptWidth
@@ -1954,6 +1959,7 @@ export class Ui {
     const mark = '❯'
     const promptPlain = this.pickerOpen ? `${APP} ${mark} ` : name ? `${name} ${mark} ` : `${mark} `
     const pw = this.promptWidth = strWidth(promptPlain)
+    this.promptNameWidth = !this.pickerOpen && name ? strWidth(name) : 0
     const target = this.pickerOpen ? null : this.replyTo ?? this.reactTo ?? this.editing
     const header = !target ? null : this.editing
       ? t('editHeader', this.snippet(target))

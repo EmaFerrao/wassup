@@ -43,11 +43,11 @@ background colour to pick light or dark shades.
   left unsent stays with each chat. While someone is typing, a braille spinner turns before their name in the tab and
   beside their 👀 on the rule above the input. New messages in a chat without a tab open one without activating it, with a passing
   notice over it and the bell.
-- **Chats**: `/` opens the list under the app's name, most recent at the bottom, under day separators (today,
-  yesterday, this week, older); each row has the name in its colour, 👀 while the person is online, the last message (a
-  spinner and "typing…" while someone types, the state of yours, mentions by name), how long ago and the unread count.
-  Typing after `wassup ❯` filters it word by word, ignoring accents and case, with the matches underlined; Enter, Tab,
-  → or a click opens.
+- **Chats**: `/`, or a click on the chat's name in the prompt, opens the list under the app's name, most recent at the
+  bottom, under day separators (today, yesterday, this week, older); each row has the name in its colour, 👀 while the
+  person is online, the last message (a spinner and "typing…" while someone types, the state of yours, mentions by
+  name), how long ago and the unread count. Typing after `wassup ❯` filters it word by word, ignoring accents and
+  case, with the matches underlined; Enter, Tab, → or a click opens.
 - **Messages**: yours on the right, each in a bubble with WhatsApp Web's colours where the terminal takes 24-bit
   colour (yours, on a dark theme, toned down to the brightness of theirs) and two discreet greys otherwise, with the
   time and its state outside it and a link's preview image inside it above the text; the pictures of images, stickers,
