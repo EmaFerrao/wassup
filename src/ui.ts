@@ -131,6 +131,10 @@ export class Ui {
   private ghostBox!: blessed.Widgets.BoxElement
   /** The reply, reaction or edit header, floating on the line above the input. */
   private headerBox!: blessed.Widgets.BoxElement
+  /** The faint rules above and below the input, across the whole width, as Claude Code draws its prompt. */
+  private ruleTop!: blessed.Widgets.BoxElement
+  private ruleBottom!: blessed.Widgets.BoxElement
+  private ruleChar = '─'
   private ghostTimer: NodeJS.Timeout | undefined
   private ghostAbort: AbortController | undefined
   /** Right-arrow presses with the next suggestion still on the way: accepted on arrival, one per arrow, so → → → correct in a chain. */
@@ -241,10 +245,10 @@ export class Ui {
    * notices or state from the others; the picker switches it.
    */
   private get fixed(): boolean { return !!this.wanted || inHerdr }
-  /** Input lines: two at minimum, growing with the text up to half the screen. */
+  /** Input lines: one at minimum, growing with the text up to half the screen. */
   private inputRows = 1
-  /** Lines occupied at the bottom: the input. */
-  private get bottom(): number { return this.inputRows }
+  /** Lines occupied at the bottom: the input between its two rules. */
+  private get bottom(): number { return this.inputRows + 2 }
   /** Lines occupied at the top: the tab bar (1), which doesn't exist in single-chat mode. */
   private get barRows(): number { return this.fixed ? 0 : 1 }
 
@@ -282,9 +286,14 @@ export class Ui {
       tags: true, wrap: false, scrollable: true, alwaysScroll: true, mouse: true,
     }) as ClinesBox
     this.input = blessed.box({
-      parent: this.screen, top: `100%-${this.bottom}`, left: 0, right: 0, height: this.inputRows, padding: { left: 1 },
+      parent: this.screen, top: `100%-${this.bottom - 1}`, left: 0, right: 0, height: this.inputRows, padding: { left: 1 },
       tags: true, mouse: true,
     })
+    // Box-drawing only with a UTF-8 locale, like the frames; otherwise plain dashes.
+    this.ruleChar = caps.utf8 ? '─' : '-'
+    this.ruleTop = blessed.box({ parent: this.screen, top: `100%-${this.bottom}`, left: 0, right: 0, height: 1, tags: true })
+    this.ruleBottom = blessed.box({ parent: this.screen, top: '100%-1', left: 0, right: 0, height: 1, tags: true })
+    this.drawRules()
     this.picker = blessed.list({
       parent: this.screen, top: this.barRows, left: 0, right: 0, height: `100%-${this.bottom + this.barRows + 1}`, padding: { left: 1 }, hidden: true,
       tags: true, keys: true, mouse: true,
@@ -300,10 +309,9 @@ export class Ui {
       parent: this.screen, top: '100%-4', left: 0, width: 1, height: 1, tags: true, hidden: true, padding: { left: 1 }, wrap: false, mouse: true,
       style: { bg: this.selectedBg } as unknown as blessed.Widgets.Types.TStyle,
     })
-    // What's being replied to, reacted to or edited, on the line above the input: the blank line that closes the
-    // last message, so the messages don't move; floating, like the correction below, which is created after it
-    // and so wins the row when both are there.
-    this.headerBox = blessed.box({ parent: this.screen, top: 0, left: 0, right: 0, height: 1, tags: true, hidden: true, padding: { left: 1 } })
+    // What's being replied to, reacted to or edited, floating over the input's top rule, as wide as its text so the
+    // rule carries on after it; the correction below is created after it and so wins the row when both are there.
+    this.headerBox = blessed.box({ parent: this.screen, top: 0, left: 0, width: 1, height: 1, tags: true, hidden: true, padding: { left: 1 } })
     // The model's correction, floating one line above the word it replaces, with the same background.
     this.ghostBox = blessed.box({
       parent: this.screen, top: 0, left: 0, width: 1, height: 1, tags: true, hidden: true, wrap: false,
@@ -369,7 +377,7 @@ export class Ui {
     this.bindDiagnostics()
     this.screen.on('keypress', (ch: string, key: blessed.Widgets.Events.IKeyEventArg) => this.onKey(ch, key))
     // The picker list has its position and height calculated by hand: it's recomputed when the terminal resizes.
-    this.screen.on('resize', () => { this.dirtyMessages = true; this.dirtyTabs = true; if (this.pickerOpen) this.refreshPicker(); this.scheduleRender() })
+    this.screen.on('resize', () => { this.dirtyMessages = true; this.dirtyTabs = true; this.drawRules(); if (this.pickerOpen) this.refreshPicker(); this.scheduleRender() })
     this.screen.on('prerender', () => this.rgbBlocks?.snapshot(this.screenRows('olines')))
     this.screen.on('render', () => { this.loadVisibleImages(); this.placeImages(); this.paintRgb() })
 
@@ -1643,7 +1651,8 @@ export class Ui {
     // One column of margin on the right, which also serves as padding: blessed wraps the line if a closing tag lands on the last column.
     this.suggest.width = Math.max(...lines.map(visibleWidth)) + 2
     this.suggest.height = lines.length
-    this.suggest.top = `100%-${this.bottom + lines.length}`
+    // Over the input's top rule, its last line on the rule.
+    this.suggest.top = `100%-${this.bottom + lines.length - 1}`
     this.suggest.setContent(lines.join('\n'))
     this.suggest.show()
   }
@@ -1747,16 +1756,18 @@ export class Ui {
     const prompt = this.pickerOpen ? '/ ' : name ? `{${color}-fg}${esc(name)}{/${color}-fg} ${mark} ` : `${mark} `
     const out = visible.map((l, i) => (this.inputTop + i === 0 ? prompt : ' '.repeat(pw)) + render(l, this.inputTop + i))
     this.input.setContent(out.join('\n'))
-    // The header (reply, react, edit) floats on the line right above the input.
+    // The header (reply, react, edit) floats over the input's top rule.
     if (header) {
-      this.headerBox.top = num(this.screen.height) - rows - 1
-      this.headerBox.setContent(dim(esc(truncate(header, w))))
+      const text = dim(esc(truncate(header, w)))
+      this.headerBox.top = num(this.screen.height) - this.bottom
+      this.headerBox.width = visibleWidth(text) + 2
+      this.headerBox.setContent(text)
       this.headerBox.show()
     } else this.headerBox.hide()
-    // The correction floats one line above its word's line, when that line is in view: the input starts `rows` from
-    // the bottom, the prompt takes its first columns, after the padding.
+    // The correction floats one line above its word's line, when that line is in view: the input starts `rows`
+    // above the bottom rule, the prompt takes its first columns, after the padding.
     if (ghostAbove && ghostLine >= this.inputTop && ghostLine < this.inputTop + rowsAvail) {
-      this.ghostBox.top = num(this.screen.height) - rows + (ghostLine - this.inputTop) - 1
+      this.ghostBox.top = num(this.screen.height) - rows - 1 + (ghostLine - this.inputTop) - 1
       this.ghostBox.left = num(this.input.ileft) + pw - 1 + ghostCol
       this.ghostBox.width = strWidth(ghostAbove) + 1
       this.ghostBox.setContent(dim(italic(esc(ghostAbove))))
@@ -1793,7 +1804,8 @@ export class Ui {
   private resizeInput(rows: number) {
     this.inputRows = rows
     this.input.height = rows
-    this.input.top = `100%-${this.bottom}`
+    this.input.top = `100%-${this.bottom - 1}`
+    this.ruleTop.top = `100%-${this.bottom}`
     this.msgBox.height = `100%-${this.bottom + this.barRows}`
     this.picker.height = `100%-${this.bottom + this.barRows + 1}`
     this.dirtyMessages = true
@@ -2162,6 +2174,12 @@ export class Ui {
       }
     }
     this.rgbBlocks.paint(cells, olines)
+  }
+
+  private drawRules() {
+    const line = faint(this.ruleChar.repeat(Math.max(0, num(this.screen.width))))
+    this.ruleTop.setContent(line)
+    this.ruleBottom.setContent(line)
   }
 
   private openMedia(row: MessageRow) {
