@@ -133,7 +133,7 @@ export class Ui {
   private ghostBox!: blessed.Widgets.BoxElement
   /** The reply, reaction or edit header, floating on the line above the input. */
   private headerBox!: blessed.Widgets.BoxElement
-  /** The faint rule above the input, across the whole width, which also says when this device shows as online. */
+  /** The faint rule above the input, across the whole width, which also shows when this device is online. */
   private ruleTop!: blessed.Widgets.BoxElement
   private ruleChar = '─'
   /** Where the prompt's name sits (screen column and width) and how many 👀 go on the rule above it; null for none. */
@@ -145,6 +145,8 @@ export class Ui {
    * each box's blank last cell lies under the next one's leading space, so the rule reads "── 👀 👀 👀 ──".
    */
   private eyesBoxes: blessed.Widgets.BoxElement[] = []
+  /** Mine, near the rule's right end while this device shows as online: a box of the same kind over a blank stretch. */
+  private myEyes!: blessed.Widgets.BoxElement
   /** Per group, how many of its followed members are online, for as many 👀 (up to EYES_MAX). */
   private groupOnline = new Map<string, number>()
   private ghostTimer: NodeJS.Timeout | undefined
@@ -342,6 +344,7 @@ export class Ui {
     // No wrapping: the rule fills its width, and with the space around "online" blessed would break it there.
     this.ruleTop = blessed.box({ parent: this.screen, top: `100%-${this.bottom}`, left: 0, right: 0, height: 1, tags: true, wrap: false })
     this.eyesBoxes = Array.from({ length: EYES_MAX }, () => blessed.box({ parent: this.screen, top: 0, left: 0, width: 4, height: 1, wrap: false, hidden: true, content: ' 👀' }))
+    this.myEyes = blessed.box({ parent: this.screen, top: 0, left: 0, width: 4, height: 1, wrap: false, hidden: true, content: ' 👀' })
     this.drawRules()
     this.picker = blessed.list({
       parent: this.screen, top: this.barRows, left: 0, right: 0, height: `100%-${this.bottom + this.barRows + 1}`, padding: { left: 1 }, hidden: true,
@@ -1855,10 +1858,10 @@ export class Ui {
     this.drawRules()
     // The header (reply, react, edit) floats over the input's top rule, starting in the column where the text being
     // written starts, after the name and the mark (its padding cell just before), so it leaves the name and its 👀
-    // in view; it stops short of the "online" near the rule's right end.
+    // in view; it stops short of the online mark near the rule's right end.
     if (header) {
       const textCol = num(this.input.aleft) + num(this.input.ileft) + pw
-      const room = num(this.screen.width) - textCol - 1 - (this.available ? t('online').length + 4 : 0)
+      const room = num(this.screen.width) - textCol - 1 - (this.available ? this.onlineLabel().length + 2 : 0)
       const text = dim(esc(truncate(header, Math.max(4, room))))
       this.headerBox.top = num(this.screen.height) - this.bottom
       this.headerBox.left = textCol - 1
@@ -2372,28 +2375,40 @@ export class Ui {
   }
 
   /**
-   * The rule above the input: "online" near its right end while this device shows as online, and 👀 centred over
-   * the prompt's name while the person of the chat is online, or one per member online in a group (only with a
-   * UTF-8 locale: it's a two-cell emoji from the emoji font), in eyesBoxes.
+   * The rule above the input: 👀 near its right end while this device shows as online (myEyes), and centred over
+   * the prompt's name while the person of the chat is online, or one per member online in a group (eyesBoxes). Only
+   * with a UTF-8 locale, as it's a two-cell emoji from the emoji font; otherwise mine is the word "online" and theirs
+   * aren't shown.
    */
   private drawRules() {
     const width = Math.max(0, num(this.screen.width))
-    const label = ` ${t('online')} `, tail = 2
+    const utf8 = this.ruleChar === '─'
+    const label = this.onlineLabel(), tail = 2
     const labelCol = this.available && width >= label.length + tail + 4 ? width - label.length - tail : width
     const rule = labelCol < width
       ? `${this.ruleChar.repeat(labelCol)}${label}${this.ruleChar.repeat(tail)}`
       : this.ruleChar.repeat(width)
     this.ruleTop.setContent(faint(esc(rule)))
+    if (utf8 && labelCol < width) {
+      this.myEyes.top = num(this.screen.height) - this.bottom
+      this.myEyes.left = labelCol
+      this.myEyes.show()
+    } else this.myEyes.hide()
     // The eyes span 3n - 1 cells (two each, a space between), centred over the name, with a space on either side.
     const n = this.promptName?.eyes ?? 0
     const col = this.promptName ? this.promptName.col + Math.max(0, Math.floor((this.promptName.width - (3 * n - 1)) / 2)) : -1
-    const fits = n > 0 && this.ruleChar === '─' && col >= 1 && col + 3 * n <= labelCol
+    const fits = n > 0 && utf8 && col >= 1 && col + 3 * n <= labelCol
     this.eyesBoxes.forEach((box, k) => {
       if (!fits || k >= n) return void box.hide()
       box.top = num(this.screen.height) - this.bottom
       box.left = col - 1 + 3 * k
       box.show()
     })
+  }
+
+  /** What the rule holds near its right end while online: blank cells under myEyes, or the word. */
+  private onlineLabel(): string {
+    return this.ruleChar === '─' ? '    ' : ` ${t('online')} `
   }
 
   private redraw() {
