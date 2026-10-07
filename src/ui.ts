@@ -305,6 +305,9 @@ export class Ui {
       // Back in front, the next key or mouse counts at once rather than up to ten seconds later.
       if (!focused) this.lastPresenceTouch = 0
       this.wa.setFocus(process.pid, focused)
+      // Coming to the front is seeing the chat: what arrived meanwhile is read, and in Herdr the pane stops asking
+      // for attention.
+      if (focused && this.current) this.wa.markRead(this.current).catch(e => logger.warn({ e }, 'markRead'))
     }
     this.screen.program.on('focus', () => focusChanged(true))
     this.screen.program.on('blur', () => focusChanged(false))
