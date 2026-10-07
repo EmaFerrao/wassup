@@ -604,6 +604,12 @@ export class Ui {
   }
 
   private onConnection(state: ConnState, detail?: string) {
+    // Any change of connection, the switch to another server process included, voids what was said about who's
+    // typing and who's online: the new connection doesn't know, and would never send the "stopped" or "offline"
+    // that clears it. Typing fades out as if they'd stopped; online comes back once open, from the presence
+    // subscriptions renewed below.
+    for (const [jid, stopped] of this.typing) if (stopped === null) this.onTyping(jid, false)
+    if (this.online.size) { this.online.clear(); this.drawInput() }
     if (state === 'qr' && this.wa.qr) {
       QRCode.toString(this.wa.qr, { type: 'terminal', small: true }, (err, qr) => {
         if (err) { logger.error({ err }, 'qr'); return }
