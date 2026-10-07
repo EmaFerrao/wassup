@@ -18,7 +18,7 @@ import { enableBracketedPaste } from './paste.js'
 import { Hearts, reaction, emojiOnly } from './hearts.js'
 import { t } from './i18n.js'
 import { parseHex, mix, nearest256, type Rgb } from './rainbow.js'
-import { suggest, llmEnabled, type Suggestion } from './llm.js'
+import { suggest, llmEnabled, type Suggestion, type Fix } from './llm.js'
 import { patchBlessedItalic } from './italic.js'
 
 /** WhatsApp Web's quick reactions, in its order, plus "⋯" for typing any other. */
@@ -53,6 +53,8 @@ interface ClinesBox extends blessed.Widgets.BoxElement {
 
 /** The sign that someone is typing, in their tab and the prompt: the classic braille dots spinner, a frame every 80 ms. */
 const SPINNER = [...'⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏']
+/** The model's suggestion in view: the letters missing from the half-typed word, the right word, or a correction. */
+type GhostView = { kind: 'suffix' | 'word'; text: string; word: { from: string; to: string } } | { kind: 'fix'; text: string; fix: Fix }
 /** The app's name, over the chat list, in the rules' thin lines with round corners, like speech bubbles. */
 const APP = 'wassup'
 const WORDMARK = [
@@ -142,6 +144,9 @@ export class Ui {
   private suggestStart = 0
   /** Local model suggestion for the text `text` (continuation or correction), requested 150 ms after the last keystroke and shown for 4 s. */
   private ghost: { text: string; s: Suggestion } | undefined
+  /** What floats above the input (its key: a correction's place and text, or the word), and the one whose 10 s ran out. */
+  private floatKey = ''
+  private floatOff = ''
   /** The correction floating right above the word it replaces. */
   private ghostBox!: blessed.Widgets.BoxElement
   /** The reply, reaction or edit header, floating on the line above the input. */
@@ -1883,32 +1888,56 @@ export class Ui {
     return this.cursor >= graphemes(this.inputValue).length
   }
 
-  /** The stored suggestion still applies to what's typed and the cursor is at the end: it's the one shown and accepted. */
-  private ghostShown(): Suggestion | null {
-    return this.ghostValid() && !this.pickerOpen && this.cursorAtEnd() ? this.ghost!.s : null
+  /**
+   * The model's corrections that still apply: all of them for the text they were asked for; with more typed since,
+   * those whose text up to the word's end is untouched and the word not extended into another. Their offsets hold,
+   * as everything before their end is the same.
+   */
+  private liveFixes(): Fix[] {
+    const g = this.ghost
+    if (!g) return []
+    if (g.text === this.inputValue) return g.s.fixes
+    return g.s.fixes.filter(f => {
+      const next = this.inputValue[f.end]
+      return this.inputValue.startsWith(g.text.slice(0, f.end)) && (next == null || !/[\p{L}\p{M}\p{N}'-]/u.test(next))
+    })
+  }
+
+  /** Whether anything of the stored suggestion still applies to the text. */
+  private ghostValid(): boolean {
+    const g = this.ghost
+    return !!g && ((!!g.s.word && g.text === this.inputValue) || this.liveFixes().length > 0)
+  }
+
+  /** The correction the cursor is on (from its first letter to just past its last), or, at the end of the text, the last one. */
+  private currentFix(): Fix | null {
+    const fixes = this.liveFixes()
+    const at = graphemes(this.inputValue).slice(0, this.cursor).join('').length
+    return fixes.find(f => at >= f.start && at <= f.end) ?? (this.cursorAtEnd() ? fixes.at(-1) ?? null : null)
   }
 
   /**
-   * Whether the suggestion still applies to the text: as is, for the text it was asked for; a correction of a word
-   * behind the cursor also survives further typing, as long as the text up to that word is untouched and the word
-   * hasn't been extended into another.
+   * The suggestion in view, the one Tab or → accepts: the word half-typed at the end, with the cursor there (the
+   * letters missing, or the right word), which comes first; otherwise the correction the cursor is on (currentFix).
    */
-  private ghostValid(): boolean {
+  private ghostShown(): GhostView | null {
     const g = this.ghost
-    if (!g) return false
-    if (g.text === this.inputValue) return true
-    if (g.s.word || !g.s.fix) return false
-    const { end } = g.s.fix
-    const next = this.inputValue[end]
-    return this.inputValue.startsWith(g.text.slice(0, end)) && (next == null || !/[\p{L}\p{M}\p{N}'-]/u.test(next))
+    if (!g || this.pickerOpen) return null
+    if (g.s.word && g.text === this.inputValue && this.cursorAtEnd()) {
+      const { from, to } = g.s.word
+      if (to.toLowerCase().startsWith(from.toLowerCase()) && to.length > from.length) return { kind: 'suffix', text: to.slice(from.length), word: g.s.word }
+      return { kind: 'word', text: to, word: g.s.word }
+    }
+    const fix = this.currentFix()
+    return fix ? { kind: 'fix', text: fix.to, fix } : null
   }
 
   /**
    * Asks the model for a suggestion for the current text, `delay` ms after the last keystroke (150 while typing; 0
    * right after accepting one, which is when it's idle waiting for the next one), and only with the cursor at the
    * end, with no reaction in progress nor emoji suggestions open. A new request cancels the previous one; the
-   * response is only used if the text is still the same when it arrives, and it stays in view for 10 s. The one
-   * shown goes away when it no longer applies (`ghostValid`), or when a new one arrives.
+   * response is only used if the text is still the same when it arrives. Its corrections stay underlined while they
+   * apply (`liveFixes`); what floats above goes after 10 s (drawInput). It all goes when a new one arrives.
    */
   private scheduleGhost(delay = 150) {
     if (this.ghost && !this.ghostValid()) this.clearGhost()
@@ -1931,8 +1960,8 @@ export class Ui {
         if (!s) { this.acceptOnArrival = 0; return }
         this.ghost = { text, s }
         if (this.acceptOnArrival > 0) { this.acceptOnArrival--; return void this.acceptGhost() }
-        if (this.ghostHide) clearTimeout(this.ghostHide)
-        this.ghostHide = setTimeout(() => { if (this.ghost?.text === text) { this.clearGhost(); this.drawInput(); this.screen.render() } }, 10000)
+        // A new suggestion floats again for its 10 s (drawInput).
+        this.floatKey = this.floatOff = ''
         this.drawInput()
         this.screen.render()
       }, e => { this.acceptOnArrival = 0; if (!abort.signal.aborted) logger.debug({ e }, 'llm') })
@@ -1943,31 +1972,32 @@ export class Ui {
     this.ghost = undefined
     this.ghostBox.hide()
     if (this.ghostHide) { clearTimeout(this.ghostHide); this.ghostHide = undefined }
+    this.floatKey = this.floatOff = ''
   }
 
-  /** What's shown: the word mid-typing (the missing letters, or the correct word) takes priority over a correction behind it. */
-  private ghostView(s: Suggestion): { kind: 'suffix' | 'word' | 'fix'; text: string } | null {
-    if (s.word) {
-      const { from, to } = s.word
-      if (to.toLowerCase().startsWith(from.toLowerCase()) && to.length > from.length) return { kind: 'suffix', text: to.slice(from.length) }
-      return { kind: 'word', text: to }
-    }
-    return s.fix ? { kind: 'fix', text: s.fix.to } : null
-  }
-
+  /**
+   * Takes the suggestion in view (ghostShown). The other corrections stay underlined, those after the one taken
+   * moved along by its change in length; with none left, the next suggestion is asked for at once.
+   */
   private acceptGhost() {
-    const s = this.ghostShown()
-    const v = s && this.ghostView(s)
-    if (!s || !v) return
+    const v = this.ghostShown()
+    if (!v) return
+    const atEnd = this.cursorAtEnd()
+    let value: string, rest: Fix[]
     if (v.kind === 'fix') {
-      const { start, end, to } = s.fix!
-      this.inputValue = this.inputValue.slice(0, start) + to + this.inputValue.slice(end)
+      const { start, end, to } = v.fix, delta = to.length - (end - start)
+      value = this.inputValue.slice(0, start) + to + this.inputValue.slice(end)
+      rest = this.liveFixes().filter(f => f !== v.fix).map(f => (f.start >= end ? { ...f, start: f.start + delta, end: f.end + delta } : f))
+      this.cursor = atEnd ? graphemes(value).length : graphemes(value.slice(0, start + to.length)).length
     } else {
-      this.inputValue = this.inputValue.slice(0, this.inputValue.length - s.word!.from.length) + s.word!.to
+      value = this.inputValue.slice(0, this.inputValue.length - v.word.from.length) + v.word.to
+      rest = this.liveFixes()
+      this.cursor = graphemes(value).length
     }
-    this.cursor = graphemes(this.inputValue).length
+    this.inputValue = value
     this.accepted = /[\p{L}\p{M}\p{N}'-]$/u.test(this.inputValue) ? this.inputValue : undefined
     this.clearGhost()
+    if (rest.length) this.ghost = { text: value, s: { word: null, fixes: rest } }
     this.promoteActive()
     this.updateSuggestions(0)
     this.drawInput()
@@ -2025,9 +2055,9 @@ export class Ui {
         : t('reactHeader', this.who(target), this.snippet(target))
     // Model suggestion, discreet, in gray italic: the letters missing from the word mid-typing, attached to the cursor
     // (which sits on the first one); a correction, whether of the mid-typed word or of a wrong word further back,
-    // floating on the line above the word, starting on its column. Tab accepts.
-    const ghost = this.ghostShown()
-    const view = ghost ? this.ghostView(ghost) : null
+    // floating on the line above the word, starting on its column. Tab accepts. Every wrong passage the model found
+    // is underlined in yellow while it applies; what floats is the cursor's one (ghostShown).
+    const view = this.ghostShown()
     const width = Math.max(4, w - pw)
     const chars = graphemes(this.pickerOpen ? this.filter : this.inputValue)
     const cursor = Math.min(this.pickerOpen ? this.filterCursor : this.cursor, chars.length)
@@ -2046,11 +2076,18 @@ export class Ui {
     const cursorLine = lines[row]!
     const avail = width - visibleWidth(esc(text(cursorLine))) - 1
     let ghostNext = '', ghostAbove = '', ghostLine = -1, ghostCol = 0
-    if (view && col >= cursorLine.length) {
+    // What floats stays 10 s, then goes until another takes its place (a new suggestion, the cursor on another word).
+    const floatKey = !view ? '' : view.kind === 'fix' ? `${view.fix.start}:${view.fix.to}` : `word:${view.word.to}`
+    if (floatKey !== this.floatKey) {
+      this.floatKey = floatKey
+      if (this.ghostHide) clearTimeout(this.ghostHide)
+      this.ghostHide = floatKey ? setTimeout(() => { this.floatOff = floatKey; this.drawInput(); this.screen.render() }, 10000) : undefined
+    }
+    if (view && floatKey !== this.floatOff && (view.kind === 'fix' || col >= cursorLine.length)) {
       if (view.kind === 'suffix' && strWidth(view.text) <= avail + 1) ghostNext = view.text
       else {
-        const word = view.kind === 'fix' ? ghost!.fix!.to : ghost!.word!.to
-        const startUnit = view.kind === 'fix' ? ghost!.fix!.start : this.inputValue.length - ghost!.word!.from.length
+        const word = view.kind === 'fix' ? view.fix.to : view.word.to
+        const startUnit = view.kind === 'fix' ? view.fix.start : this.inputValue.length - view.word.from.length
         let at = graphemes(this.inputValue.slice(0, startUnit)).length, wl = 0
         while (wl < lines.length - 1 && at >= lines[wl]!.length) at -= lines[wl++]!.length
         ghostAbove = truncate(`⇢ ${word}`, width)
@@ -2065,16 +2102,39 @@ export class Ui {
     this.inputLines = lines
     this.inputTop = Math.max(0, Math.min(row - (rowsAvail - 1), lines.length - rowsAvail))
     const showCursor = this.focus === 'input' || this.focus === 'picker'
+    // The graphemes of the passages the model found wrong, by their place in the whole text, and where each line starts.
+    const marked = new Set<number>()
+    if (!this.pickerOpen) {
+      for (const f of this.liveFixes()) {
+        const a = graphemes(this.inputValue.slice(0, f.start)).length, b = graphemes(this.inputValue.slice(0, f.end)).length
+        for (let i = a; i < b; i++) marked.add(i)
+      }
+    }
+    const lineStart: number[] = []
+    lines.reduce((at, l) => { lineStart.push(at); return at + l.length }, 0)
+    // As `text`, a line's graphemes as drawn (no "\n", no trailing space past the width), the wrong ones underlined.
+    const paint = (gs: string[], from: number) => {
+      const drawn = strWidth(gs.filter(c => c !== '\n').join('')) > width ? gs.slice(0, gs.length - (/\s*$/.exec(gs.join(''))?.[0].length ?? 0)) : gs
+      let out = '', on = false
+      drawn.forEach((g, k) => {
+        if (g === '\n') return
+        const m = marked.has(from + k)
+        if (m !== on) { out += m ? '{underline}{yellow-fg}' : '{/yellow-fg}{/underline}'; on = m }
+        out += esc(g)
+      })
+      return on ? `${out}{/yellow-fg}{/underline}` : out
+    }
     const render = (line: string[], r: number) => {
-      if (!showCursor || r !== row) return esc(text(line))
-      const before = esc(text(line.slice(0, col)))
+      const from = lineStart[r] ?? 0
+      if (!showCursor || r !== row) return paint(line, from)
+      const before = paint(line.slice(0, col), from)
       if (ghostNext) {
         // The cursor sits on the suggestion's first letter, with no empty cell in between; the rest follows in italic.
         const g = graphemes(ghostNext)
         return before + dim(italic('{inverse}' + esc(g[0]!) + '{/inverse}' + esc(g.slice(1).join(''))))
       }
       const under = line[col] == null || line[col] === '\n' ? ' ' : line[col]!
-      return before + '{inverse}' + esc(under) + '{/inverse}' + esc(text(line.slice(col + 1)))
+      return before + '{inverse}' + esc(under) + '{/inverse}' + paint(line.slice(col + 1), from + col + 1)
     }
     const visible = lines.slice(this.inputTop, this.inputTop + rowsAvail)
     // The prompt says who the line talks to: the chat's name, in the colour it has as a sender in groups (colorFor

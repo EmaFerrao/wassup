@@ -1,7 +1,7 @@
 /**
  * Writing suggestions from a local model (llama-server, an OpenAI-compatible API), of only two kinds: the word
- * that's half-typed at the cursor, completed or corrected, and the correction of a wrong word already written in
- * the sentence (spelling, words stuck together, a word swapped in an expression, grammar).
+ * that's half-typed at the cursor, completed or corrected, and the corrections of the wrong words already written in
+ * the sentence (spelling, words stuck together, a word swapped in an expression, grammar, punctuation), all of them.
  * Turned off with WA_LLM=off; with no server responding, suggestions simply don't appear.
  */
 import { logger } from './log.js'
@@ -17,21 +17,24 @@ export interface Suggestion {
   word: { from: string; to: string } | null
   /**
    * Finished words the model flags as wrong, exactly as they are in the text, their correction, and where they are
-   * (code units of the text the suggestion was requested for). When the model returns a whole expression
-   * ("de vem em quando" → "de vez em quando"), only the part that changes is kept ("vem" → "vez").
+   * (code units of the text the suggestion was requested for), in the text's order, never overlapping. When the model
+   * returns a whole expression ("de vem em quando" → "de vez em quando"), only the part that changes is kept
+   * ("vem" → "vez").
    */
-  fix: { from: string; to: string; start: number; end: number } | null
+  fixes: Fix[]
 }
 
+export interface Fix { from: string; to: string; start: number; end: number }
+
 const SYSTEM_PT = `Ajudas a escrever mensagens de WhatsApp em português de Portugal (ortografia europeia). Recebes a conversa recente e o texto em curso, que termina onde está o cursor.
-Responde só com JSON: {"word": "...", "wrong": "...", "fix": "..."}.
+Responde só com JSON: {"word": "...", "fixes": [{"wrong": "...", "fix": "..."}]}.
 - "word": se o texto em curso acabar a meio de uma palavra, essa palavra inteira, como deve ficar escrita (completa-a; se o que está escrito tiver erro, dá a forma certa; se forem duas palavras coladas, separa-as); senão "". Escolhe pelo tom e assunto da conversa.
-- "wrong" e "fix": se alguma palavra já terminada do texto em curso tiver erro ortográfico ou acento em falta ("amanha" → "amanhã", "as 8" → "às 8", "nao" → "não"), forem duas palavras coladas sem espaço ("vamosjantar"), for uma palavra trocada por outra parecida que não faz sentido ali ("de vem em quando" → "de vez em quando"), ou houver um erro gramatical (concordância, conjugação, regência: "a gente vamos" → "a gente vai", "houveram problemas" → "houve problemas", "fazem dois anos" → "faz dois anos"), ou faltar uma vírgula a seguir a uma saudação ou antes de um vocativo ("Olá gostas de mim?" → "Olá, gostas de mim?", "obrigado Marta" → "obrigado, Marta"), o trecho exactamente como está escrito (o mais curto possível, só as palavras precisas) e a sua correcção; senão ambas "". Um erro de cada vez, o mais à direita. Não mudes nomes próprios, estrangeirismos, abreviaturas correntes, a linguagem informal nem o estilo de quem escreve.`
+- "fixes": por cada erro, se alguma palavra já terminada do texto em curso tiver erro ortográfico ou acento em falta ("amanha" → "amanhã", "as 8" → "às 8", "nao" → "não"), forem duas palavras coladas sem espaço ("vamosjantar"), for uma palavra trocada por outra parecida que não faz sentido ali ("de vem em quando" → "de vez em quando"), ou houver um erro gramatical (concordância, conjugação, regência: "a gente vamos" → "a gente vai", "houveram problemas" → "houve problemas", "fazem dois anos" → "faz dois anos"), ou faltar uma vírgula a seguir a uma saudação ou antes de um vocativo ("Olá gostas de mim?" → "Olá, gostas de mim?", "obrigado Marta" → "obrigado, Marta"), em "wrong" o trecho exactamente como está escrito (o mais curto possível, só as palavras precisas) e em "fix" a sua correcção. Todos os erros, pela ordem do texto, até cinco; sem erros, []. Não mudes nomes próprios, estrangeirismos, abreviaturas correntes, a linguagem informal nem o estilo de quem escreve.`
 
 const SYSTEM_EN = `You help write WhatsApp messages in English. You get the recent conversation and the text being typed, which ends where the cursor is.
-Answer only with JSON: {"word": "...", "wrong": "...", "fix": "..."}.
+Answer only with JSON: {"word": "...", "fixes": [{"wrong": "...", "fix": "..."}]}.
 - "word": if the text ends in the middle of a word, that whole word as it should be written (complete it; if what is written has a typo, give the right form; if two words are stuck together, separate them); otherwise "". Choose by the tone and topic of the conversation.
-- "wrong" and "fix": if some finished word of the text has a spelling error ("tomorow" → "tomorrow", "recieve" → "receive"), two words are stuck together without a space ("letsgo"), a word was swapped for a similar one that makes no sense there ("could of" → "could have", "their going" → "they're going"), or there is a grammar error (agreement, tense: "he don't" → "he doesn't", "we was" → "we were"), or a comma is missing after a greeting or before a name being addressed ("Hi how are you?" → "Hi, how are you?", "thanks John" → "thanks, John"), give the passage exactly as written (as short as possible, only the words needed) and its correction; otherwise both "". One error at a time, the rightmost. Do not change proper names, slang, common abbreviations, informal language or the writer's style.`
+- "fixes": for each error, if some finished word of the text has a spelling error ("tomorow" → "tomorrow", "recieve" → "receive"), two words are stuck together without a space ("letsgo"), a word was swapped for a similar one that makes no sense there ("could of" → "could have", "their going" → "they're going"), or there is a grammar error (agreement, tense: "he don't" → "he doesn't", "we was" → "we were"), or a comma is missing after a greeting or before a name being addressed ("Hi how are you?" → "Hi, how are you?", "thanks John" → "thanks, John"), give in "wrong" the passage exactly as written (as short as possible, only the words needed) and in "fix" its correction. All the errors, in the text's order, up to five; with none, []. Do not change proper names, slang, common abbreviations, informal language or the writer's style.`
 
 const SYSTEM = lang === 'pt' ? SYSTEM_PT : SYSTEM_EN
 const LABELS = lang === 'pt'
@@ -40,8 +43,20 @@ const LABELS = lang === 'pt'
 
 const SCHEMA = {
   type: 'object',
-  properties: { word: { type: 'string', maxLength: 60 }, wrong: { type: 'string', maxLength: 40 }, fix: { type: 'string', maxLength: 60 } },
-  required: ['word', 'wrong', 'fix'],
+  properties: {
+    word: { type: 'string', maxLength: 60 },
+    fixes: {
+      type: 'array',
+      maxItems: 5,
+      items: {
+        type: 'object',
+        properties: { wrong: { type: 'string', maxLength: 40 }, fix: { type: 'string', maxLength: 60 } },
+        required: ['wrong', 'fix'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['word', 'fixes'],
   additionalProperties: false,
 }
 
@@ -94,7 +109,7 @@ export function locateWord(text: string, phrase: string): { start: number; end: 
  * Narrows an expression correction down to the words that change: the matching words at the start and end of both
  * are stripped. "de vem em quando" → "de vez em quando" becomes "vem" → "vez", at the right spot within the occurrence found.
  */
-export function narrowFix(text: string, wrong: string, fix: string): Suggestion['fix'] {
+export function narrowFix(text: string, wrong: string, fix: string): Fix | null {
   const loc = locateWord(text, wrong)
   return loc && narrowAt(loc, wrong, fix)
 }
@@ -104,7 +119,7 @@ export function narrowFix(text: string, wrong: string, fix: string): Suggestion[
  * "word" ("nao" → "não", "esta bem" → "está bem"). This is accepted when the wrong passage ends right at the end of
  * the text, word for word, and each corrected word matches what was written or is plausible as its correction.
  */
-export function fixAtEnd(text: string, wrong: string, fix: string): Suggestion['fix'] {
+export function fixAtEnd(text: string, wrong: string, fix: string): Fix | null {
   if (!text.endsWith(wrong)) return null
   const start = text.length - wrong.length
   if (start > 0 && /[\p{L}\p{M}\p{N}'-]/u.test(text[start - 1]!)) return null
@@ -113,7 +128,7 @@ export function fixAtEnd(text: string, wrong: string, fix: string): Suggestion['
   return narrowAt({ start, end: text.length }, wrong, fix)
 }
 
-function narrowAt(loc: { start: number; end: number }, wrong: string, fix: string): Suggestion['fix'] {
+function narrowAt(loc: { start: number; end: number }, wrong: string, fix: string): Fix | null {
   const a = wrong.split(' '), b = fix.split(' ')
   let head = 0
   while (head < a.length && head < b.length && a[head] === b[head]) head++
@@ -137,7 +152,7 @@ export async function suggest(context: { who: string; text: string }[], text: st
   const body = {
     model: MODEL,
     temperature: 0,
-    max_tokens: 48,
+    max_tokens: 200,
     reasoning_effort: 'none',
     chat_template_kwargs: { enable_thinking: false },
     response_format: { type: 'json_schema', json_schema: { name: 'suggestion', schema: SCHEMA } },
@@ -148,7 +163,7 @@ export async function suggest(context: { who: string; text: string }[], text: st
   const data = (await res.json()) as { choices?: { message?: { content?: string } }[] }
   const content = data.choices?.[0]?.message?.content
   if (!content) return null
-  let parsed: { word?: unknown; wrong?: unknown; fix?: unknown }
+  let parsed: { word?: unknown; fixes?: unknown }
   try { parsed = JSON.parse(content) } catch { logger.warn({ content }, 'llm: response is not JSON'); return null }
   // Only words made of letters or digits, up to four separated by a space (words stuck together to split, expressions): the
   // model sometimes returns quotes, punctuation or the end of the text stuck on. A wrong passage and its fix may also
@@ -161,7 +176,15 @@ export async function suggest(context: { who: string; text: string }[], text: st
   const partial = partialWord(text)
   const wordTo = str(parsed.word)
   const word = partial && wordTo && wordTo !== partial && plausibleWord(partial, wordTo) ? { from: partial, to: wordTo } : null
-  const wrong = str(parsed.wrong, true), fixTo = str(parsed.fix, true)
-  const fix = wrong && fixTo && fixTo !== wrong ? narrowFix(text, wrong, fixTo) ?? (word ? null : fixAtEnd(text, wrong, fixTo)) : null
-  return word || fix ? { word, fix } : null
+  // Each correction where it is in the text; the one at the very end only when no word is half-typed there. Those
+  // overlapping one already taken are dropped.
+  const fixes: Fix[] = []
+  for (const item of Array.isArray(parsed.fixes) ? parsed.fixes.slice(0, 5) : []) {
+    const wrong = str((item as { wrong?: unknown })?.wrong, true), fixTo = str((item as { fix?: unknown })?.fix, true)
+    if (!wrong || !fixTo || fixTo === wrong) continue
+    const fix = narrowFix(text, wrong, fixTo) ?? (word ? null : fixAtEnd(text, wrong, fixTo))
+    if (fix && !fixes.some(f => fix.start < f.end && f.start < fix.end)) fixes.push(fix)
+  }
+  fixes.sort((a, b) => a.start - b.start)
+  return word || fixes.length ? { word, fixes } : null
 }
