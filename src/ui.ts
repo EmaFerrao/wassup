@@ -148,8 +148,11 @@ export class Ui {
   /** The faint rule above the input, across the whole width, which also shows when this device is online. */
   private ruleTop!: blessed.Widgets.BoxElement
   private ruleChar = '─'
-  /** Where the prompt's name sits (screen column and width) and how many 👀 go on the rule above it; null for none. */
-  private promptName: { col: number; width: number; eyes: number } | null = null
+  /**
+   * Where the prompt's name sits (screen column and width; the mark's, for a chat with no name), how many 👀 go on
+   * the rule above it and whether the typing spinner goes beside them; null for none.
+   */
+  private promptName: { col: number; width: number; eyes: number; typing: boolean } | null = null
   /**
    * The 👀 over the name, each in a small box of its own floating over the rule: blessed leaves the last cell of a
    * line blank when it holds a wide character, which inside the rule lost its last dash, and counts each emoji one
@@ -159,6 +162,8 @@ export class Ui {
   private eyesBoxes: blessed.Widgets.BoxElement[] = []
   /** Mine, near the rule's right end while this device shows as online: a box of the same kind over a blank stretch. */
   private myEyes!: blessed.Widgets.BoxElement
+  /** The braille spinner while the person of the chat types, right after their 👀 (" ⠋ ", a space on either side). */
+  private typingBox!: blessed.Widgets.BoxElement
   /** Per group, how many of its followed members are online, for as many 👀 (up to EYES_MAX). */
   private groupOnline = new Map<string, number>()
   private ghostTimer: NodeJS.Timeout | undefined
@@ -375,6 +380,7 @@ export class Ui {
     this.ruleTop = blessed.box({ parent: this.screen, top: `100%-${this.bottom}`, left: 0, right: 0, height: 1, tags: true, wrap: false })
     this.eyesBoxes = Array.from({ length: EYES_MAX }, () => blessed.box({ parent: this.screen, top: 0, left: 0, width: 4, height: 1, wrap: false, hidden: true, content: ' 👀' }))
     this.myEyes = blessed.box({ parent: this.screen, top: 0, left: 0, width: 4, height: 1, wrap: false, hidden: true, content: ' 👀' })
+    this.typingBox = blessed.box({ parent: this.screen, top: 0, left: 0, width: 3, height: 1, wrap: false, hidden: true })
     this.drawRules()
     this.picker = blessed.list({
       parent: this.screen, top: this.barRows, left: 0, right: 0, height: `100%-${this.bottom + this.barRows + 1}`, padding: { left: 1 }, hidden: true,
@@ -757,9 +763,9 @@ export class Ui {
   }
 
   /**
-   * Someone started or stopped typing: a braille spinner turns in their tab, before the name, in the prompt of the
-   * active chat in the mark's place and in the window title (in Herdr, the agent's name), on a clock that runs while
-   * anyone is typing.
+   * Someone started or stopped typing: a braille spinner turns in their tab, before the name, on the rule above the
+   * active chat's input, beside the 👀 over the name, and in the window title (in Herdr, the agent's name), on a
+   * clock that runs while anyone is typing.
    */
   private onTyping(jid: string, active: boolean) {
     if (active) this.typing.add(jid); else this.typing.delete(jid)
@@ -767,7 +773,7 @@ export class Ui {
       this.typingTimer = setInterval(() => {
         this.drawTabs()
         this.redrawPickerRows(this.typing)
-        if (this.current && this.typing.has(this.current)) this.drawInput()
+        if (this.current && this.typing.has(this.current)) this.drawRules()
         this.updateTitle()
         this.screen.render()
       }, 80)
@@ -1936,19 +1942,16 @@ export class Ui {
 
   private drawInput() {
     // One line at minimum (grows with the text), the prompt on the first ("Ema ❯ ": the chat's first name, in the
-    // colour it has in groups, with a braille spinner for the mark while they type and 👀 above it on the rule while
-    // they're online; "Lourinhasaurus ❯ " for a group; just "❯ " for a chat known only by a number), text wrapped
+    // colour it has in groups, with 👀 above it on the rule while they're online and a braille spinner beside them
+    // while they type; "Lourinhasaurus ❯ " for a group; just "❯ " for a chat known only by a number), text wrapped
     // by word (never mid-word) and continuation indented under the text.
     // When the text has more lines than fit, the ones around the cursor are shown, with the cursor on the bottom one whenever possible. With
     // "chats" open, the same line is used to type the filter. When replying, reacting or editing, the line
     // above the input says which message (`headerBox`), so the input itself keeps its rows for the text.
     const w = num(this.input.width) - num(this.input.iwidth) - 1
     const name = this.pickerOpen || !this.current ? null : shortName(this.current, true)
-    // The prompt ends in "❯", groups and one-to-one chats alike. While the other person is typing, the mark is a
-    // braille spinner, a frame every 80 ms, turned by the typing timer's redraws; one cell either way, so the text
-    // doesn't move.
-    const typing = !this.pickerOpen && !!this.current && this.typing.has(this.current)
-    const mark = typing ? spinnerFrame() : '❯'
+    // The prompt ends in "❯", groups and one-to-one chats alike.
+    const mark = '❯'
     const promptPlain = this.pickerOpen ? `${APP} ${mark} ` : name ? `${name} ${mark} ` : `${mark} `
     const pw = this.promptWidth = strWidth(promptPlain)
     const target = this.pickerOpen ? null : this.replyTo ?? this.reactTo ?? this.editing
@@ -2019,10 +2022,12 @@ export class Ui {
     const out = visible.map((l, i) => (this.inputTop + i === 0 ? prompt : ' '.repeat(pw)) + render(l, this.inputTop + i))
     this.input.setContent(out.join('\n'))
     // The rule above shows 👀 over the name while the person of a one-to-one chat is online, and in a group one per
-    // member online, up to EYES_MAX.
+    // member online, up to EYES_MAX; while someone in it types, the spinner beside them (over the mark when the chat
+    // has no name).
     const jid = this.current
     const eyes = !name || !jid ? 0 : jid.endsWith('@g.us') ? Math.min(EYES_MAX, this.groupOnline.get(jid) ?? 0) : this.online.has(jid) ? 1 : 0
-    this.promptName = eyes ? { col: num(this.input.aleft) + num(this.input.ileft), width: strWidth(name!), eyes } : null
+    const typing = !this.pickerOpen && !!jid && this.typing.has(jid)
+    this.promptName = eyes || typing ? { col: num(this.input.aleft) + num(this.input.ileft), width: name ? strWidth(name) : 1, eyes, typing } : null
     this.drawRules()
     // The header (reply, react, edit) floats over the input's top rule, starting in the column where the text being
     // written starts, after the name and the mark (its padding cell just before), so it leaves the name and its 👀
@@ -2567,7 +2572,8 @@ export class Ui {
    * The rule above the input: 👀 near its right end while this device shows as online (myEyes), and centred over
    * the prompt's name while the person of the chat is online, or one per member online in a group (eyesBoxes). Only
    * with a UTF-8 locale, as it's a two-cell emoji from the emoji font; otherwise mine is the word "online" and theirs
-   * aren't shown.
+   * aren't shown. While they type, the braille spinner follows their 👀 (typingBox), a frame every 80 ms, turned by
+   * the typing timer's redraws.
    */
   private drawRules() {
     const width = Math.max(0, num(this.screen.width))
@@ -2583,16 +2589,25 @@ export class Ui {
       this.myEyes.left = labelCol
       this.myEyes.show()
     } else this.myEyes.hide()
-    // The eyes span 3n - 1 cells (two each, a space between), centred over the name, with a space on either side.
-    const n = this.promptName?.eyes ?? 0
-    const col = this.promptName ? this.promptName.col + Math.max(0, Math.floor((this.promptName.width - (3 * n - 1)) / 2)) : -1
-    const fits = n > 0 && utf8 && col >= 1 && col + 3 * n <= labelCol
+    // The eyes span 3n - 1 cells (two each, a space between), and the spinner one more after a space; together
+    // centred over the name, with a space on either side.
+    const n = utf8 ? this.promptName?.eyes ?? 0 : 0
+    const spin = !!this.promptName?.typing
+    const span = (n ? 3 * n - 1 : -1) + (spin ? 2 : 0)
+    const col = this.promptName ? this.promptName.col + Math.max(0, Math.floor((this.promptName.width - span) / 2)) : -1
+    const fits = span > 0 && col >= 1 && col + span + 1 <= labelCol
     this.eyesBoxes.forEach((box, k) => {
       if (!fits || k >= n) return void box.hide()
       box.top = num(this.screen.height) - this.bottom
       box.left = col - 1 + 3 * k
       box.show()
     })
+    if (fits && spin) {
+      this.typingBox.top = num(this.screen.height) - this.bottom
+      this.typingBox.left = col - 1 + 3 * n
+      this.typingBox.setContent(` ${spinnerFrame()} `)
+      this.typingBox.show()
+    } else this.typingBox.hide()
   }
 
   /** What the rule holds near its right end while online: blank cells under myEyes, or the word. */
