@@ -52,6 +52,8 @@ interface ClinesBox extends blessed.Widgets.BoxElement {
 
 /** How long the rainbow fade lasts after the person stops typing. */
 const FADE_MS = 1500
+/** The prompt's mark while the other person types: the classic braille dots spinner. */
+const SPINNER = [...'⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏']
 /** How many of a chat's latest messages the panel draws at first, and how many more each scroll past the top adds. */
 const PAGE = 300
 /** The notice for a message in another chat: time to appear, stay, and disappear, in milliseconds. */
@@ -208,7 +210,7 @@ export class Ui {
   /** What's left unsent in each chat: switching tabs swaps the input, so nothing goes to the wrong person. */
   private drafts = new Map<string, { value: string; cursor: number }>()
   private reactTo: MessageRow | null = null
-  /** Columns the prompt takes on the input's first line ("Ema ❯ "), and the continuation lines' indent. */
+  /** Columns the prompt takes on the input's first line ("Ema ◉ "), and the continuation lines' indent. */
   private promptWidth = 2
   private images: ImageSlot[] = []
   private mode: ImageMode
@@ -225,6 +227,8 @@ export class Ui {
    * clock that redraws the bar while there are names animating.
    */
   private typing = new Map<string, number | null>()
+  /** One-to-one chats whose person is online right now, for the prompt's mark. */
+  private online = new Set<string>()
   private typingTimer: NodeJS.Timeout | undefined
   private ring: Rgb[]
   private fgRgb: Rgb
@@ -543,6 +547,10 @@ export class Ui {
     this.wa.on('connection', (state, detail) => this.onConnection(state, detail))
     this.wa.on('chats', () => { this.dirtyTabs = true; if (this.pickerOpen) this.refreshPicker(); this.scheduleRender() })
     this.wa.on('typing', (jid, who) => this.onTyping(jid, who.length > 0))
+    this.wa.on('presence', (jid, on) => {
+      if (on) this.online.add(jid); else this.online.delete(jid)
+      if (jid === this.current) { this.drawInput(); this.screen.render() }
+    })
     this.wa.on('messages', jid => { if (jid === '*' || jid === this.current) this.dirtyMessages = true; this.dirtyTabs = true; this.scheduleRender() })
     this.wa.on('notify', (jid, row) => {
       if (jid === this.current) {
@@ -1675,17 +1683,22 @@ export class Ui {
   }
 
   private drawInput() {
-    // One line at minimum (grows with the text), the prompt on the first ("Ema ❯ ": the chat's first name, with the
-    // rainbow across it while they type; "Lourinhasaurus ∴ " for a group; just "❯ " for a chat known only by a
-    // number), text wrapped by word (never mid-word) and continuation indented under the text.
+    // One line at minimum (grows with the text), the prompt on the first ("Ema ◉ ": the chat's first name, with the
+    // rainbow across it and a braille spinner for the mark while they type, "Ema ○ " while they're not online;
+    // "Lourinhasaurus ✻ " for a group; just "◉ " or "○ " for a chat known only by a number), text wrapped by word
+    // (never mid-word) and continuation indented under the text.
     // When the text has more lines than fit, the ones around the cursor are shown, with the cursor on the bottom one whenever possible. With
     // "chats" open, the same line is used to type the filter. When replying, reacting or editing, the line
     // above the input says which message (`headerBox`), so the input itself keeps its rows for the text.
     const w = num(this.input.width) - num(this.input.iwidth) - 1
     const name = this.pickerOpen || !this.current ? null : shortName(this.current, true)
-    // Groups end the prompt in "∴", three dots like three people; one-to-one chats in "❯". Both are one cell wide
-    // in common monospace fonts (a glyph a font lacks falls back to another and may overflow its cell).
-    const mark = this.current?.endsWith('@g.us') ? '∴' : '❯'
+    // Groups end the prompt in "✻"; one-to-one chats in "◉" while the person is online, the mark of a message read,
+    // and in "○", the same circle empty, when they aren't or don't share it. While the other person
+    // is typing (not while the rainbow fades after they stop), the mark is a braille spinner, a frame every 80 ms,
+    // turned by the typing timer's redraws. "✻" isn't in JetBrains Mono, Ghostty's default: Ghostty takes it from
+    // DejaVu Sans Mono, as it does wherever Claude Code shows it. All of them one cell, so the text doesn't move.
+    const typing = !this.pickerOpen && this.current ? this.typing.get(this.current) : undefined
+    const mark = typing === null ? SPINNER[Math.floor(Date.now() / 80) % SPINNER.length]! : this.current?.endsWith('@g.us') ? '✻' : this.online.has(this.current!) ? '◉' : '○'
     const promptPlain = this.pickerOpen ? '/ ' : name ? `${name} ${mark} ` : `${mark} `
     const pw = this.promptWidth = strWidth(promptPlain)
     const target = this.pickerOpen ? null : this.replyTo ?? this.reactTo ?? this.editing
@@ -1748,9 +1761,8 @@ export class Ui {
       return before + '{inverse}' + esc(under) + '{/inverse}' + esc(text(line.slice(col + 1)))
     }
     const visible = lines.slice(this.inputTop, this.inputTop + rowsAvail)
-    // The prompt says what the line does: the name and "❯" or "∴" type, "/" filters the chats; while the other
+    // The prompt says what the line does: the name and "◉", "○" or "✻" type, "/" filters the chats; while the other
     // person types, the rainbow runs across the name.
-    const typing = !this.pickerOpen && this.current ? this.typing.get(this.current) : undefined
     const prompt = this.pickerOpen ? '/ ' : name ? `${typing !== undefined ? this.rainbow(name, typing) : esc(name)} ${mark} ` : `${mark} `
     const out = visible.map((l, i) => (this.inputTop + i === 0 ? prompt : ' '.repeat(pw)) + render(l, this.inputTop + i))
     this.input.setContent(out.join('\n'))

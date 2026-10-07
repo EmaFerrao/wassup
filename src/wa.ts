@@ -25,6 +25,8 @@ export interface WaEvents {
   typing: [chatJid: string, who: string[]]
   /** A reaction just received or sent (empty emoji: removed). */
   reaction: [chatJid: string, msgId: string, senderJid: string, emoji: string]
+  /** Whether the person of a one-to-one chat is online, as far as WhatsApp lets this device know. */
+  presence: [chatJid: string, online: boolean]
   /** Only from the remote client: the server process disappeared. */
   lost: []
 }
@@ -294,6 +296,13 @@ export class Wa extends EventEmitter<WaEvents> {
   private typing = new Map<string, { who: Set<string>; timer: NodeJS.Timeout }>()
   /** Whether this device announced itself "available" to WhatsApp, and the timer that sets it back to unavailable. */
   private available = false
+  /**
+   * Who is online, per one-to-one chat, and the chats whose presence was asked for. WhatsApp only sends presence
+   * while this device is available, and only from people who share it: when this device goes unavailable the
+   * states would go stale, so they're dropped, and asked for again when it's back.
+   */
+  private online = new Map<string, boolean>()
+  private subscribed = new Set<string>()
   private presenceTimer: NodeJS.Timeout | undefined
   me = ''
   state: ConnState = 'connecting'
@@ -377,6 +386,8 @@ export class Wa extends EventEmitter<WaEvents> {
         const who = canonicalJid(participant)
         const active = p.lastKnownPresence === 'composing' || p.lastKnownPresence === 'recording'
         this.setTyping(chatJid, who, active && who !== this.me)
+        // Typing, recording and paused are all online; only "unavailable" isn't.
+        if (who !== this.me && !this.isGroup(chatJid)) this.setOnline(chatJid, p.lastKnownPresence !== 'unavailable')
       }
     })
 
@@ -399,6 +410,7 @@ export class Wa extends EventEmitter<WaEvents> {
         const code = (lastDisconnect?.error as Boom | undefined)?.output?.statusCode
         const loggedOut = code === DisconnectReason.loggedOut
         logger.warn({ code, err: lastDisconnect?.error?.message }, 'connection closed')
+        this.dropOnline()
         if (this.stopped) return
         if (code === DisconnectReason.connectionReplaced) {
           // Another instance connected with these credentials. Reconnecting here would just kick it out and get kicked out again.
@@ -698,7 +710,23 @@ export class Wa extends EventEmitter<WaEvents> {
   private setAvailable(on: boolean) {
     if (on === this.available || !this.sock) return
     this.available = on
-    this.sock.sendPresenceUpdate(on ? 'available' : 'unavailable').catch(e => logger.warn({ e }, 'sendPresenceUpdate'))
+    const sock = this.sock
+    sock.sendPresenceUpdate(on ? 'available' : 'unavailable')
+      .then(() => { if (on) for (const jid of this.subscribed) sock.presenceSubscribe(jid).catch(e => logger.warn({ e, jid }, 'presenceSubscribe')) })
+      .catch(e => logger.warn({ e }, 'sendPresenceUpdate'))
+    if (!on) this.dropOnline()
+  }
+
+  private setOnline(chatJid: string, on: boolean) {
+    if ((this.online.get(chatJid) ?? false) === on) return void this.online.set(chatJid, on)
+    this.online.set(chatJid, on)
+    this.emit('presence', chatJid, on)
+  }
+
+  /** Nothing more will arrive (this device unavailable, or the connection gone): everyone known online goes back to unknown. */
+  private dropOnline() {
+    for (const [jid, on] of this.online) if (on) this.emit('presence', jid, false)
+    this.online.clear()
   }
 
   /** Tells the chat that we're typing (or that we stopped): it's the "typing…" that the other person sees. */
@@ -706,9 +734,14 @@ export class Wa extends EventEmitter<WaEvents> {
     this.sock?.sendPresenceUpdate(on ? 'composing' : 'paused', chatJid).catch(e => logger.warn({ e, chatJid }, 'setComposing'))
   }
 
-  /** Asks WhatsApp for a chat's presence (typing, recording); without this nothing arrives. */
+  /**
+   * Asks WhatsApp for a chat's presence (online, typing, recording); without this nothing arrives. What's already
+   * known is said again, for a terminal that opens the chat after another one did.
+   */
   subscribePresence(chatJid: string) {
+    this.subscribed.add(chatJid)
     this.sock?.presenceSubscribe(chatJid).catch(e => logger.warn({ e, chatJid }, 'presenceSubscribe'))
+    if (this.online.get(chatJid)) this.emit('presence', chatJid, true)
   }
 
   async markRead(chatJid: string) {
