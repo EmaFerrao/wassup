@@ -109,8 +109,9 @@ or DECRQSS; Herdr does), in the 256-colour palette otherwise. `WA_IMAGES=kitty|b
 
 With a local `llama-server` at `http://127.0.0.1:8080` (or `WA_LLM`), model `gemma4-26b` (or `WA_LLM_MODEL`), the
 input asks for a suggestion shortly after the last key, with the latest messages as context: the letters missing from
-the word being typed, right at the cursor, or the right word after `⇢` above the wrong one. Tab or → accept. The prompt is in
-the user's language. `WA_LLM=off` disables it.
+the word being typed, right at the cursor, and every wrong passage already written (spelling, accents, grammar, a
+missing comma) underlined in yellow, with the right word after `⇢` above the one the cursor is on, or the last. Tab or
+→ accept it; the others stay underlined. The prompt is in the user's language. `WA_LLM=off` disables it.
 
 ## Data
 
