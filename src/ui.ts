@@ -2090,13 +2090,12 @@ export class Ui {
       }
       // On its own line the time goes straight in, flush right for mine, without passing through the wrapping.
       if (!stamped) { const at = map.length; push(mine ? alignRight(stamp, width) : stamp, row); headers.add(at) }
-      // Reactions underneath, outside the bubble: each emoji with who reacted, or just the count when there were several.
+      // Reactions underneath, outside the bubble: each emoji, with how many when more than one person reacted with it.
       const rs = reactions.get(row.id)
       if (rs?.length) {
-        const byEmoji = new Map<string, string[]>()
-        // Only the first name, to keep the line short.
-        for (const r of rs) byEmoji.set(r.emoji, [...(byEmoji.get(r.emoji) ?? []), r.sender_jid === this.wa.me ? t('me') : contactName(r.sender_jid).split(' ')[0]!])
-        const parts = [...byEmoji].map(([emoji, who]) => `${emoji} ${who.length > 1 ? who.length : who[0]}`)
+        const byEmoji = new Map<string, number>()
+        for (const r of rs) byEmoji.set(r.emoji, (byEmoji.get(r.emoji) ?? 0) + 1)
+        const parts = [...byEmoji].map(([emoji, n]) => (n > 1 ? `${emoji} ${n}` : emoji))
         out(dim(esc(parts.join('  '))), row)
       }
       for (let i = bubbleFrom; i < lines.length; i++) lines[i] = decorate(lines[i]!, row)
