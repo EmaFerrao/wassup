@@ -29,12 +29,23 @@ const RASTER_PX = 128
 const LIFE_MS = 4200
 const FRAME_MS = 20
 
+/**
+ * One emoji: a pictograph (or a pair of regional indicators, a flag), with its presentation selector, skin tone, and
+ * the pictographs joined to it (❤️‍🔥, 👨‍👩‍👧).
+ */
+const EMOJI = '(?:\\p{Extended_Pictographic}|\\p{Regional_Indicator}{2})(?:\\uFE0F|\\p{Emoji_Modifier}|\\u200D\\p{Extended_Pictographic}\\uFE0F?)*'
+const ONE = new RegExp(`^${EMOJI}$`, 'u')
+const ONLY = new RegExp(`^\\s*(?:${EMOJI}\\s*)+$`, 'u')
+
 /** A single emoji with nothing else (or a smiley that stands for one, like "<3" or ":*"): the emoji, or nothing. */
 export function reaction(text: string): string | null {
   const t = emoticonify(text.trim())
-  // One pictograph (or a pair of regional indicators, a flag), with its presentation selector, skin tone, and the
-  // pictographs joined to it (❤️‍🔥, 👨‍👩‍👧).
-  return /^(?:\p{Extended_Pictographic}|\p{Regional_Indicator}{2})(?:️|\p{Emoji_Modifier}|‍\p{Extended_Pictographic}️?)*$/u.test(t) ? t : null
+  return ONE.test(t) ? t : null
+}
+
+/** Text made of emoji alone, one or more, with nothing but spaces between them. */
+export function emojiOnly(text: string): boolean {
+  return ONLY.test(text)
 }
 
 /** Rasterized glyphs by emoji: null when sharp isn't there or couldn't draw it; absent while loading. */
