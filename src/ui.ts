@@ -217,6 +217,8 @@ export class Ui {
   private textLines = new Map<number, { start: number; end: number }>()
   /** Lines carrying a group member's name, by original line: who it is and how many columns the name takes. */
   private nameLines = new Map<number, { jid: string; start: number; width: number }>()
+  /** Per message line, the mentions on it (columns [start, end) and whose), which a click opens the chat of. */
+  private mentionLines = new Map<number, { start: number; end: number; jid: string }[]>()
   /**
    * Text being selected with the mouse: the cell pressed (`ax`, `ay`) and the one the pointer is at (`hx`, `hy`),
    * swept in reading order within the columns of the panel it started in (`xi`..`xl`). Copied to the clipboard on
@@ -527,7 +529,8 @@ export class Ui {
       const cols = this.textLines.get(orig), col = x - num(this.msgBox.aleft) - num(this.msgBox.ileft)
       const onText = cols != null && col >= cols.start && col < cols.end
       const name = this.nameLines.get(orig)
-      return { row: this.lineMap[orig] ?? null, header: this.headerLines.has(orig) && !onText, name: name && col >= name.start && col < name.start + name.width ? name.jid : null }
+      const mention = this.mentionLines.get(orig)?.find(m => col >= m.start && col < m.end)
+      return { row: this.lineMap[orig] ?? null, header: this.headerLines.has(orig) && !onText, name: name && col >= name.start && col < name.start + name.width ? name.jid : mention?.jid ?? null }
     }
     const rowAt = (y: number) => lineAt(y)?.row ?? null
     let pressed: { x: number; y: number; row: MessageRow | null; header: boolean } | undefined
@@ -574,7 +577,7 @@ export class Ui {
         this.drawInput()
         return this.renderNow()
       }
-      // A click on a link copies it, whole; on a group member's name, it opens the chat with that person.
+      // A click on a link copies it, whole; on a group member's name or a mention, it opens the chat with that person.
       if (!dragged) {
         const url = this.linkAt(data.x, data.y); if (url) return this.copyToClipboard(url)
         const who = lineAt(data.y, data.x)?.name; if (who) return this.openChat(canonicalJid(who))
@@ -2128,6 +2131,7 @@ export class Ui {
     this.rows = rows
     this.selected = rows.find(r => r.id === selectedId) ?? null
     const headers = new Set<number>(), texts = new Map<number, { start: number; end: number }>(), names = new Map<number, { jid: string; start: number; width: number }>()
+    const mentions = new Map<number, { start: number; end: number; jid: string }[]>()
     // The text under the highlight is about to change.
     this.textSel = undefined
     let lastDay = ''
@@ -2215,7 +2219,14 @@ export class Ui {
       // last text line, or, with no text, the note that stands for it (a video's), or beside an image's last row
       // (above). Otherwise it gets its own line.
       if (row.text && (type === 'text' || type === 'image' || type === 'video' || type === 'gif' || type === 'document')) {
-        const wrapped = waMarkup(withMentions(row.text)).split('\n').flatMap(l => wrapTagged(l, wrapAt))
+        // Mentions by first name, in the colour the person's name has in groups; where each lands is kept for a click.
+        const marks = new Map<string, { jid: string; width: number }>()
+        const shown = withMentions(waMarkup(row.text), (jid, first) => {
+          const color = colorFor(jid), token = `{${color}-fg}@${esc(first)}{/${color}-fg}`
+          marks.set(token, { jid, width: strWidth(`@${first}`) })
+          return token
+        })
+        const wrapped = shown.split('\n').flatMap(l => wrapTagged(l, wrapAt))
         wrapped.forEach((l, i) => {
           const tw = visibleWidth(l)
           const withStamp = bare && i === wrapped.length - 1 && tw + 2 + visibleWidth(stamp) <= width
@@ -2225,6 +2236,14 @@ export class Ui {
           push(mine ? alignRight(line, edge) : ind + line, row)
           const start = mine ? padding(line, edge) : indent
           texts.set(at, { start, end: start + tw })
+          const spans: { start: number; end: number; jid: string }[] = []
+          for (const [token, m] of marks) {
+            for (let k = l.indexOf(token); k >= 0; k = l.indexOf(token, k + 1)) {
+              const col = start + visibleWidth(l.slice(0, k))
+              spans.push({ start: col, end: col + m.width, jid: m.jid })
+            }
+          }
+          if (spans.length) mentions.set(at, spans)
           if (withStamp) { headers.add(at); stamped = true }
         })
       }
@@ -2262,6 +2281,7 @@ export class Ui {
     this.headerLines = headers
     this.textLines = texts
     this.nameLines = names
+    this.mentionLines = mentions
     this.images = images
     this.msgBox.setContent(lines.join('\n'))
     if (this.atBottom) this.msgBox.setScrollPerc(100)
