@@ -34,13 +34,14 @@ texts, the emoji names and the language of the writing suggestions.
 The tab bar at the top with the connection state on the right, messages across the full width under it, and the input
 at the bottom, with the chat's first name as the prompt, in the colour the person's name has in groups (`Ema ❯ `,
 with 👀 over the name on the rule above while they're online, and in a group one per member online, up to five, among
-the 30 who wrote most recently, the first two for a contact with more than two names, or a group's name). No frames
+the 30 who wrote most recently, and a braille spinner beside them while they type; the first two for a contact with
+more than two names, or a group's name). No frames
 or backgrounds of its own: the colours are the terminal theme's, and on startup the terminal is asked for its real
 background colour to pick light or dark shades.
 
 - **Tabs**: one per open chat, with the unread count in red and an `×` to close. Tab cycles through them; whatever is
   left unsent stays with each chat. While someone is typing, a braille spinner turns before their name in the tab and
-  in place of the prompt's mark. New messages in a chat without a tab open one without activating it, with a passing
+  beside their 👀 on the rule above the input. New messages in a chat without a tab open one without activating it, with a passing
   notice over it and the bell.
 - **Chats**: `/` opens the list under the app's name, most recent at the bottom, under day separators (today,
   yesterday, this week, older); each row has the name in its colour, 👀 while the person is online, the last message (a
