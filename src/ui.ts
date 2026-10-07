@@ -7,7 +7,7 @@ import { chatName, contactName, shortName, canonicalJid, thumbPath, mediaFile, j
 import { inHerdr, reportHerdr, titleHerdr, tabNameHerdr, releaseHerdr, openChatHerdr, focusHerdr, focusNextChatHerdr, paneFocusedHerdr } from './herdr.js'
 import type { Backend } from './backend.js'
 import { waMarkup, clipTagged, esc, colorFor, setTheme, dim, faint, italic, padding, urlsIn, fmtTime, fmtDay, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, wrapWidth, fold, graphemes, wrapChars } from './format.js'
-import { decode, cached, cellSize, halfBlocks, blockGrid, blockCell, detectImageMode, detectRgb, KittyImages, RgbBlocks, type Decoded, type ImageMode, type RgbCell } from './image.js'
+import { decode, cached, cellSize, halfBlocks, blockGrid, blockCell, detectImageMode, detectRgb, KittyImages, RgbPainter, type Decoded, type ImageMode, type RgbCell } from './image.js'
 import { logger, uiLog } from './log.js'
 import { patchBlessedDraw, patchBlessedUnicode } from './unicode.js'
 import type { TermCaps } from './term.js'
@@ -230,8 +230,8 @@ export class Ui {
   private images: ImageSlot[] = []
   private mode: ImageMode
   private kitty: KittyImages | undefined
-  /** Half-block images repainted in 24-bit colour, when the terminal takes it. */
-  private rgbBlocks: RgbBlocks | undefined
+  /** Half-block images and message bubbles repainted in 24-bit colour, when the terminal takes it. */
+  private rgbPaint: RgbPainter | undefined
   private connText = t('connecting')
   private transient = ''
   private transientTimer: NodeJS.Timeout | undefined
@@ -253,6 +253,14 @@ export class Ui {
   /** Whether the terminal background is dark (decides the strong color of the active tab and of names) and the gray for the selected message. */
   private dark: boolean
   private selectedBg: number
+  /**
+   * Message bubbles' backgrounds. blessed draws them in two greys of the 256-colour palette, mine never the more
+   * intense of the two, which is what shows without 24-bit colour; with it, the painter repaints the cells in
+   * those greys with `bubbleRgb`: WhatsApp Web's colours, mine on a dark theme toned down to the luminance of theirs
+   * (its #005c4b stands out far more than their #202c33).
+   */
+  private bubbleBg = { mine: 0, theirs: 0 }
+  private bubbleRgb: { mine: string; theirs: string } | null = null
 
   /**
    * `wa ema`, or any startup inside Herdr: only one chat at a time. No tabs (in Herdr, the tabs are its own) and no
@@ -269,6 +277,11 @@ export class Ui {
   constructor(private wa: Backend, caps: TermCaps, private wanted?: string) {
     this.mode = detectImageMode(caps.kittyGraphics, inHerdr)
     ;({ dark: this.dark, selected: this.selectedBg } = theme(caps.bg))
+    // WhatsApp Web's bubbles: on a dark theme #005c4b mine and #202c33 theirs, on a light one #d9fdd3 and #ffffff.
+    // Mine a step quieter than theirs: darker on a dark theme, lighter on a light one; never the selection's grey,
+    // which the painter would take for a bubble.
+    const offSelected = (n: number) => (n === this.selectedBg ? n - 2 : n)
+    this.bubbleBg = this.dark ? { mine: offSelected(235), theirs: offSelected(236) } : { mine: offSelected(255), theirs: offSelected(254) }
     this.fgRgb = parseHex(caps.fg) ?? (this.dark ? [192, 192, 192] : [48, 48, 48])
     this.bgRgb = parseHex(caps.bg) ?? (this.dark ? [0, 0, 0] : [255, 255, 255])
     setTheme(this.dark)
@@ -295,7 +308,15 @@ export class Ui {
     this.screen.program.on('blur', () => focusChanged(false))
     // In Herdr the events only come with a change, so the pane's state at start is asked of Herdr.
     paneFocusedHerdr().then(f => { if (f !== undefined && this.hasFocus === undefined) focusChanged(f) }).catch(() => {})
-    if (this.mode === 'blocks' && detectRgb(caps.truecolor)) this.rgbBlocks = new RgbBlocks(s => program._write(s))
+    if (detectRgb(caps.truecolor)) {
+      this.rgbPaint = new RgbPainter(s => program._write(s))
+      const lum = ([r, g, b]: Rgb) => 0.2126 * r + 0.7152 * g + 0.0722 * b
+      const theirs: Rgb = this.dark ? [0x20, 0x2c, 0x33] : [0xff, 0xff, 0xff]
+      const green: Rgb = this.dark ? [0x00, 0x5c, 0x4b] : [0xd9, 0xfd, 0xd3]
+      const k = this.dark ? Math.min(1, lum(theirs) / lum(green)) : 1
+      const mine = green.map(v => Math.round(v * k)) as Rgb
+      this.bubbleRgb = { mine: mine.join(';'), theirs: theirs.join(';') }
+    }
     // Only with the terminal confirming the protocol: it's what lets Shift+Backspace be distinguished, for deleting words.
     if (caps.kittyKeyboard) this.disableKittyKeyboard = enableKittyKeyboard((this.screen.program as unknown as { input: Parameters<typeof enableKittyKeyboard>[0] }).input, s => program._write(s))
     // Outside the Kitty translator: pasted text doesn't go through it.
@@ -407,7 +428,10 @@ export class Ui {
     this.screen.on('keypress', (ch: string, key: blessed.Widgets.Events.IKeyEventArg) => this.onKey(ch, key))
     // The picker list has its position and height calculated by hand: it's recomputed when the terminal resizes.
     this.screen.on('resize', () => { this.dirtyMessages = true; this.dirtyTabs = true; this.drawRules(); if (this.pickerOpen) this.refreshPicker(); this.scheduleRender() })
-    this.screen.on('prerender', () => this.rgbBlocks?.snapshot(this.screenRows('olines')))
+    // The painter looks at blessed's buffers just before it draws, when it's known which rows it will redraw.
+    const screen = this.screen as unknown as { draw: (start: number, end: number) => void }
+    const draw = screen.draw.bind(screen)
+    screen.draw = (start, end) => { this.rgbPaint?.snapshot(this.screenRows('olines'), this.screenRows('lines')); draw(start, end) }
     this.screen.on('render', () => { this.loadVisibleImages(); this.placeImages(); this.paintRgb() })
 
     // The mouse wheel scrolls one line per notch (by default blessed jumps half the panel, or two list entries).
@@ -1950,6 +1974,7 @@ export class Ui {
         // A blank line under it, so the day stands apart from its first message as from the last one before.
         push('', null)
       }
+      const bubbleFrom = lines.length
       // My own messages stay flush right: I wrap the lines myself (blessed only wraps from the left) and push each
       // one to the edge; other people's stay on the left, wrapped the same way.
       const mine = row.from_me === 1
@@ -2030,7 +2055,8 @@ export class Ui {
       }
       // On its own line the time goes straight in, flush right for mine, without passing through the wrapping.
       if (!stamped) { const at = map.length; push(mine ? alignRight(stamp, width) : stamp, row); headers.add(at) }
-      // Reactions underneath: each emoji with who reacted, or just the count when there were several.
+      this.bubble(lines, bubbleFrom, lines.length, row.from_me === 1, width, row.id === selectedId || row.id === this.drag?.id)
+      // Reactions underneath, outside the bubble: each emoji with who reacted, or just the count when there were several.
       const rs = reactions.get(row.id)
       if (rs?.length) {
         const byEmoji = new Map<string, string[]>()
@@ -2154,6 +2180,35 @@ export class Ui {
     return !!tail
   }
 
+  /**
+   * The message's lines [from, to) get a bubble background, like WhatsApp Web's: the rectangle around their text,
+   * mine against the right edge and theirs against the left, one spare column on the open side. Only tags and
+   * spaces are added around each line's own content, never inside it, so no column moves (clicks, selection and
+   * images keep their places). The background is opened in three runs, before, over and after the content: an image
+   * line ends in a full reset, which would leave the spare cells after it bare. Not for the selected message, whose
+   * own background spans the whole width, nor one being dragged.
+   */
+  private bubble(lines: string[], from: number, to: number, mine: boolean, width: number, skip: boolean) {
+    if (skip || to <= from) return
+    const spans = lines.slice(from, to).map(l => {
+      const start = l.length - l.trimStart().length
+      return { start, end: Math.max(start, visibleWidth(l)) }
+    })
+    const used = spans.filter(sp => sp.end > sp.start)
+    if (!used.length) return
+    const minStart = Math.min(...used.map(sp => sp.start)), maxEnd = Math.max(...used.map(sp => sp.end))
+    const bStart = mine ? Math.max(0, minStart - 1) : 0
+    const bEnd = mine ? maxEnd : Math.min(width, maxEnd + 1)
+    const bg = mine ? this.bubbleBg.mine : this.bubbleBg.theirs
+    const on = (s: string) => (s ? `{${bg}-bg}${s}{/${bg}-bg}` : '')
+    for (let i = from; i < to; i++) {
+      const sp = spans[i - from]!, line = lines[i]!
+      const blank = sp.end <= sp.start
+      const start = blank ? bStart : Math.max(sp.start, bStart), end = blank ? bStart : sp.end
+      lines[i] = ' '.repeat(bStart) + on(' '.repeat(start - bStart)) + on(blank ? '' : line.slice(sp.start)) + on(' '.repeat(Math.max(0, bEnd - end)))
+    }
+  }
+
   /** Drawn lines [start, end) of an image, and the panel's visible window. */
   private imageSpan(img: ImageSlot): { top: number; bottom: number } | null {
     const top = this.msgBox._clines?.ftor?.[img.origLine]?.[0]
@@ -2218,12 +2273,14 @@ export class Ui {
   }
 
   /**
-   * After each frame, the half-block images in view get their exact colours (RgbBlocks). A cell is only taken when
-   * blessed's buffer still holds the half-block it was given there, so whatever is drawn over an image (a notice,
-   * the reply header, the quick reactions, a dragged message) keeps its place.
+   * After each frame, the half-block images in view get their exact colours, and the message bubbles theirs
+   * (RgbPainter). An image cell is only taken when blessed's buffer still holds the half-block it was given there,
+   * so whatever is drawn over an image (a notice, the reply header, the quick reactions, a dragged message) keeps
+   * its place; a bubble cell is any cell of the panel in one of the bubbles' greys, repainted with its own
+   * character, colour and attributes over the exact background.
    */
   private paintRgb() {
-    if (!this.rgbBlocks) return
+    if (!this.rgbPaint) return
     const olines = this.screenRows('olines')
     const cells: RgbCell[] = []
     const clines = this.msgBox._clines
@@ -2232,7 +2289,7 @@ export class Ui {
       const base = this.msgBox.childBase, innerH = this.innerHeight()
       const x0 = num(this.msgBox.aleft) + num(this.msgBox.ileft), y0 = num(this.msgBox.atop) + num(this.msgBox.itop)
       const rgbAt = (rgb: Uint8Array, i: number) => `${rgb[i * 3]};${rgb[i * 3 + 1]};${rgb[i * 3 + 2]}`
-      for (const img of this.images) {
+      for (const img of this.mode === 'blocks' ? this.images : []) {
         if (!img.d) continue
         const top = clines.ftor[img.origLine]?.[0]
         if (top == null) continue
@@ -2248,12 +2305,33 @@ export class Ui {
             const x = x0 + img.pad + c, held = row[x]
             const attr = held?.[0] ?? -1
             if (held?.[1] !== cell.ch || attr >> 18 !== 0 || ((attr >> 9) & 0x1ff) !== (cell.fg < 0 ? 0x1ff : cell.fg) || (attr & 0x1ff) !== (cell.bg < 0 ? 0x1ff : cell.bg)) continue
-            cells.push({ x, y, ch: cell.ch, fg: rgbAt(grid.rgb, cell.fgAt), bg: cell.bgAt < 0 ? null : rgbAt(grid.rgb, cell.bgAt) })
+            cells.push({ x, y, ch: cell.ch, w: 1, sgr: `0;38;2;${rgbAt(grid.rgb, cell.fgAt)}${cell.bgAt < 0 ? '' : `;48;2;${rgbAt(grid.rgb, cell.bgAt)}`}` })
           }
         }
       }
+      if (this.bubbleRgb) {
+        const bubbles = { [this.bubbleBg.mine]: this.bubbleRgb.mine, [this.bubbleBg.theirs]: this.bubbleRgb.theirs } as Record<number, string>
+        const x1 = x0 + num(this.msgBox.width) - num(this.msgBox.iwidth)
+        // blessed's attribute flags as SGR codes: bold, underline, blink, inverse, invisible, and italic (italic.ts).
+        const FLAGS: [number, number][] = [[1, 1], [2, 4], [4, 5], [8, 7], [16, 8], [32, 3]]
+        for (let y = y0; y < y0 + innerH; y++) {
+          const row = lines[y]
+          if (!row) continue
+          for (let x = x0; x < x1; x++) {
+            const held = row[x]
+            if (!held) continue
+            const rgb = bubbles[held[0] & 0x1ff]
+            // The second cell of a wide character holds blessed's marker: the character itself covers it.
+            if (!rgb || held[1] === '\u0003') continue
+            const flags = held[0] >> 18, fg = (held[0] >> 9) & 0x1ff
+            const codes = ['0', ...FLAGS.filter(([bit]) => flags & bit).map(([, code]) => String(code)), fg === 0x1ff ? '39' : `38;5;${fg}`, `48;2;${rgb}`]
+            cells.push({ x, y, ch: held[1] || ' ', w: Math.max(1, strWidth(held[1] || ' ')), sgr: codes.join(';') })
+          }
+        }
+        cells.sort((a, b) => a.y - b.y || a.x - b.x)
+      }
     }
-    this.rgbBlocks.paint(cells, olines)
+    this.rgbPaint.paint(cells, olines)
   }
 
   /**
