@@ -337,8 +337,9 @@ export class Ui {
       parent: this.screen, top: '100%-4', left: 0, width: 1, height: 1, tags: true, hidden: true, padding: { left: 1 }, wrap: false, mouse: true,
       style: { bg: this.selectedBg } as unknown as blessed.Widgets.Types.TStyle,
     })
-    // What's being replied to, reacted to or edited, floating over the input's top rule, as wide as its text so the
-    // rule carries on after it; the correction below is created after it and so wins the row when both are there.
+    // What's being replied to, reacted to or edited, floating over the input's top rule above the text being written,
+    // as wide as its text so the rule carries on around it; the correction below is created after it and so wins the
+    // row when both are there.
     this.headerBox = blessed.box({ parent: this.screen, top: 0, left: 0, width: 1, height: 1, tags: true, hidden: true, padding: { left: 1 } })
     // The model's correction, floating one line above the word it replaces, with the same background.
     this.ghostBox = blessed.box({
@@ -1812,10 +1813,21 @@ export class Ui {
     const prompt = this.pickerOpen ? '/ ' : name ? `{${color}-fg}${esc(name)}{/${color}-fg} ${mark} ` : `${mark} `
     const out = visible.map((l, i) => (this.inputTop + i === 0 ? prompt : ' '.repeat(pw)) + render(l, this.inputTop + i))
     this.input.setContent(out.join('\n'))
-    // The header (reply, react, edit) floats over the input's top rule.
+    // The rule above shows 👀 over the name while the person of a one-to-one chat is online, and in a group one per
+    // member online, up to EYES_MAX.
+    const jid = this.current
+    const eyes = !name || !jid ? 0 : jid.endsWith('@g.us') ? Math.min(EYES_MAX, this.groupOnline.get(jid) ?? 0) : this.online.has(jid) ? 1 : 0
+    this.promptName = eyes ? { col: num(this.input.aleft) + num(this.input.ileft), width: strWidth(name!), eyes } : null
+    this.drawRules()
+    // The header (reply, react, edit) floats over the input's top rule, starting in the column where the text being
+    // written starts, after the name and the mark (its padding cell just before), so it leaves the name and its 👀
+    // in view; it stops short of the "online" near the rule's right end.
     if (header) {
-      const text = dim(esc(truncate(header, w)))
+      const textCol = num(this.input.aleft) + num(this.input.ileft) + pw
+      const room = num(this.screen.width) - textCol - 1 - (this.available ? t('online').length + 4 : 0)
+      const text = dim(esc(truncate(header, Math.max(4, room))))
       this.headerBox.top = num(this.screen.height) - this.bottom
+      this.headerBox.left = textCol - 1
       this.headerBox.width = visibleWidth(text) + 2
       this.headerBox.setContent(text)
       this.headerBox.show()
