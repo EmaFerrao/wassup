@@ -111,6 +111,13 @@ export async function openChatHerdr(jid: string, focus = true, how?: 'pane' | 't
   await call('pane.send_input', { pane_id: paneId, text: `exec '${waBin}' '${jid}'`, keys: ['enter'] })
 }
 
+/** Whether this pane has the focus in Herdr, which the terminal's focus events only say once it changes. */
+export async function paneFocusedHerdr(): Promise<boolean | undefined> {
+  if (!inHerdr) return undefined
+  const pane = (await call('pane.get', { pane_id: env.HERDR_PANE_ID }) as { pane?: { focused?: boolean } } | undefined)?.pane
+  return pane?.focused
+}
+
 /** Switches to the Herdr tab, and the pane in it, where the conversation is already open. */
 export function focusHerdr(tabId: string, paneId?: string) {
   if (!inHerdr) return

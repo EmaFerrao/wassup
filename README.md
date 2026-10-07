@@ -19,9 +19,10 @@ dependencies' install scripts were skipped; they are not needed, the warning can
 The first time, a QR code appears: on the phone, WhatsApp › Settings › Linked devices › Link a device. The session is
 saved and later runs connect directly.
 
-While the terminal is in use the client announces itself "available" to WhatsApp, so the phone does not notify, just
-as with WhatsApp Web open. Opening it doesn't count: it takes a key or the mouse. After 2 minutes idle it goes back
-to "unavailable".
+While you write in a chat the client announces itself "available" to WhatsApp, so the phone does not notify, just as
+with WhatsApp Web open. Only writing counts (typing, deleting, pasting or sending): not opening it, the mouse, other
+keys or getting the focus. After 2 minutes without writing it goes back to "unavailable", and at once when its window
+or pane loses the focus, in terminals that report it (Herdr does).
 
 Requirements: Node 22.13 or newer (it uses the SQLite built into Node).
 
