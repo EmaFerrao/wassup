@@ -53,10 +53,23 @@ export function reportHerdr(state: HerdrState, message?: string) {
 }
 
 /**
- * The window's title ("● Fulano", "⠋ Fulano" while they type) goes on the agent (`display_agent`, what the sidebar
- * shows for the pane in place of "wassup"), the same whether wa is alone in its tab or in a pane of a split one. When
- * wa is alone in its tab, the tab's label also takes the chat's short name (a first name, no state, nothing for a bare
- * number); the label that was there is saved to restore it on exit. Pane labels are left alone. Requests queue up so they don't overtake each other.
+ * Marks the agent "done" in Herdr's sidebar (in blue), which the API doesn't take as a state to report: Herdr gives
+ * it to an agent that goes from working to idle out of view, and keeps it until its pane is seen. So: working, then
+ * idle at once (Herdr orders them by seq).
+ */
+export function doneHerdr(message?: string) {
+  if (!inHerdr) return
+  void pane('pane.report_agent', { state: 'working', message: message ?? null })
+  void pane('pane.report_agent', { state: 'idle', message: message ?? null })
+  lastState = `idle\n${message ?? ''}`
+}
+
+/**
+ * The window's title (in Herdr the chat's name alone, no dot nor spinner, see Ui.updateTitle) goes on the agent
+ * (`display_agent`, what the sidebar shows for the pane in place of "wassup"), the same whether wa is alone in its
+ * tab or in a pane of a split one. When wa is alone in its tab, the tab's label also takes the chat's short name (a
+ * first name, no state, nothing for a bare number); the label that was there is saved to restore it on exit. Pane
+ * labels are left alone. Requests queue up so they don't overtake each other.
  */
 let titleQueue: Promise<unknown> = Promise.resolve()
 let lastTab: string | null | undefined
