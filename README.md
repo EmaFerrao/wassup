@@ -30,14 +30,14 @@ texts, the emoji names and the language of the writing suggestions.
 ## Interface
 
 The tab bar at the top with the connection state on the right, messages across the full width under it, and the input
-at the bottom, with the chat's first name as the prompt (`Ema ◉ ` while they're online, `Ema ○ ` while not, the first
-two for a contact with more than two names, or a group's name and `✻`). No frames or backgrounds of its own: the
-colours are the terminal theme's, and on startup the terminal is asked for its real background colour to pick light
-or dark shades.
+at the bottom, with the chat's first name as the prompt, in the colour the person's name has in groups (`Ema ◉ `
+while they're online, `Ema ○ ` while not, the first two for a contact with more than two names, or a group's name and
+`✻`). No frames or backgrounds of its own: the colours are the terminal theme's, and on startup the terminal is asked
+for its real background colour to pick light or dark shades.
 
 - **Tabs**: one per open chat, with the unread count in red and an `×` to close. Tab cycles through them; whatever is
-  left unsent stays with each chat. While someone is typing, a rainbow runs along their name, in the tab and in the
-  prompt, where a braille spinner takes the place of the mark. New messages in a chat without a tab open one without
+  left unsent stays with each chat. While someone is typing, a rainbow runs along their name in the tab, and a
+  braille spinner takes the place of the prompt's mark. New messages in a chat without a tab open one without
   activating it, with a passing notice over it and the bell.
 - **Chats**: `/` opens the list, most recent at the bottom, with an excerpt of the last message; typing filters it,
   ignoring accents and case; Enter, Tab, → or a click opens.

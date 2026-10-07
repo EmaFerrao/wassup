@@ -636,15 +636,15 @@ export class Ui {
   }
 
   /**
-   * Someone started or stopped typing: the rainbow runs across the chat's name, in its tab and in the prompt when
-   * it's the active chat, and once they stop, fades out.
+   * Someone started or stopped typing: the rainbow runs across the chat's name in its tab and, once they stop,
+   * fades out; in the prompt of the active chat, a braille spinner takes the mark's place while they type.
    */
   private onTyping(jid: string, active: boolean) {
     if (active) this.typing.set(jid, null)
     else if (this.typing.has(jid)) this.typing.set(jid, Date.now())
-    // The input is redrawn while the active chat's person types, and once more when their entry goes, so the
-    // rainbow on the prompt's name gives way to its plain colour again.
-    const mine = () => !!this.current && this.typing.has(this.current)
+    // The input is redrawn while the active chat's person types, turning the spinner, and once more when they
+    // stop, so the mark comes back.
+    const mine = () => !!this.current && this.typing.get(this.current) === null
     const frame = (input: boolean) => { this.drawTabs(); if (input) this.drawInput(); this.screen.render() }
     if (this.typing.size && !this.typingTimer) {
       this.typingTimer = setInterval(() => {
@@ -1689,10 +1689,10 @@ export class Ui {
   }
 
   private drawInput() {
-    // One line at minimum (grows with the text), the prompt on the first ("Ema ◉ ": the chat's first name, with the
-    // rainbow across it and a braille spinner for the mark while they type, "Ema ○ " while they're not online;
-    // "Lourinhasaurus ✻ " for a group; just "◉ " or "○ " for a chat known only by a number), text wrapped by word
-    // (never mid-word) and continuation indented under the text.
+    // One line at minimum (grows with the text), the prompt on the first ("Ema ◉ ": the chat's first name, in the
+    // colour it has in groups, with a braille spinner for the mark while they type, "Ema ○ " while they're not
+    // online; "Lourinhasaurus ✻ " for a group; just "◉ " or "○ " for a chat known only by a number), text wrapped
+    // by word (never mid-word) and continuation indented under the text.
     // When the text has more lines than fit, the ones around the cursor are shown, with the cursor on the bottom one whenever possible. With
     // "chats" open, the same line is used to type the filter. When replying, reacting or editing, the line
     // above the input says which message (`headerBox`), so the input itself keeps its rows for the text.
@@ -1700,7 +1700,7 @@ export class Ui {
     const name = this.pickerOpen || !this.current ? null : shortName(this.current, true)
     // Groups end the prompt in "✻"; one-to-one chats in "◉" while the person is online, the mark of a message read,
     // and in "○", the same circle empty, when they aren't or don't share it. While the other person
-    // is typing (not while the rainbow fades after they stop), the mark is a braille spinner, a frame every 80 ms,
+    // is typing (not after they stop), the mark is a braille spinner, a frame every 80 ms,
     // turned by the typing timer's redraws. "✻" isn't in JetBrains Mono, Ghostty's default: Ghostty takes it from
     // DejaVu Sans Mono, as it does wherever Claude Code shows it. All of them one cell, so the text doesn't move.
     const typing = !this.pickerOpen && this.current ? this.typing.get(this.current) : undefined
@@ -1767,9 +1767,10 @@ export class Ui {
       return before + '{inverse}' + esc(under) + '{/inverse}' + esc(text(line.slice(col + 1)))
     }
     const visible = lines.slice(this.inputTop, this.inputTop + rowsAvail)
-    // The prompt says what the line does: the name and "◉", "○" or "✻" type, "/" filters the chats; while the other
-    // person types, the rainbow runs across the name.
-    const prompt = this.pickerOpen ? '/ ' : name ? `${typing !== undefined ? this.rainbow(name, typing) : esc(name)} ${mark} ` : `${mark} `
+    // The prompt says what the line does: the name and "◉", "○" or "✻" type, "/" filters the chats. The name is in
+    // the colour it has as a sender in groups (colorFor of the same jid; a group's own jid for a group).
+    const color = this.current ? colorFor(this.current) : 0
+    const prompt = this.pickerOpen ? '/ ' : name ? `{${color}-fg}${esc(name)}{/${color}-fg} ${mark} ` : `${mark} `
     const out = visible.map((l, i) => (this.inputTop + i === 0 ? prompt : ' '.repeat(pw)) + render(l, this.inputTop + i))
     this.input.setContent(out.join('\n'))
     // The header (reply, react, edit) floats on the line right above the input.
