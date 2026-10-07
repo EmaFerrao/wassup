@@ -1465,14 +1465,23 @@ export class Ui {
     // Most recent at the bottom, like the messages; the default selection is the last one (the most recent).
     this.chats = store.listChats().filter(c => !c.archived).reverse()
     const f = fold(this.filter)
-    // The best matches go to the bottom, next to the prompt and the default selection: names that start with the
-    // filter, the first name typed ("ana": Ana Costa); above them, names with a word that starts with it ("costa":
-    // Ana Costa, after a space, hyphen or any non-letter); on top, the rest (Mariana, a number). Each group keeps
-    // its order, most recent at the bottom.
-    const matches = this.chats.filter(c => fold(chatName(c.jid)).includes(f) || jidUser(c.jid).includes(f))
-    const wordStart = new RegExp(`(?:^|[^\\p{L}\\p{N}])${f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'u')
-    const rank = (c: ChatRow) => { const n = fold(chatName(c.jid)); return n.startsWith(f) ? 2 : wordStart.test(n) ? 1 : 0 }
-    this.filtered = f ? [0, 1, 2].flatMap(r => matches.filter(c => rank(c) === r)) : this.chats
+    // The filter is taken word by word, every one of them somewhere in the name (or the number), in any order:
+    // "ana russo" finds Ana Lobo Russo. The best matches go to the bottom, next to the prompt and the default
+    // selection: names that start with the first word and have each other one starting a word ("ana": Ana Costa);
+    // above them, names where every word starts one ("costa": Ana Costa, after a space, hyphen or any non-letter);
+    // on top, the rest (Mariana, a number). Each group keeps its order, most recent at the bottom.
+    const words = f.split(/\s+/).filter(Boolean)
+    const matches = this.chats.filter(c => {
+      const n = fold(chatName(c.jid)), u = jidUser(c.jid)
+      return words.every(w => n.includes(w) || u.includes(w))
+    })
+    const starts = words.map(w => new RegExp(`(?:^|[^\\p{L}\\p{N}])${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'u'))
+    const rank = (c: ChatRow) => {
+      const n = fold(chatName(c.jid))
+      if (!starts.every(re => re.test(n))) return 0
+      return n.startsWith(words[0]!) ? 2 : 1
+    }
+    this.filtered = words.length ? [0, 1, 2].flatMap(r => matches.filter(c => rank(c) === r)) : this.chats
     const width = num(this.picker.width) - num(this.picker.iwidth) - 1
     // Person or group name on the left and a snippet of the last message on the right, like in a chat list.
     const nameW = Math.min(28, Math.max(12, Math.floor(width * 0.35)))
