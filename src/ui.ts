@@ -16,7 +16,7 @@ import { enableKittyKeyboard } from './kittykeys.js'
 import { enableBracketedPaste } from './paste.js'
 import { Hearts, reaction } from './hearts.js'
 import { t } from './i18n.js'
-import { parseHex, rainbowRing, mix, nearest256, type Rgb } from './rainbow.js'
+import { parseHex, mix, nearest256, type Rgb } from './rainbow.js'
 import { suggest, llmEnabled, type Suggestion } from './llm.js'
 import { patchBlessedItalic } from './italic.js'
 
@@ -50,10 +50,9 @@ interface ClinesBox extends blessed.Widgets.BoxElement {
   childBase: number
 }
 
-/** How long the rainbow fade lasts after the person stops typing. */
-const FADE_MS = 1500
-/** The prompt's mark while the other person types: the classic braille dots spinner. */
+/** The sign that someone is typing, in their tab and the prompt: the classic braille dots spinner, a frame every 80 ms. */
 const SPINNER = [...'⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏']
+const spinnerFrame = () => SPINNER[Math.floor(Date.now() / 80) % SPINNER.length]!
 /** How many of a chat's latest messages the panel draws at first, and how many more each scroll past the top adds. */
 const PAGE = 300
 /** The notice for a message in another chat: time to appear, stay, and disappear, in milliseconds. */
@@ -222,15 +221,11 @@ export class Ui {
   private transientTimer: NodeJS.Timeout | undefined
   private atBottom = true
   private renderTimer: NodeJS.Timeout | undefined
-  /**
-   * Chats where someone is typing (null) or just stopped (the moment they stopped, for the rainbow to fade), and the
-   * clock that redraws the bar while there are names animating.
-   */
-  private typing = new Map<string, number | null>()
+  /** Chats where someone is typing, and the clock that turns their spinners while there's any. */
+  private typing = new Set<string>()
   /** One-to-one chats whose person is online right now, for the prompt's mark. */
   private online = new Set<string>()
   private typingTimer: NodeJS.Timeout | undefined
-  private ring: Rgb[]
   private fgRgb: Rgb
   private bgRgb: Rgb
   private dirtyTabs = true
@@ -256,7 +251,6 @@ export class Ui {
   constructor(private wa: Backend, caps: TermCaps, private wanted?: string) {
     this.mode = detectImageMode(caps.kittyGraphics, inHerdr)
     ;({ dark: this.dark, selected: this.selectedBg } = theme(caps.bg))
-    this.ring = rainbowRing(this.dark)
     this.fgRgb = parseHex(caps.fg) ?? (this.dark ? [192, 192, 192] : [48, 48, 48])
     this.bgRgb = parseHex(caps.bg) ?? (this.dark ? [0, 0, 0] : [255, 255, 255])
     setTheme(this.dark)
@@ -606,9 +600,9 @@ export class Ui {
   private onConnection(state: ConnState, detail?: string) {
     // Any change of connection, the switch to another server process included, voids what was said about who's
     // typing and who's online: the new connection doesn't know, and would never send the "stopped" or "offline"
-    // that clears it. Typing fades out as if they'd stopped; online comes back once open, from the presence
+    // that clears it. Typing ends as if they'd stopped; online comes back once open, from the presence
     // subscriptions renewed below.
-    for (const [jid, stopped] of this.typing) if (stopped === null) this.onTyping(jid, false)
+    for (const jid of [...this.typing]) this.onTyping(jid, false)
     if (this.online.size) { this.online.clear(); this.drawInput() }
     if (state === 'qr' && this.wa.qr) {
       QRCode.toString(this.wa.qr, { type: 'terminal', small: true }, (err, qr) => {
@@ -636,43 +630,22 @@ export class Ui {
   }
 
   /**
-   * Someone started or stopped typing: the rainbow runs across the chat's name in its tab and, once they stop,
-   * fades out; in the prompt of the active chat, a braille spinner takes the mark's place while they type.
+   * Someone started or stopped typing: a braille spinner turns in their tab, before the name, and in the prompt of
+   * the active chat in the mark's place, on a clock that runs while anyone is typing.
    */
   private onTyping(jid: string, active: boolean) {
-    if (active) this.typing.set(jid, null)
-    else if (this.typing.has(jid)) this.typing.set(jid, Date.now())
-    // The input is redrawn while the active chat's person types, turning the spinner, and once more when they
-    // stop, so the mark comes back.
-    const mine = () => !!this.current && this.typing.get(this.current) === null
-    const frame = (input: boolean) => { this.drawTabs(); if (input) this.drawInput(); this.screen.render() }
+    if (active) this.typing.add(jid); else this.typing.delete(jid)
     if (this.typing.size && !this.typingTimer) {
       this.typingTimer = setInterval(() => {
-        const had = mine()
-        for (const [j, stopped] of this.typing) if (stopped != null && Date.now() - stopped > FADE_MS) this.typing.delete(j)
-        if (!this.typing.size && this.typingTimer) { clearInterval(this.typingTimer); this.typingTimer = undefined }
-        frame(had || mine())
-      }, 40)
-    }
-    frame(jid === this.current)
+        this.drawTabs()
+        if (this.current && this.typing.has(this.current)) this.drawInput()
+        this.screen.render()
+      }, 80)
+    } else if (!this.typing.size && this.typingTimer) { clearInterval(this.typingTimer); this.typingTimer = undefined }
+    this.drawTabs()
+    if (jid === this.current) this.drawInput()
     this.updateTitle()
     this.screen.render()
-  }
-
-  /**
-   * The name with the rainbow: the ring of hues runs across the letters (one full turn in ~3 s, at 25 frames per
-   * second), and once the person stops, each color blends into the text color over FADE_MS, with a smooth curve,
-   * until it's back to normal.
-   */
-  private rainbow(name: string, stopped: number | null): string {
-    const n = this.ring.length
-    const phase = (Date.now() / 1000) * (n / 3)
-    const raw = stopped == null ? 0 : Math.min(1, (Date.now() - stopped) / FADE_MS)
-    const t = raw * raw * (3 - 2 * raw)
-    return graphemes(name).map((g, i) => {
-      const c = nearest256(mix(this.ring[Math.floor(phase + i * 1.5) % n]!, this.fgRgb, t))
-      return `{${c}-fg}${esc(g)}{/${c}-fg}`
-    }).join('')
   }
 
   /** Pasted text goes in whole where the cursor is; in the input it keeps the lines, in the picker filter it collapses to one. */
@@ -1284,7 +1257,8 @@ export class Ui {
     this.segments = []
     for (const t of tabs) {
       const name = truncate(t.name, nameW)
-      const label = this.typing.has(t.jid) ? this.rainbow(name, this.typing.get(t.jid)!) : esc(name)
+      // While they type, the spinner takes the space before the name, so the tab keeps its width.
+      const label = `${this.typing.has(t.jid) ? spinnerFrame() : ' '}${esc(name)}`
       const text = ` ${name}${t.badge ? ' ' + t.badge : ''}${close} `
       const w = strWidth(text)
       const closeX0 = close ? x + w - 2 : x + w
@@ -1292,8 +1266,8 @@ export class Ui {
       const badge = t.badge ? ` {${FG.badge}-fg}{bold}${t.badge}{/bold}{/${FG.badge}-fg}` : ''
       const closeMark = close ? ` ${dim('×')}` : ''
       out += t.i === this.active && !this.pickerOpen
-        ? `{${strong}-fg}{bold} ${label}{/bold}{/${strong}-fg}${badge}${closeMark} `
-        : `{${FG.tab}-fg} ${label}{/${FG.tab}-fg}${badge}${closeMark} `
+        ? `{${strong}-fg}{bold}${label}{/bold}{/${strong}-fg}${badge}${closeMark} `
+        : `{${FG.tab}-fg}${label}{/${FG.tab}-fg}${badge}${closeMark} `
       x += w
     }
     // Status flush right: the transient message (yellow) or the connection; truncated if it doesn't fit.
@@ -1510,7 +1484,7 @@ export class Ui {
     // In Herdr, alone in its tab, the tab takes the chat's first name, with no state.
     if (inHerdr) tabNameHerdr(this.current ? shortName(this.current) : null)
     // In Herdr the same signal goes to the agent's status: someone typing is work in progress, unread asks for attention.
-    const typing = [...this.typing].filter(([jid, stopped]) => stopped == null && (!this.fixed || jid === this.current)).map(([jid]) => chatName(jid))
+    const typing = [...this.typing].filter(jid => !this.fixed || jid === this.current).map(jid => chatName(jid))
     if (typing.length) reportHerdr('working', t('typingWho', typing.join(', ')))
     else if (unread.length) reportHerdr('blocked', unread.map(c => `${chatName(c.jid)} (${c.unread})`).join(', '))
     else reportHerdr('idle')
@@ -1700,11 +1674,11 @@ export class Ui {
     const name = this.pickerOpen || !this.current ? null : shortName(this.current, true)
     // Groups end the prompt in "✻"; one-to-one chats in "◉" while the person is online, the mark of a message read,
     // and in "○", the same circle empty, when they aren't or don't share it. While the other person
-    // is typing (not after they stop), the mark is a braille spinner, a frame every 80 ms,
+    // is typing, the mark is a braille spinner, a frame every 80 ms,
     // turned by the typing timer's redraws. "✻" isn't in JetBrains Mono, Ghostty's default: Ghostty takes it from
     // DejaVu Sans Mono, as it does wherever Claude Code shows it. All of them one cell, so the text doesn't move.
-    const typing = !this.pickerOpen && this.current ? this.typing.get(this.current) : undefined
-    const mark = typing === null ? SPINNER[Math.floor(Date.now() / 80) % SPINNER.length]! : this.current?.endsWith('@g.us') ? '✻' : this.online.has(this.current!) ? '◉' : '○'
+    const typing = !this.pickerOpen && !!this.current && this.typing.has(this.current)
+    const mark = typing ? spinnerFrame() : this.current?.endsWith('@g.us') ? '✻' : this.online.has(this.current!) ? '◉' : '○'
     const promptPlain = this.pickerOpen ? '/ ' : name ? `${name} ${mark} ` : `${mark} `
     const pw = this.promptWidth = strWidth(promptPlain)
     const target = this.pickerOpen ? null : this.replyTo ?? this.reactTo ?? this.editing

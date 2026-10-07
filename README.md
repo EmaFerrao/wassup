@@ -36,9 +36,9 @@ while they're online, `Ema ○ ` while not, the first two for a contact with mor
 for its real background colour to pick light or dark shades.
 
 - **Tabs**: one per open chat, with the unread count in red and an `×` to close. Tab cycles through them; whatever is
-  left unsent stays with each chat. While someone is typing, a rainbow runs along their name in the tab, and a
-  braille spinner takes the place of the prompt's mark. New messages in a chat without a tab open one without
-  activating it, with a passing notice over it and the bell.
+  left unsent stays with each chat. While someone is typing, a braille spinner turns before their name in the tab and
+  in place of the prompt's mark. New messages in a chat without a tab open one without activating it, with a passing
+  notice over it and the bell.
 - **Chats**: `/` opens the list, most recent at the bottom, with an excerpt of the last message; typing filters it,
   ignoring accents and case; Enter, Tab, → or a click opens.
 - **Messages**: yours on the right. Mouse wheel or PgUp/PgDn; scrolling past the top brings older messages, first the

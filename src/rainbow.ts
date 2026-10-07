@@ -1,7 +1,7 @@
 /**
- * Soft rainbow in 256 colors, for a tab's name while someone is typing. blessed only accepts 256-palette indices
- * in labels, so the colors are computed in RGB (hue ring, blended with the text color to fade it out) and only
- * at the end is the nearest index chosen in the 6×6×6 cube or the grayscale ramp.
+ * Colours worked out in RGB (the terminal's own, blends for notices and hearts, image pixels) and brought to the
+ * 256-colour palette at the end, since blessed only takes palette indices: the nearest one in the 6×6×6 cube or
+ * the grayscale ramp.
  */
 export type Rgb = [number, number, number]
 
@@ -9,22 +9,6 @@ export type Rgb = [number, number, number]
 export function parseHex(s: string | null): Rgb | null {
   const m = s && /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(s)
   return m ? [parseInt(m[1]!, 16), parseInt(m[2]!, 16), parseInt(m[3]!, 16)] : null
-}
-
-function hsvToRgb(h: number, s: number, v: number): Rgb {
-  const f = (n: number) => {
-    const k = (n + h * 6) % 6
-    return Math.round(255 * v * (1 - s * Math.max(0, Math.min(k, 4 - k, 1))))
-  }
-  return [f(5), f(3), f(1)]
-}
-
-/**
- * Ring of `n` colors along the hue: pastel (low saturation, high brightness) on a dark background, deep on a
- * light background. Low saturation is what makes the effect calm rather than garish.
- */
-export function rainbowRing(dark: boolean, n = 48): Rgb[] {
-  return Array.from({ length: n }, (_, i) => (dark ? hsvToRgb(i / n, 0.45, 0.95) : hsvToRgb(i / n, 0.7, 0.6)))
 }
 
 /** Linear blend from `a` to `b`; `t` from 0 (only `a`) to 1 (only `b`). */
