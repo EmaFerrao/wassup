@@ -131,9 +131,8 @@ export class Ui {
   private ghostBox!: blessed.Widgets.BoxElement
   /** The reply, reaction or edit header, floating on the line above the input. */
   private headerBox!: blessed.Widgets.BoxElement
-  /** The faint rules above and below the input, across the whole width, as Claude Code draws its prompt. */
+  /** The faint rule above the input, across the whole width, which also says when this device shows as online. */
   private ruleTop!: blessed.Widgets.BoxElement
-  private ruleBottom!: blessed.Widgets.BoxElement
   private ruleChar = '─'
   private ghostTimer: NodeJS.Timeout | undefined
   private ghostAbort: AbortController | undefined
@@ -229,14 +228,8 @@ export class Ui {
   private typing = new Set<string>()
   /** One-to-one chats whose person is online right now, for the prompt's mark. */
   private online = new Set<string>()
-  /**
-   * Whether this device shows as online to the others, and the input cursor's blink that says so: while online it
-   * blinks, drawn and hidden on a clock of its own (the terminal's blink attribute can't be confirmed when probing),
-   * and each key brings it back lit; while not, it stays lit.
-   */
+  /** Whether this device shows as online to the others, which the rule under the input says discreetly. */
   private available = false
-  private cursorOn = true
-  private blinkTimer: NodeJS.Timeout | undefined
   private typingTimer: NodeJS.Timeout | undefined
   private fgRgb: Rgb
   private bgRgb: Rgb
@@ -255,8 +248,8 @@ export class Ui {
   private get fixed(): boolean { return !!this.wanted || inHerdr }
   /** Input lines: one at minimum, growing with the text up to half the screen. */
   private inputRows = 1
-  /** Lines occupied at the bottom: the input between its two rules. */
-  private get bottom(): number { return this.inputRows + 2 }
+  /** Lines occupied at the bottom: the input and the rule above it. */
+  private get bottom(): number { return this.inputRows + 1 }
   /** Lines occupied at the top: the tab bar (1), which doesn't exist in single-chat mode. */
   private get barRows(): number { return this.fixed ? 0 : 1 }
 
@@ -312,8 +305,8 @@ export class Ui {
     })
     // Box-drawing only with a UTF-8 locale, like the frames; otherwise plain dashes.
     this.ruleChar = caps.utf8 ? '─' : '-'
-    this.ruleTop = blessed.box({ parent: this.screen, top: `100%-${this.bottom}`, left: 0, right: 0, height: 1, tags: true })
-    this.ruleBottom = blessed.box({ parent: this.screen, top: '100%-1', left: 0, right: 0, height: 1, tags: true })
+    // No wrapping: the rule fills its width, and with the space around "online" blessed would break it there.
+    this.ruleTop = blessed.box({ parent: this.screen, top: `100%-${this.bottom}`, left: 0, right: 0, height: 1, tags: true, wrap: false })
     this.drawRules()
     this.picker = blessed.list({
       parent: this.screen, top: this.barRows, left: 0, right: 0, height: `100%-${this.bottom + this.barRows + 1}`, padding: { left: 1 }, hidden: true,
@@ -396,7 +389,7 @@ export class Ui {
 
   private bindEvents() {
     this.bindDiagnostics()
-    this.screen.on('keypress', (ch: string, key: blessed.Widgets.Events.IKeyEventArg) => { if (this.available) this.restartBlink(); this.onKey(ch, key) })
+    this.screen.on('keypress', (ch: string, key: blessed.Widgets.Events.IKeyEventArg) => this.onKey(ch, key))
     // The picker list has its position and height calculated by hand: it's recomputed when the terminal resizes.
     this.screen.on('resize', () => { this.dirtyMessages = true; this.dirtyTabs = true; this.drawRules(); if (this.pickerOpen) this.refreshPicker(); this.scheduleRender() })
     this.screen.on('prerender', () => this.rgbBlocks?.snapshot(this.screenRows('olines')))
@@ -570,7 +563,7 @@ export class Ui {
     this.wa.on('connection', (state, detail) => this.onConnection(state, detail))
     this.wa.on('chats', () => { this.dirtyTabs = true; if (this.pickerOpen) this.refreshPicker(); this.scheduleRender() })
     this.wa.on('typing', (jid, who) => this.onTyping(jid, who.length > 0))
-    this.wa.on('available', on => { this.available = on; this.restartBlink() })
+    this.wa.on('available', on => { this.available = on; this.drawRules(); this.screen.render() })
     this.wa.on('presence', (jid, on) => {
       if (on) this.online.add(jid); else this.online.delete(jid)
       if (jid === this.current) { this.drawInput(); this.screen.render() }
@@ -1780,18 +1773,16 @@ export class Ui {
     this.inputLines = lines
     this.inputTop = Math.max(0, Math.min(row - (rowsAvail - 1), lines.length - rowsAvail))
     const showCursor = this.focus === 'input' || this.focus === 'picker'
-    // The cursor is a cell in reverse video, left plain in the blink's off half.
-    const caret = (s: string) => this.cursorOn ? `{inverse}${s}{/inverse}` : s
     const render = (line: string[], r: number) => {
       if (!showCursor || r !== row) return esc(text(line))
       const before = esc(text(line.slice(0, col)))
       if (ghostNext) {
         // The cursor sits on the suggestion's first letter, with no empty cell in between; the rest follows in italic.
         const g = graphemes(ghostNext)
-        return before + dim(italic(caret(esc(g[0]!)) + esc(g.slice(1).join(''))))
+        return before + dim(italic('{inverse}' + esc(g[0]!) + '{/inverse}' + esc(g.slice(1).join(''))))
       }
       const under = line[col] == null || line[col] === '\n' ? ' ' : line[col]!
-      return before + caret(esc(under)) + esc(text(line.slice(col + 1)))
+      return before + '{inverse}' + esc(under) + '{/inverse}' + esc(text(line.slice(col + 1)))
     }
     const visible = lines.slice(this.inputTop, this.inputTop + rowsAvail)
     // The prompt says what the line does: the name and "◉", "○" or "✻" type, "/" filters the chats. The name is in
@@ -1808,10 +1799,10 @@ export class Ui {
       this.headerBox.setContent(text)
       this.headerBox.show()
     } else this.headerBox.hide()
-    // The correction floats one line above its word's line, when that line is in view: the input starts `rows`
-    // above the bottom rule, the prompt takes its first columns, after the padding.
+    // The correction floats one line above its word's line, when that line is in view: the input takes the last
+    // `rows` lines, the prompt its first columns, after the padding.
     if (ghostAbove && ghostLine >= this.inputTop && ghostLine < this.inputTop + rowsAvail) {
-      this.ghostBox.top = num(this.screen.height) - rows - 1 + (ghostLine - this.inputTop) - 1
+      this.ghostBox.top = num(this.screen.height) - rows + (ghostLine - this.inputTop) - 1
       this.ghostBox.left = num(this.input.ileft) + pw - 1 + ghostCol
       this.ghostBox.width = strWidth(ghostAbove) + 1
       this.ghostBox.setContent(dim(italic(esc(ghostAbove))))
@@ -2220,24 +2211,14 @@ export class Ui {
     this.rgbBlocks.paint(cells, olines)
   }
 
+  /** The rule above the input; while this device shows as online, it says so near its right end. */
   private drawRules() {
-    const line = faint(this.ruleChar.repeat(Math.max(0, num(this.screen.width))))
-    this.ruleTop.setContent(line)
-    this.ruleBottom.setContent(line)
-  }
-
-  /** Lights the cursor and restarts its blink from there, or stops it lit when this device isn't online. */
-  private restartBlink() {
-    this.cursorOn = true
-    if (this.blinkTimer) { clearInterval(this.blinkTimer); this.blinkTimer = undefined }
-    if (this.available) {
-      this.blinkTimer = setInterval(() => {
-        this.cursorOn = !this.cursorOn
-        if (this.focus === 'input' || this.focus === 'picker') { this.drawInput(); this.screen.render() }
-      }, 530)
-    }
-    this.drawInput()
-    this.screen.render()
+    const width = Math.max(0, num(this.screen.width))
+    const label = ` ${t('online')} `, tail = 2
+    const rule = this.available && width >= label.length + tail + 4
+      ? `${this.ruleChar.repeat(width - label.length - tail)}${label}${this.ruleChar.repeat(tail)}`
+      : this.ruleChar.repeat(width)
+    this.ruleTop.setContent(faint(esc(rule)))
   }
 
   private openMedia(row: MessageRow) {

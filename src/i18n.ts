@@ -29,6 +29,7 @@ const STRINGS = {
   openFirst: { pt: 'abre primeiro uma conversa ("/")', en: 'open a chat first ("/")' },
   unknownCommand: { pt: 'comando desconhecido', en: 'unknown command' },
   typingWho: { pt: '{0} a escrever', en: '{0} typing' },
+  online: { pt: 'online', en: 'online' },
   noChatWith: { pt: 'nenhuma conversa com "{0}"', en: 'no chat matching "{0}"' },
   deleted: { pt: 'mensagem apagada', en: 'message deleted' },
   edited: { pt: '(editada)', en: '(edited)' },
