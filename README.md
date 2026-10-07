@@ -22,7 +22,9 @@ saved and later runs connect directly.
 While you write in a chat the client announces itself "available" to WhatsApp, so the phone does not notify, just as
 with WhatsApp Web open. Only writing counts (typing, deleting, pasting or sending): not opening it, the mouse, other
 keys or getting the focus. After 2 minutes without writing it goes back to "unavailable", and at once when its window
-or pane loses the focus, in terminals that report it (Herdr does).
+or pane loses the focus, in terminals that report it (Herdr does). A message arriving in the chat you have open counts
+as read only while you show as online and, in Herdr, its pane has the focus; otherwise it stays unread, and the phone
+notifies, until you write, open the chat or come back to the terminal.
 
 Requirements: Node 22.13 or newer (it uses the SQLite built into Node).
 
@@ -73,14 +75,14 @@ background colour to pick light or dark shades.
 
 ### Herdr
 
-Inside [Herdr](https://herdr.dev) wassup starts in single-chat mode and each chat is a Herdr tab or pane: in the
-list, Enter puts the chat in this pane, → opens it in a new pane beside it and Tab in a new tab (all three focus the
-one that already has it), and a message from a chat without one opens it in the background, in a pane when its tab is
-already split and in a tab otherwise. Tab, with nothing typed, moves to the next conversation's pane or tab, in the
-order Herdr shows them. wassup shows up in Herdr's agent list under the chat's name, with `●` when there is something
-unread and a turning braille spinner while the other person types: `working` while they type, `blocked` with unread
-messages, `idle` otherwise; alone in its tab, the tab takes the contact's first name. Outside Herdr the terminal
-window title carries the name, the dot and the spinner.
+Inside [Herdr](https://herdr.dev) wassup starts in single-chat mode and each chat is a Herdr tab or pane: in the list,
+Enter puts the chat in this pane, → opens it in a new pane beside it and Tab in a new tab (all three focus the one
+that already has it), and a message from a chat without one opens it in the background, in a pane when its tab is
+already split and in a tab otherwise, still unread (so the phone notifies) until you go to it. Tab, with nothing
+typed, moves to the next conversation's pane or tab, in the order Herdr shows them. wassup shows up in Herdr's agent
+list under the chat's name, with `●` when there is something unread and a turning braille spinner while the other
+person types: `working` while they type, `blocked` with unread messages, `idle` otherwise; alone in its tab, the tab
+takes the contact's first name. Outside Herdr the terminal window title carries the name, the dot and the spinner.
 
 ### Formatting and emoji
 
