@@ -2196,8 +2196,12 @@ export class Ui {
       }
 
       const type = row.type
-      // The note after an attachment: that it's gone, when it is; nothing otherwise.
-      const mediaHint = row.media_err && !row.media_path ? ` ${dim(t('unavailable'))}` : ''
+      // The note after an attachment: that it's gone, when it is; while it isn't on disk yet, "⤓" in green, and a
+      // click on the message fetches it into the app's media folder (openMedia), where it stays; the mark goes with
+      // the redraw that follows. Images and stickers fetch themselves as they come into view.
+      const fetchMark = this.ruleChar === '─' ? '⤓' : 'v'
+      const mediaHint = row.media_err && !row.media_path ? ` ${dim(t('unavailable'))}`
+        : row.media_mime && !row.media_path ? ` {${this.green}-fg}${fetchMark}{/${this.green}-fg}` : ''
       let stamped = false
       if (type === 'deleted') out(dim(`⊘ ${t('deleted')}`), row)
       else if (type === 'image' || type === 'sticker' || type === 'gif' || type === 'video') {
