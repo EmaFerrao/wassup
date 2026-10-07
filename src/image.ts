@@ -107,23 +107,56 @@ export function cellSize(w: number, h: number, maxCols: number, maxRows: number,
 }
 
 /**
- * Rows of ▀ half-blocks, two pixel rows per line, in the 256-color palette blessed keeps anyway (handing it 24-bit
- * colors made it match each cell against the palette while parsing), and with a color only written where it
- * changes from the cell before: a line costs blessed and the terminal a fraction of what one SGR pair per cell did.
+ * The palette index of each half-cell of an image drawn `cols` wide and `rows` tall in half-blocks (`cols` ×
+ * `rows * 2` of them, row by row), or -1 where it's transparent. Each half-cell gets the average of all the pixels
+ * it covers, weighted by their opacity, instead of one pixel picked from them, which broke edges and text into
+ * stray dots. No dithering: with half-cells this big and a palette of six levels per channel, Floyd–Steinberg's
+ * carried error showed up as saturated dots that weren't in the picture.
+ */
+export function blockColors(d: Decoded, cols: number, rows: number): Int16Array {
+  const W = cols, H = rows * 2
+  const sx = d.rw / W, sy = d.rh / H
+  const out = new Int16Array(W * H).fill(-1)
+  for (let y = 0; y < H; y++) {
+    const y0 = Math.min(d.rh - 1, Math.floor(y * sy)), y1 = Math.max(y0 + 1, Math.min(d.rh, Math.floor((y + 1) * sy)))
+    for (let x = 0; x < W; x++) {
+      const x0 = Math.min(d.rw - 1, Math.floor(x * sx)), x1 = Math.max(x0 + 1, Math.min(d.rw, Math.floor((x + 1) * sx)))
+      let sa = 0, sr = 0, sg = 0, sb = 0
+      for (let yy = y0; yy < y1; yy++) {
+        for (let xx = x0; xx < x1; xx++) {
+          const o = (yy * d.rw + xx) * 4, a = d.rgba[o + 3]!
+          sa += a; sr += d.rgba[o]! * a; sg += d.rgba[o + 1]! * a; sb += d.rgba[o + 2]! * a
+        }
+      }
+      // Transparent below a quarter of opacity, the same threshold as one pixel had.
+      if (sa / ((y1 - y0) * (x1 - x0)) < 64) continue
+      out[y * W + x] = nearest256([sr / sa, sg / sa, sb / sa])
+    }
+  }
+  return out
+}
+
+/** halfBlocks' lines per image and size: averaging reads every pixel, too much to redo on each redraw. */
+const blockCache = new WeakMap<Decoded, Map<string, string[]>>()
+
+/**
+ * Rows of ▀ half-blocks, two pixel rows per line, coloured by blockColors in the 256-colour palette blessed keeps
+ * anyway (handing it 24-bit colours made it match each cell against the palette while parsing), and with a colour
+ * only written where it changes from the cell before: a line costs blessed and the terminal a fraction of what one
+ * SGR pair per cell did.
  */
 export function halfBlocks(d: Decoded, cols: number, rows: number): string[] {
+  const key = `${cols}x${rows}`
+  const sizes = blockCache.get(d) ?? new Map<string, string[]>()
+  blockCache.set(d, sizes)
+  const hit = sizes.get(key)
+  if (hit) return hit
   const out: string[] = []
-  const sx = d.rw / cols, sy = d.rh / (rows * 2)
-  // Palette index of the pixel, or -1 when transparent.
-  const px = (x: number, y: number): number => {
-    const ix = Math.min(d.rw - 1, Math.floor(x * sx)), iy = Math.min(d.rh - 1, Math.floor(y * sy))
-    const o = (iy * d.rw + ix) * 4
-    return d.rgba[o + 3]! < 64 ? -1 : nearest256([d.rgba[o]!, d.rgba[o + 1]!, d.rgba[o + 2]!])
-  }
+  const px = blockColors(d, cols, rows)
   for (let r = 0; r < rows; r++) {
     let line = '', fg = -1, bg = -1
     for (let c = 0; c < cols; c++) {
-      const top = px(c, r * 2), bottom = px(c, r * 2 + 1)
+      const top = px[r * 2 * cols + c]!, bottom = px[(r * 2 + 1) * cols + c]!
       // Which color goes in the foreground (the block's glyph) and which in the background; -1 is the terminal's own.
       const [f, b, ch] = top < 0 && bottom < 0 ? [-1, -1, ' '] : bottom < 0 ? [top, -1, '▀'] : top < 0 ? [bottom, -1, '▄'] : [top, bottom, '▀']
       if (b < 0 && bg >= 0) { line += '\x1b[0m'; fg = -1 }
@@ -134,6 +167,7 @@ export function halfBlocks(d: Decoded, cols: number, rows: number): string[] {
     }
     out.push(line + '\x1b[0m')
   }
+  sizes.set(key, out)
   return out
 }
 
