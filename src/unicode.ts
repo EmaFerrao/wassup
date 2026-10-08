@@ -41,14 +41,16 @@ export function patchBlessedUnicode(flags: boolean) {
   u.charWidth = (str, i) => {
     const at = i ?? 0
     const cp = typeof str === 'number' ? str : str.codePointAt(at)
-    if (cp == null || cp <= 0xff) return orig.call(u, str, i)
+    if (cp == null) return orig.call(u, str, i)
     const c = String.fromCodePoint(cp)
+    // blessed's renderer merges the U+FE0F into the previous character's cell, so here it comes right after it.
+    // Before the Latin-1 shortcut: "©️" and "®️" are pictographs below U+0100, as wide with the selector as any other.
+    if (typeof str !== 'number' && str[at + c.length] === VS16 && PICTOGRAPH.test(c)) return 2
+    if (cp <= 0xff) return orig.call(u, str, i)
     // A flag drawn as such has one cell of width 2, the second regional indicator inside the first's (patchRender):
     // the first counts 2, as an emoji, and the second nothing.
     if (realFlags && typeof str !== 'number' && flagTail(str, at)) return 0
     if (EMOJI_WIDE.test(c)) return 2
-    // blessed's renderer merges the U+FE0F into the previous character's cell, so here it comes right after it.
-    if (typeof str !== 'number' && str[at + c.length] === VS16 && PICTOGRAPH.test(c)) return 2
     return orig.call(u, str, i)
   }
 
