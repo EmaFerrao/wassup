@@ -10,6 +10,7 @@ import blessed from 'blessed'
  */
 interface BlessedUnicode {
   charWidth: (str: string | number, i?: number) => number
+  isCombining: (str: string, i: number) => boolean
   chars: { all: RegExp; wide: RegExp; swide: RegExp }
 }
 
@@ -60,6 +61,30 @@ export function patchBlessedUnicode(flags: boolean) {
   const flag = flags ? '\\p{Regional_Indicator}{2}|' : ''
   u.chars.all = new RegExp(`(${flag}\\p{Extended_Pictographic}\\uFE0F|\\p{Emoji_Presentation}|[\\u{20000}-\\u{2FFFD}\\u{30000}-\\u{3FFFD}]|${u.chars.wide.source})`, 'gu')
   if (flags) patchRender(u)
+  patchWrap(u)
+}
+
+/**
+ * blessed fits a line to the box's width counting UTF-16 units, the second cell's marker of a wide character
+ * included: an emoji outside the basic plane ("😁": two halves and the marker) or a pictograph with U+FE0F ("❤️")
+ * counts three for its two cells, a flag drawn as such five, an accent written apart one for none. A line that
+ * fills the width with any of them was cut short, and with wrap off its last cells were lost, the time at the end
+ * of a message or of the chat list's row among them. `_wrapContent` is rebuilt from its own source so that those
+ * units, which take no cell of their own, aren't counted, and those right after the last cell stay on the line.
+ */
+function patchWrap(u: BlessedUnicode) {
+  type Wrap = (this: unknown, content: string, width: number) => unknown
+  const proto = (blessed as unknown as { Element: { prototype: { _wrapContent: Wrap } } }).Element.prototype
+  const src = proto._wrapContent.toString()
+  // Where the count reaches the width, the units with no cell that follow (an accent written apart) stay with it.
+  const marker = 'if (!line[i]) break;\n        if (++total === width) {\n          // If we\'re not wrapping the text, we have to finish up the rest of\n          // the control sequences before cutting off the line.\n          i++;'
+  if (!src.includes(marker)) throw new Error('blessed: _wrapContent changed; the width patch does not apply')
+  const patched = src.replace(marker, marker.replace('if (++total', 'if (uncounted(line, i)) continue;\n        if (++total') + '\n          while (i < line.length && uncounted(line, i)) i++;')
+  const uncounted = (s: string, i: number) => {
+    const c = s.charCodeAt(i)
+    return (c >= 0xDC00 && c <= 0xDFFF) || c === 0xFE0F || (realFlags && flagTail(s, i)) || u.isCombining(s, i)
+  }
+  proto._wrapContent = new Function('unicode', 'uncounted', `return function ${patched.replace(/^function\s*/, '')}`)(u, uncounted) as Wrap
 }
 
 /**

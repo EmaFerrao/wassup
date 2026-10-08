@@ -144,26 +144,6 @@ export function visibleWidth(s: string): number {
   return strWidth(stripTags(s))
 }
 
-/**
- * Width of tag-free text as blessed counts it when deciding whether to wrap the line: in UTF-16 units, with the
- * marker it puts in the second cell of each wide character. An emoji outside the basic plane (surrogate pair)
- * or a pictograph with the U+FE0F variation selector thus counts one more than the cells it occupies, and a flag
- * drawn as such (two regional indicators and the marker, in 2 cells) three more. Wrapping and aligning by this
- * measure is what keeps blessed from wrapping the line again and throwing the last word onto the next line.
- */
-function wrapUnits(plain: string): number {
-  let extra = 0
-  for (const c of plain) if (c.codePointAt(0)! > 0xffff) extra++
-  extra += plain.match(/\p{Extended_Pictographic}️/gu)?.length ?? 0
-  extra += plain.match(/\p{Regional_Indicator}{2}/gu)?.length ?? 0
-  return strWidth(plain) + extra
-}
-
-/** `wrapUnits` of a line with tags. */
-export function wrapWidth(s: string): number {
-  return wrapUnits(stripTags(s))
-}
-
 /** Cuts a tagged line to `width` visible columns, letting tags through and closing whatever is open at the end. */
 export function clipTagged(s: string, width: number): string {
   let out = '', w = 0
@@ -182,7 +162,7 @@ export function clipTagged(s: string, width: number): string {
 
 /**
  * Wraps a line with tags into lines of width ≤ `width`, by words (or by characters when the word doesn't fit),
- * measured as blessed measures it (`wrapUnits`). Each line stands on its own: what's open where it breaks (blessed's
+ * measured in cells, as blessed measures them once patched (unicode.ts, patchWrap). Each line stands on its own: what's open where it breaks (blessed's
  * tags, innermost last, and the italic's raw SGR) is closed at its end and opened again at the start of the next, so
  * what's added after a line's text (a bubble's spare cells, the time, a mark) doesn't carry on an underline or a
  * colour from a link cut in two.
@@ -208,7 +188,7 @@ export function wrapTagged(s: string, width: number): string[] {
     if (curW + w <= width) { cur += piece; curW += w; return }
     if (w <= width) { newline(); cur += piece; curW = w; return }
     for (const ch of piece) {
-      const cw = wrapUnits(ch)
+      const cw = strWidth(ch)
       if (curW + cw > width) newline()
       cur += ch; curW += cw
     }
@@ -223,7 +203,7 @@ export function wrapTagged(s: string, width: number): string[] {
     for (const piece of tok.split(/(\s+)/)) {
       if (!piece) continue
       if (/^\s+$/.test(piece)) { if (curW + piece.length <= width) { cur += piece; curW += piece.length } else newline(); continue }
-      emit(piece, wrapUnits(piece))
+      emit(piece, strWidth(piece))
     }
   }
   if (cur !== start || !lines.length) lines.push(cur.replace(/\s+$/, ''))
@@ -244,7 +224,7 @@ export function graphemes(s: string): string[] {
 export function wrapChars(chars: string[], width: number): string[][] {
   const lines: string[][] = [[]]
   let curW = 0
-  const cw = (c: string) => wrapWidth(esc(c))
+  const cw = (c: string) => visibleWidth(esc(c))
   const push = (ch: string, w: number) => {
     if (curW > 0 && curW + w > width) { lines.push([]); curW = 0 }
     lines[lines.length - 1]!.push(ch); curW += w
@@ -265,16 +245,12 @@ export function wrapChars(chars: string[], width: number): string[][] {
   return lines
 }
 
-/**
- * Spaces that bring `s` up to `width` cells without blessed wrapping the line: blessed's own measure
- * (`wrapWidth`) may go one past `width` before it wraps, so a line with one emoji still reaches the edge; with
- * more, each further one costs a column.
- */
+/** Spaces that bring `s` up to `width` cells. */
 export function padding(s: string, width: number): number {
-  return Math.max(0, Math.min(width - visibleWidth(s), width + 1 - wrapWidth(s)))
+  return Math.max(0, width - visibleWidth(s))
 }
 
-/** Right-aligns to `width` columns, as far as `padding` allows. */
+/** Right-aligns to `width` columns. */
 export function alignRight(s: string, width: number): string {
   return ' '.repeat(padding(s, width)) + s
 }

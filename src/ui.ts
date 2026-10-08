@@ -6,7 +6,7 @@ import { store, type ChatRow, type MessageRow, type ReactionRow } from './db.js'
 import { chatName, contactName, shortName, canonicalJid, thumbPath, previewPath, hasPreviewImage, mediaFile, jidUser, withMentions, typeLabel, pinTarget, myAccount, type ConnState } from './wa.js'
 import { inHerdr, reportHerdr, doneHerdr, titleHerdr, tabNameHerdr, releaseHerdr, openChatHerdr, focusHerdr, focusNextChatHerdr, paneFocusedHerdr } from './herdr.js'
 import type { Backend } from './backend.js'
-import { waMarkup, clipTagged, esc, colorFor, setTheme, dim, faint, italic, padding, fmtTime, fmtDay, fmtWhen, daysAgo, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, wrapWidth, fold, graphemes, wrapChars } from './format.js'
+import { waMarkup, clipTagged, esc, colorFor, setTheme, dim, faint, italic, padding, fmtTime, fmtDay, fmtWhen, daysAgo, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, fold, graphemes, wrapChars } from './format.js'
 import { decode, cached, cellSize, halfBlocks, blockGrid, blockCell, detectImageMode, detectRgb, KittyImages, RgbPainter, type BlockGrid, type Decoded, type ImageMode, type RgbCell } from './image.js'
 import { logger, uiLog } from './log.js'
 import { linksIn, showLinks } from './links.js'
@@ -434,9 +434,8 @@ export class Ui {
       // background across the whole row (repainted in WhatsApp Web's colour where the terminal takes 24-bit colour).
       style: { selected: { bold: true, fg: this.dark ? 'bright-white' : 'black', bg: this.bubbleBg.theirs } } as unknown as blessed.Widgets.ListElementStyle,
     })
-    // Rows aren't wrapped, as the messages' aren't: one with emoji, which blessed measures a cell too wide, would
-    // otherwise be cut at the edge, through the middle of the time's closing tag. Set as each row is made, before
-    // blessed first lays out its content.
+    // Rows aren't wrapped, as the messages' aren't: a row is one line, cut at the edge should it ever run past it.
+    // Set as each row is made, before blessed first lays out its content.
     const list = this.picker as unknown as { createItem: (content: string) => { wrap: boolean } }
     const createItem = list.createItem.bind(list)
     list.createItem = content => { const item = createItem(content); item.wrap = false; return item }
@@ -1811,8 +1810,7 @@ export class Ui {
     const right = c.unread > 0 ? `{${this.green}-fg}{bold}${c.unread}{/bold}  ${when}{/${this.green}-fg}` : faint(when)
     const body = typing ? '' : last ? this.excerpt(last, !!c.is_group) : ''
     const text = (s: string) => (typing ? `{${this.green}-fg}${esc(t('typingShort'))}{/${this.green}-fg}` : dim(esc(s)))
-    // The excerpt takes what's left; the time ends at the edge (a cell or so short with emoji in the row, which
-    // blessed measures a cell too wide, see padding).
+    // The excerpt takes what's left; the time ends at the edge.
     let room = width - visibleWidth(prefix) - visibleWidth(right) - 2
     for (let i = 0; i < 4; i++) {
       const base = `${prefix}${text(truncate(body, Math.max(0, room)))}`
@@ -2318,7 +2316,7 @@ export class Ui {
     let row = 0, start = 0
     while (row < lines.length - 1 && cursor >= start + lines[row]!.length) start += lines[row++]!.length
     let col = cursor - start
-    if (col >= lines[row]!.length && wrapWidth(esc(lines[row]!.join(''))) >= width) { lines.push([]); row++; col = 0 }
+    if (col >= lines[row]!.length && visibleWidth(esc(lines[row]!.join(''))) >= width) { lines.push([]); row++; col = 0 }
     // The "\n" or the space that closes a line stay in it, so the cursor counts them, but aren't drawn: one space
     // past the width would make blessed wrap the line. A trailing space that fits is drawn, so the cursor advances with it.
     const text = (l: string[]) => { const t = l.filter(c => c !== '\n').join(''); return strWidth(t) > width ? t.replace(/\s+$/, '') : t }
@@ -2658,11 +2656,9 @@ export class Ui {
       }
       if (!bare) {
         const rect = this.bubble(lines, bubbleFrom, lines.length, mine, width, row.id !== selectedId && row.id !== this.drag?.id, pictures)
-        // In a bubble, the time goes outside it on its last line: right after it for theirs, against the edge for
-        // mine (a cell or so short when that line's emoji would take it past, see padding).
+        // In a bubble, the time goes outside it on its last line: right after it for theirs, against the edge for mine.
         const at = lines.length - 1, line = lines[at] ?? ''
-        let gap = rect ? (mine ? width - visibleWidth(stamp) : rect.end + 1) - visibleWidth(line) : 0
-        gap -= Math.max(0, wrapWidth(`${line}${' '.repeat(Math.max(0, gap))}${stamp}`) - (width + 1))
+        const gap = rect ? (mine ? width - visibleWidth(stamp) : rect.end + 1) - visibleWidth(line) : 0
         const tailed = `${line}${' '.repeat(Math.max(0, gap))}${stamp}`
         if (!stamped && rect && !pictures.has(at) && gap >= 1 && visibleWidth(tailed) <= width) { lines[at] = tailed; headers.add(at); stamped = true }
       }
