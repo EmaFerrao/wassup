@@ -125,12 +125,12 @@ sentence or two from the local model (see below) on what it shows, beside it, or
 With a local `llama-server` at `http://127.0.0.1:8080` (or `WA_LLM`), model `gemma4-26b` (or `WA_LLM_MODEL`), the
 input asks for a suggestion shortly after the last key, with the latest messages as context: the letters missing from
 the word being typed, right at the cursor, and every wrong passage already written (spelling, accents, grammar, a
-missing comma) underlined in yellow, with the right word after `⇢` above the one the cursor is on, or the last. Tab or
-→ accept it; the others stay underlined. The prompt is in the user's language. `WA_LLM=off` turns the model off.
-Without it (`WA_LLM=off`, or no server answering, then for a minute before asking again) a small local spell checker
-stands in, words only, in the same way: Hunspell in WebAssembly with LibreOffice's Portuguese (Portugal) and English
-dictionaries, a word being right in any of them; words you wrote yourself more than once and the names of contacts and
-chats count as known, unless all they lack is an accent.
+missing comma) underlined in yellow, with the right word right above the one the cursor is on, or the last. Tab, →
+or a click on it accept it; the others stay underlined. The prompt is in the user's language. `WA_LLM=off` turns the
+model off. Without it (`WA_LLM=off`, or no server answering, then for a minute before asking again) a small local
+spell checker stands in, words only, in the same way: Hunspell in WebAssembly with LibreOffice's Portuguese (Portugal)
+and English dictionaries, a word being right in any of them; words you wrote yourself more than once and the names of
+contacts and chats count as known, unless all they lack is an accent.
 
 With the input empty, after 5 s without keys, the same gray italic offers a reply when the chat calls for one; → puts
 it in the input, to edit and send (Tab still switches tabs). When the last messages are the other side's, from the last three days, the
