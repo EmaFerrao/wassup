@@ -7,17 +7,18 @@ SQLite database and draws the interface with panels, mouse and images right in t
 ## Running
 
 ```sh
-npm install -g github:lucio-ferrao/wassup --allow-git=root --ignore-scripts
+npm install -g github:lucio-ferrao/wassup --allow-git=all --install-links
 wa              # from anywhere: opens on the chat list
 wa emma         # opens straight into the chat whose name or number contains "emma"
 ```
 
-`--allow-git=root` lets npm 12 install from GitHub, which it refuses by default (npm 10 and 11 take the option without
-complaint). `--ignore-scripts` skips the dependencies' install scripts, which aren't needed (a Node version check, a
-version check, and confirming esbuild's binary) and on some setups fail, as on macOS with Homebrew's npm ("spawn sh
-ENOENT" in `node_modules/baileys`). Without installing, `npx --allow-git=root github:lucio-ferrao/wassup` runs it from
-npm's cache (the first time downloads the dependencies, about 100 MB). Or, from a clone: `npm install`, then `./wa`
-(or `npm start`).
+`--install-links` makes npm put a real copy in place: without it npm 11 links the package to a temporary clone it then
+deletes, and the install fails ("spawn sh ENOENT" in `node_modules/baileys`) or ends up empty. `--allow-git=all` lets
+npm 12 install from GitHub, which it refuses by default (npm 11 needs `all`, as it turns `root` down for a global
+install; npm 10 ignores it). npm 12 then warns that it skipped three dependencies' install scripts; they aren't
+needed. Without installing, `npx --allow-git=all --install-links github:lucio-ferrao/wassup` runs it from npm's cache
+(the first time downloads the dependencies, about 100 MB). Or, from a clone: `npm install`, then `./wa` (or `npm
+start`).
 
 The first time, a QR code appears: on the phone, WhatsApp › Settings › Linked devices › Link a device. The session is
 saved and later runs connect directly.
