@@ -58,7 +58,7 @@ and on startup the terminal is asked for its real background colour to pick ligh
 - **Messages**: yours on the right, each in a bubble with WhatsApp Web's colours where the terminal takes 24-bit
   colour (yours, on a dark theme, toned down to the brightness of theirs) and two discreet greys otherwise, with the
   time outside it, yours with their state in its separator (`14 06` not sent yet, `14.06` sent, `14:06` delivered;
-  `14:06 ❮` the last of yours that was read) and a link's preview image inside it above the text; the
+  `14:06❮` the last of yours that was read) and a link's preview image inside it above the text; the
   pictures of images, stickers, videos and GIFs stay out of it, with their caption in
   it, and emoji on their own go bare; each day starts with a separator and a blank line. Mouse wheel or PgUp/PgDn;
   scrolling past the top brings older messages, first the stored ones and then from the phone, and Ctrl+↓ or Ctrl+PgDn

@@ -1806,7 +1806,8 @@ export class Ui {
     const prefix = `${left}${' '.repeat(Math.max(1, nameW - visibleWidth(left)))}${mark} `
     const ts = last?.ts ?? c.last_ts
     const mine = last?.from_me ? last.status ?? 0 : null
-    const when = !ts ? '' : esc(mine != null && daysAgo(ts) <= 0 ? myTime(ts, mine) : fmtWhen(ts)) + (mine != null && mine >= 4 ? ' ❮' : '')
+    // The cell after the time is kept in every row, blank but for the read mark, so all the times line up.
+    const when = !ts ? '' : esc(mine != null && daysAgo(ts) <= 0 ? myTime(ts, mine) : fmtWhen(ts)) + (mine != null && mine >= 4 ? '❮' : ' ')
     const right = c.unread > 0 ? `{${this.green}-fg}{bold}${c.unread}{/bold}  ${when}{/${this.green}-fg}` : faint(when)
     const body = typing ? '' : last ? this.excerpt(last, !!c.is_group) : ''
     const text = (s: string) => (typing ? `{${this.green}-fg}${esc(t('typingShort'))}{/${this.green}-fg}` : dim(esc(s)))
@@ -2510,7 +2511,7 @@ export class Ui {
     for (const r of store.listReactions(jid)) reactions.set(r.msg_id, [...(reactions.get(r.msg_id) ?? []), r])
     // Encrypted content for another message, stored before the client knew to drop it, isn't a message to show.
     const rows = store.listMessages(jid, this.shown.get(jid) ?? PAGE).filter(r => r.type !== 'secretEncrypted')
-    // The last of mine the other side has read (or played), which gets the prompt's mark turned round, "❮", after its time.
+    // The last of mine the other side has read (or played), which gets the prompt's mark turned round, "❮", right after its time.
     const lastRead = [...rows].reverse().find(r => r.from_me === 1 && (r.status ?? 0) >= 4)?.id
     this.rows = rows
     this.selected = rows.find(r => r.id === selectedId) ?? null
@@ -2538,8 +2539,9 @@ export class Ui {
       // My own messages stay flush right: I wrap the lines myself (blessed only wraps from the left) and push each
       // one to the edge; other people's stay on the left, wrapped the same way.
       const mine = row.from_me === 1
-      // Mine carry their state in the time's separator (myTime), the same width whatever the state; the last read, "❮".
-      const stamp = faint(mine ? `${myTime(row.ts, row.status ?? 0)}${row.id === lastRead ? ' ❮' : ''}` : fmtTime(row.ts))
+      // Mine carry their state in the time's separator (myTime), the same width whatever the state, and a cell after
+      // it, "❮" on the last read and blank on the others, so all their times line up.
+      const stamp = faint(mine ? `${myTime(row.ts, row.status ?? 0)}${row.id === lastRead ? '❮' : ' '}` : fmtTime(row.ts))
       // Messages go in a bubble (see bubble), with the time outside it, except emoji on their own, which stand bare
       // with the time beside them. The pictures of images, stickers, videos and GIFs stay out of it too (`pictures`,
       // their rows), while what comes with them (the sender's name, a quote, the caption, the video's note) goes in.
