@@ -7,14 +7,17 @@ SQLite database and draws the interface with panels, mouse and images right in t
 ## Running
 
 ```sh
-npm install -g github:lucio-ferrao/wassup
+npm install -g github:lucio-ferrao/wassup --allow-git=root --ignore-scripts
 wa              # from anywhere: opens on the chat list
 wa emma         # opens straight into the chat whose name or number contains "emma"
 ```
 
-Without installing, `npx github:lucio-ferrao/wassup` runs it from npm's cache (the first time downloads the
-dependencies, about 100 MB). Or, from a clone: `npm install`, then `./wa` (or `npm start`). npm 12 warns that some
-dependencies' install scripts were skipped; they are not needed, the warning can be ignored.
+`--allow-git=root` lets npm 12 install from GitHub, which it refuses by default (npm 10 and 11 take the option without
+complaint). `--ignore-scripts` skips the dependencies' install scripts, which aren't needed (a Node version check, a
+version check, and confirming esbuild's binary) and on some setups fail, as on macOS with Homebrew's npm ("spawn sh
+ENOENT" in `node_modules/baileys`). Without installing, `npx --allow-git=root github:lucio-ferrao/wassup` runs it from
+npm's cache (the first time downloads the dependencies, about 100 MB). Or, from a clone: `npm install`, then `./wa`
+(or `npm start`).
 
 The first time, a QR code appears: on the phone, WhatsApp › Settings › Linked devices › Link a device. The session is
 saved and later runs connect directly.
