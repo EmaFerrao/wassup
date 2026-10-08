@@ -248,16 +248,24 @@ for (const [faces, emoji] of EMOTICONS) for (const f of faces) EMOTICON_MAP.set(
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 /** Longest first, so ">:(" is found before ":(". */
 const FACES = [...EMOTICON_MAP.keys()].sort((a, b) => b.length - a.length)
-const EMOTICON_RE = new RegExp(`(^|\\s)(${FACES.map(escapeRe).join('|')})(?=\\s|$|[.,!?])`, 'g')
+const anyOf = (faces: string[]) => faces.map(escapeRe).join('|')
+/** What may follow a smiley: a space, the end, or punctuation. */
+const FACE_END = '(?=\\s|$|[.,!?])'
+const EMOTICON_RE = new RegExp(`(^|\\s)(${anyOf(FACES)})${FACE_END}`, 'g')
+/**
+ * The smileys offered while typing: not those that start with a letter or a digit ("xD", "B)", "8)", "o/"), which
+ * are also ordinary text being typed ("xdg-open", "(plan B)", "caro o/a").
+ */
+const TYPED_FACE_RE = new RegExp(`(?:^|\\s)(${anyOf(FACES.filter(f => !/^[\p{L}\p{N}]/u.test(f)))})$`)
+const AFTER_FACE_RE = new RegExp(`^${FACE_END}`)
 
-/** The classic smiley ending `text`, on its own after a space (or at the start), and the emoji it stands for. */
-export function emoticonAt(text: string): { face: string; emoji: string } | null {
-  for (const face of FACES) {
-    if (!text.endsWith(face)) continue
-    const pre = text.slice(0, -face.length)
-    if (!pre || /\s$/.test(pre)) return { face, emoji: EMOTICON_MAP.get(face)! }
-  }
-  return null
+/**
+ * The classic smiley `before` ends with, on its own after a space (or at the start) and with a space, the end or
+ * punctuation in `after`, and the emoji it stands for.
+ */
+export function emoticonAt(before: string, after: string): { face: string; emoji: string } | null {
+  const face = TYPED_FACE_RE.exec(before)?.[1]
+  return face && AFTER_FACE_RE.test(after) ? { face, emoji: EMOTICON_MAP.get(face)! } : null
 }
 
 /** Replaces classic smileys (":)", ":-P", ":*") with the corresponding emoji; everything else stays as is. */

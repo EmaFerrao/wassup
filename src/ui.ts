@@ -12,7 +12,7 @@ import { logger, uiLog } from './log.js'
 import { linksIn, showLinks } from './links.js'
 import { patchBlessedDraw, patchBlessedUnicode } from './unicode.js'
 import type { TermCaps } from './term.js'
-import { emojify, completeEmoji, emoticonAt } from './emoji.js'
+import { emojify, emoticonify, completeEmoji, emoticonAt } from './emoji.js'
 import { enableKittyKeyboard } from './kittykeys.js'
 import { enableBracketedPaste } from './paste.js'
 import { Hearts, reaction, emojiOnly } from './hearts.js'
@@ -642,7 +642,8 @@ export class Ui {
           for (const ch of line) { const w = visibleWidth(esc(ch)); if (col + w / 2 > x) break; col += w; pos++ }
         }
         if (this.pickerOpen) this.filterCursor = pos
-        else this.cursor = pos
+        // The emoji list follows the cursor: it's for what's before the new position, if anything.
+        else { this.cursor = pos; this.updateSuggestions() }
         this.drawInput()
       }
       this.screen.render()
@@ -874,7 +875,7 @@ export class Ui {
     // active tab, the program.
     if (k === 'escape') {
       if (this.quickFor) { this.quickFor = undefined; return this.screen.render() }
-      if (this.suggestions.length) { this.suggestions = []; this.drawSuggestions(); return this.screen.render() }
+      if (this.suggestions.length) { this.suggestions = []; this.drawSuggestions(); this.drawInput(); return this.screen.render() }
       if (this.replyTo || this.reactTo) { this.replyTo = this.reactTo = null; this.drawInput(); return this.screen.render() }
       if (this.editing) { this.editing = null; this.inputValue = ''; this.cursor = 0; this.updateSuggestions(); this.drawInput(); return this.screen.render() }
       if (this.focus === 'messages') { this.setFocus('input'); return this.renderNow() }
@@ -947,15 +948,16 @@ export class Ui {
       if (ch === '/' && !this.inputValue) return this.openPicker()
       // Shift+Enter (only with the Kitty protocol, which distinguishes it) or Ctrl+J start a new line in the message.
       if (k === 'S-return' || k === 'linefeed') return this.paste('\n')
-      // With emoji suggestions open, ↑/↓ choose and Enter or Tab accept (Enter not after a whole smiley, where it
-      // sends the message as typed); everything else keeps typing and refines them.
+      // With emoji suggestions open, ↑/↓ choose (with a single one they go on to the messages) and Enter or Tab
+      // accept (Enter not on a whole smiley's own emoji, where it sends the message as typed); everything else keeps
+      // typing and refines them.
       if (this.suggestions.length) {
-        if (k === 'up' || k === 'down') {
+        if ((k === 'up' || k === 'down') && this.suggestions.length > 1) {
           this.suggestIndex = (this.suggestIndex + (k === 'up' ? -1 : 1) + this.suggestions.length) % this.suggestions.length
           this.drawSuggestions()
           return this.screen.render()
         }
-        if ((k === 'enter' || k === 'return') && !this.suggestFace) return this.acceptSuggestion()
+        if ((k === 'enter' || k === 'return') && !(this.suggestFace && this.suggestIndex === 0)) return this.acceptSuggestion()
       }
       if (k === 'enter' || k === 'return') { const v = this.inputValue; if (v) this.noteWriting(); this.inputValue = ''; this.cursor = 0; this.stopComposing(); this.updateSuggestions(); this.drawInput(); this.screen.render(); return void this.submit(v) }
       // Right after accepting a suggestion that ended mid-word, a letter or digit starts a new word: it goes in
@@ -1263,8 +1265,9 @@ export class Ui {
       this.reactTo = null
       this.drawInput()
       this.screen.render()
-      // The ":" the reaction starts with, alone, counts the same as nothing: it removes the reaction.
-      return this.react(reactTo, text === ':' ? '' : text)
+      // The ":" the reaction starts with, alone, counts the same as nothing: it removes the reaction. A smiley
+      // (":)", "<3") goes as its emoji.
+      return this.react(reactTo, text === ':' ? '' : emoticonify(text))
     }
     // Edit in progress: the text replaces the open message's; empty sends nothing and the edit stays open.
     const editing = this.editing
@@ -1290,7 +1293,8 @@ export class Ui {
     // On sending, the panel jumps to the bottom to show the new message, even if it was looking at history.
     this.atBottom = true
     try {
-      if (text.startsWith(':')) return this.flash(`${t('unknownCommand')}: ${text.split(' ')[0]}. ${HELP}`, 10000)
+      // A message that starts with a smiley (":)", ":D") isn't a ":" command.
+      if (emoticonify(text).startsWith(':')) return this.flash(`${t('unknownCommand')}: ${text.split(' ')[0]}. ${HELP}`, 10000)
       const replyTo = this.replyTo?.chat_jid === jid ? this.replyTo : null
       this.replyTo = null
       this.drawInput()
@@ -1936,17 +1940,20 @@ export class Ui {
   /**
    * A `:` right before the cursor opens the list with the basic smileys (":)", ":D"...); what's typed after it
    * narrows it to the smileys and the emojis whose name starts that way. A whole smiley before the cursor, on its
-   * own after a space or at the start, puts its emoji first, those that don't start with ":" too ("<3", ";)", "xD").
+   * own after a space or at the start, puts its emoji first, those that don't start with ":" too ("<3", ";)").
+   * Only with the focus on the input: a draft put back with it elsewhere (closing a tab) opens nothing.
    */
   private updateSuggestions(ghostDelay = 150) {
     const chars = graphemes(this.inputValue)
     const at = Math.min(this.cursor, chars.length)
     const before = chars.slice(0, at).join('')
-    const face = emoticonAt(before)
-    const m = /(^|[^\w:]):([^\s:]*)$/.exec(before)
+    const writing = this.focus === 'input'
+    const face = writing ? emoticonAt(before, chars.slice(at).join('')) : null
+    const m = writing ? /(^|[^\w:]):([^\s:]*)$/.exec(before) : null
+    const typed = m ? graphemes(`:${m[2]}`).length : 0
     const options = [
       ...face ? [{ emoji: face.emoji, code: face.face, length: graphemes(face.face).length }] : [],
-      ...(m ? completeEmoji(m[2]!) : []).map(o => ({ ...o, length: graphemes(`:${m![2]}`).length })),
+      ...(m ? completeEmoji(m[2]!).slice(0, 5) : []).map(o => ({ ...o, length: typed })),
     ].filter((o, i, all) => all.findIndex(p => p.emoji === o.emoji) === i).slice(0, 5)
     const same = options.length === this.suggestions.length && options.every((o, i) => o.emoji === this.suggestions[i]!.emoji)
     this.suggestions = options
@@ -1993,10 +2000,11 @@ export class Ui {
   /**
    * The suggestion in view, the one Tab or → accepts: the word half-typed at the end, with the cursor there (the
    * letters missing, or the right word), which comes first; otherwise the correction the cursor is on (currentFix).
+   * None while the emoji list is open: it's the list Tab takes, and it sits where a correction would float.
    */
   private ghostShown(): GhostView | null {
     const g = this.ghost
-    if (!g || this.pickerOpen) return null
+    if (!g || this.pickerOpen || this.suggestions.length) return null
     if (g.s.word && g.text === this.inputValue && this.cursorAtEnd()) {
       const { from, to } = g.s.word
       if (to.toLowerCase().startsWith(from.toLowerCase()) && to.length > from.length) return { kind: 'suffix', text: to.slice(from.length), word: g.s.word }
@@ -2009,9 +2017,10 @@ export class Ui {
   /**
    * Asks the model for a suggestion for the current text, `delay` ms after the last keystroke (150 while typing; 0
    * right after accepting one, which is when it's idle waiting for the next one), and only with the cursor at the
-   * end, with no reaction in progress nor emoji suggestions open. A new request cancels the previous one; the
-   * response is only used if the text is still the same when it arrives. Its corrections stay underlined while they
-   * apply (`liveFixes`); what floats above goes after 10 s (drawInput). It all goes when a new one arrives.
+   * end, with no reaction in progress nor emoji suggestions open but for a whole smiley's. A new request cancels the
+   * previous one; the response is only used if the text is still the same when it arrives. Its corrections stay
+   * underlined while they apply (`liveFixes`); what floats above goes after 10 s (drawInput). It all goes when a new
+   * one arrives.
    */
   private scheduleGhost(delay = 150) {
     if (this.ghost && !this.ghostValid()) this.clearGhost()
@@ -2019,7 +2028,7 @@ export class Ui {
     this.ghostAbort?.abort()
     this.ghostAbort = undefined
     const jid = this.current
-    if (!jid || this.focus !== 'input' || this.pickerOpen || this.reactTo || this.suggestions.length) return
+    if (!jid || this.focus !== 'input' || this.pickerOpen || this.reactTo || (this.suggestions.length && !this.suggestFace)) return
     if (!this.cursorAtEnd() || this.inputValue.trim().length < 3 || this.ghost?.text === this.inputValue) return
     const text = this.inputValue
     this.ghostTimer = setTimeout(() => {

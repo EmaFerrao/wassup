@@ -97,8 +97,9 @@ the name, with `●` for unread messages or the spinner while they type.
 WhatsApp markup is shown with terminal attributes: `*bold*`, `_italic_`, `~strikethrough~`, `` `code` ``, `> quote`.
 When sending, write the markup as on the phone. `:name:` codes are replaced by the emoji as soon as the second `:` is
 typed, with names in Portuguese and in English (`:thumbsup:` 👍, `:kissing_heart:` 😘, `:coffee:` ☕ …; the list is in
-`src/emoji.ts`), and classic smileys surrounded by spaces too (`:)`, `;)`, `<3` …). The suggestion list (`:` and a
-letter) finds them by either language's names too, showing the user's language's when both match. Links are shown
+`src/emoji.ts`). The suggestion list (`:` and a letter) finds them by either language's names too, showing the
+user's language's when both match; `:` on its own lists the basic smileys. Classic smileys (`:)`, `;)`, `<3` …) are
+sent as typed: after one, on its own after a space, the list offers its emoji, which Tab or → take. Links are shown
 without what only tracks who shared them (`fbclid`, `utm_…`, `igsh`, `si` and the many others in
 [ClearURLs](https://github.com/ClearURLs/Rules)' rules, redirections through a site undone) and shortened
 (`instagram.com/p/DeNKVAJuamr`, a long path cut in the middle); a click copies the whole clean link.
