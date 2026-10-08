@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import type blessed from 'blessed'
 import { emoticonify } from './emoji.js'
 import { loadSharp } from './image.js'
@@ -7,7 +8,8 @@ import { mix, nearest256, type Rgb } from './rainbow.js'
  * An emoji sent or received alone, as a message or a reaction, makes a big copy of it rise through the message
  * panel: it's born over the message itself, grows and rises, like Instagram used to do in chat. The drawing is the
  * terminal's own: the glyph is rasterized with sharp from the system's emoji font (fontconfig's "emoji" family,
- * the one terminals fall back to), so it has the same shape and colors as the small one in the message.
+ * the one terminals fall back to), so it has the same shape and colors as the small one in the message; where the
+ * system has no colour emoji font, from the Noto Color Emoji that comes with wassup (BUNDLED_EMOJI).
  * It draws over everything, only on the cells of the glyph, writing directly into blessed's screen buffer from
  * an empty element that is the last to render.
  */
@@ -51,6 +53,22 @@ export function emojiOnly(text: string): boolean {
 /** Rasterized glyphs by emoji: null when sharp isn't there or couldn't draw it; absent while loading. */
 const glyphs = new Map<string, Glyph | null>()
 const loading = new Map<string, Promise<void>>()
+/**
+ * Noto Color Emoji, the vector one (Noto-COLRv1.ttf from googlefonts/noto-emoji v2.051, OFL-1.1, see fonts/LICENSE):
+ * for a system with no colour emoji font, whose glyph comes out empty or grey (a Mac, whose Apple Color Emoji
+ * fontconfig may not see; a server with no fonts).
+ */
+const BUNDLED_EMOJI = fileURLToPath(new URL('./fonts/Noto-COLRv1.ttf', import.meta.url))
+
+/** Whether any of the glyph's ink has colour: a monochrome fallback font draws it all in grey. */
+function colourful(g: Glyph): boolean {
+  for (let i = 0; i < g.rgba.length; i += 4) {
+    const [r, gr, b, a] = [g.rgba[i]!, g.rgba[i + 1]!, g.rgba[i + 2]!, g.rgba[i + 3]!]
+    if (a > 128 && Math.abs(r - b) + Math.abs(gr - b) > 30) return true
+  }
+  return false
+}
+
 function rasterize(emoji: string): Promise<void> {
   const p = loading.get(emoji)
   if (p) return p
@@ -58,9 +76,14 @@ function rasterize(emoji: string): Promise<void> {
     try {
       const sharp = await loadSharp()
       if (!sharp) { glyphs.set(emoji, null); return }
-      const { data, info } = await sharp({ text: { text: emoji, font: 'emoji', rgba: true, width: RASTER_PX, height: RASTER_PX } })
-        .ensureAlpha().raw().toBuffer({ resolveWithObject: true })
-      glyphs.set(emoji, trim(new Uint8Array(data.buffer, data.byteOffset, data.byteLength), info.width, info.height))
+      const draw = async (font: { font: string; fontfile?: string }) => {
+        const { data, info } = await sharp({ text: { text: emoji, rgba: true, width: RASTER_PX, height: RASTER_PX, ...font } })
+          .ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+        return trim(new Uint8Array(data.buffer, data.byteOffset, data.byteLength), info.width, info.height)
+      }
+      let glyph = await draw({ font: 'emoji' }).catch(() => null)
+      if (!glyph || !colourful(glyph)) glyph = (await draw({ font: 'Noto Color Emoji', fontfile: BUNDLED_EMOJI }).catch(() => null)) ?? glyph
+      glyphs.set(emoji, glyph)
     } catch {
       glyphs.set(emoji, null)
     } finally {

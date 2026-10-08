@@ -71,7 +71,8 @@ and on startup the terminal is asked for its real background colour to pick ligh
   through a socket and are interface only, each with its own tabs. If the server ends, another one takes over.
 - **Single chat**: `wa <name>` opens only that chat, without the tab bar or notices from others; the `/` list swaps
   it. An emoji on its own, as a message or a reaction, sends a big copy of it floating up the panel, drawn in block
-  characters from the system's emoji font (the same glyph and colours the terminal shows); needs `sharp`.
+  characters from the system's emoji font (the same glyph and colours the terminal shows), or, where the system has no
+  colour one, from the Noto Color Emoji that comes with wassup; needs `sharp`.
 
 ### Herdr
 
@@ -137,6 +138,7 @@ History starts with what WhatsApp sends to new devices. `WA_FULL_HISTORY=1` asks
 | `src/ui.ts` | blessed interface: panels, keyboard, mouse, message rendering |
 | `src/format.ts` | WhatsApp markup, dates, colours, line wrapping |
 | `src/links.ts`, `src/clearurls/` | Links cleaned of tracking and shortened; ClearURLs' rules (LGPL-3.0, from [ClearURLs/Rules](https://github.com/ClearURLs/Rules) at 11086f4, 2026-03-25) |
+| `src/fonts/` | Noto Color Emoji (COLRv1, OFL-1.1, from [googlefonts/noto-emoji](https://github.com/googlefonts/noto-emoji) v2.051), for the big emoji where the system has no colour emoji font |
 | `src/image.ts` | Decoding, half-blocks (24-bit or 256 colours), Kitty graphics protocol |
 | `src/term.ts` | Probing the terminal's capabilities |
 | `src/kittykeys.ts`, `src/paste.ts` | Kitty keyboard protocol and bracketed paste, read before blessed |
