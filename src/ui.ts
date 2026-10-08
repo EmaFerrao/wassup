@@ -7,7 +7,7 @@ import { chatName, contactName, shortName, canonicalJid, thumbPath, previewPath,
 import { inHerdr, reportHerdr, doneHerdr, titleHerdr, tabNameHerdr, releaseHerdr, openChatHerdr, focusHerdr, focusNextChatHerdr, paneFocusedHerdr } from './herdr.js'
 import type { Backend } from './backend.js'
 import { waMarkup, clipTagged, esc, colorFor, setTheme, dim, faint, italic, padding, fmtTime, fmtDay, fmtWhen, daysAgo, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, wrapWidth, fold, graphemes, wrapChars } from './format.js'
-import { decode, cached, cellSize, halfBlocks, blockGrid, blockCell, detectImageMode, detectRgb, KittyImages, RgbPainter, type Decoded, type ImageMode, type RgbCell } from './image.js'
+import { decode, cached, cellSize, halfBlocks, blockGrid, blockCell, detectImageMode, detectRgb, KittyImages, RgbPainter, type BlockGrid, type Decoded, type ImageMode, type RgbCell } from './image.js'
 import { logger, uiLog } from './log.js'
 import { linksIn, showLinks } from './links.js'
 import { patchBlessedDraw, patchBlessedUnicode } from './unicode.js'
@@ -293,6 +293,10 @@ export class Ui {
   /** What the model says each image shows (by chat and message), null when it gave nothing; the one on its way. */
   private descriptions = new Map<string, string | null>()
   private describing: { key: string; abort: AbortController } | undefined
+  /** The image or sticker open in the popup (a click on it), and where its picture went on the screen (0-based). */
+  private viewing: MessageRow | null = null
+  private viewerBox: blessed.Widgets.BoxElement
+  private viewerImg: { d: Decoded; path: string; x: number; y: number; cols: number; rows: number } | undefined
   private mode: ImageMode
   private kitty: KittyImages | undefined
   /** Half-block images and message bubbles repainted in 24-bit colour, when the terminal takes it. */
@@ -453,6 +457,10 @@ export class Ui {
       this.suggestIndex = this.suggestTop + row
       this.acceptSuggestion()
     })
+
+    // Over the panels, the image opened with a click: any key or click closes it.
+    this.viewerBox = blessed.box({ parent: this.screen, top: 1, left: 2, right: 2, bottom: 1, border: { type: 'line' }, tags: true, wrap: false, hidden: true })
+    this.viewerBox.on('click', () => this.closeViewer())
 
     // Above everything, the emoji rising when a message or reaction is a single emoji, sent or received.
     this.hearts = new Hearts(this.screen, this.msgBox, this.bgRgb, blessed.box)
@@ -627,7 +635,10 @@ export class Ui {
       const hasImage = this.images.some(i => i.row.id === row.id)
       if (onIcon) this.quickFor = row
       else if (row.type === 'pinInChat') return this.jumpTo(pinTarget(row))
-      else if (row.media_mime && (!hasImage || this.imageAt(data.x, data.y)?.row.id === row.id)) this.openMedia(row)
+      else if (row.media_mime && (!hasImage || this.imageAt(data.x, data.y)?.row.id === row.id)) {
+        if (hasImage && this.mode !== 'none' && (row.type === 'image' || row.type === 'sticker')) return this.openViewer(row)
+        this.openMedia(row)
+      }
       this.renderNow()
     })
     this.msgBox.on('scroll', () => { this.updateAtBottom(); if (this.textSel) { this.textSel = undefined; this.screen.render() } })
@@ -877,6 +888,7 @@ export class Ui {
     // Ctrl+R redraws the whole screen, for whatever left marks on it (a glyph wider than its cell, a message
     // written straight to the terminal): blessed forgets what it believes is there and paints everything again.
     if (k === 'C-r') return this.redraw()
+    if (this.viewing) return this.closeViewer()
     if (k === 'paste') return this.paste(ch)
     // ESC closes, in order: the reply or reaction in progress, the selection, the picker filter, the picker, the
     // active tab, the program.
@@ -1140,7 +1152,7 @@ export class Ui {
   private drawQuick() {
     this.quickHit = undefined
     const row = this.quickFor ?? this.hover
-    if (!row || this.showingQr) return
+    if (!row || this.showingQr || this.viewing) return
     let idx = -1
     for (let i = 0; i < this.lineMap.length; i++) if (this.lineMap[i]?.id === row.id && this.headerLines.has(i)) { idx = i; break }
     if (idx < 0) return
@@ -1881,6 +1893,7 @@ export class Ui {
     // With no chat open (startup without one asked for, or chats arriving for the first time, after the QR) the
     // chat list opens, to pick from.
     if (!this.current && !this.pickerOpen && !this.showingQr && store.listChats().some(c => !c.archived)) return this.openPicker()
+    if (this.viewing) this.drawViewer()
     this.screen.render()
   }
 
@@ -2368,11 +2381,7 @@ export class Ui {
     const lastRead = this.ruleChar === '─' ? [...rows].reverse().find(r => r.from_me === 1 && (r.status ?? 0) >= 4)?.id : undefined
     this.rows = rows
     this.selected = rows.find(r => r.id === selectedId) ?? null
-    // A description on its way for an image no longer selected is given up.
-    if (this.describing && this.describing.key !== (this.selected ? `${this.selected.chat_jid} ${this.selected.id}` : '')) {
-      this.describing.abort.abort()
-      this.describing = undefined
-    }
+    this.dropDescribing()
     const headers = new Set<number>(), texts = new Map<number, { start: number; end: number }>(), names = new Map<number, { jid: string; start: number; width: number }>()
     const mentions = new Map<number, { start: number; end: number; jid: string }[]>()
     // The text under the highlight is about to change.
@@ -2692,14 +2701,19 @@ export class Ui {
     return { start: bStart, end: bEnd }
   }
 
-  /**
-   * What the selected image or sticker shows, from the model, when images are drawn in half-blocks (which lose its
-   * detail): "a descrever…" while it answers, nothing when it can't. Asked for once the full file is decoded (not the
-   * thumbnail, while the file is still coming), kept for the session, and given up if the selection moves on first.
-   * A model that doesn't answer is left alone for a minute, as for the writing suggestions.
-   */
+  /** The selected image or sticker's description, beside it, when images are drawn in half-blocks (which lose its detail). */
   private imageAside(row: MessageRow): string | undefined {
-    if (this.mode !== 'blocks' || !llmEnabled || (row.type !== 'image' && row.type !== 'sticker')) return undefined
+    return this.mode === 'blocks' && (row.type === 'image' || row.type === 'sticker') ? this.describedAs(row) : undefined
+  }
+
+  /**
+   * What an image or sticker shows, from the model, ready for the screen: "a descrever…" while it answers, nothing
+   * when it can't. Asked for once the full file is decoded (not the thumbnail, while the file is still coming), kept
+   * for the session, and given up if neither the selection nor the popup is on it any more (dropDescribing). A model
+   * that doesn't answer is left alone for a minute, as for the writing suggestions.
+   */
+  private describedAs(row: MessageRow): string | undefined {
+    if (!llmEnabled) return undefined
     const key = `${row.chat_jid} ${row.id}`
     if (this.descriptions.has(key)) { const text = this.descriptions.get(key); return text ? dim(italic(esc(text))) : undefined }
     const path = this.imagePathFor(row), d = path ? cached(path) : undefined
@@ -2723,6 +2737,63 @@ export class Ui {
       })
     }
     return this.describing?.key === key ? dim(t('describing')) : undefined
+  }
+
+  /** A description on its way for an image neither selected nor in the popup is given up. */
+  private dropDescribing() {
+    const keep = [this.selected, this.viewing].map(r => (r ? `${r.chat_jid} ${r.id}` : ''))
+    if (this.describing && !keep.includes(this.describing.key)) {
+      this.describing.abort.abort()
+      this.describing = undefined
+    }
+  }
+
+  /** Opens the image or sticker in the popup, once its full file is here (fetched first otherwise, like openMedia). */
+  private openViewer(row: MessageRow) {
+    const path = this.imagePathFor(row)
+    if (!path || path !== mediaFile(row)) {
+      if (row.media_err) return this.flash(t('attachmentExpired'))
+      this.wa.ensureMedia(row)
+      return this.flash(t('downloading'))
+    }
+    this.viewing = row
+    this.quickFor = undefined
+    this.viewerBox.show()
+    this.renderNow()
+  }
+
+  private closeViewer() {
+    this.viewing = null
+    this.viewerImg = undefined
+    this.viewerBox.hide()
+    this.dropDescribing()
+    this.renderNow()
+  }
+
+  /**
+   * The popup's content: the picture as large as the box allows, centred, with its description under it (up to 80
+   * columns wide, for reading), the two together centred in height. In half-blocks the picture is in the lines;
+   * with Kitty, placeImages puts it there.
+   */
+  private drawViewer() {
+    const row = this.viewing!, box = this.viewerBox
+    const iw = Math.max(1, num(this.screen.width) - 4 - 2), ih = Math.max(1, num(this.screen.height) - 2 - 2)
+    const path = this.imagePathFor(row)!, d = cached(path)
+    this.viewerImg = undefined
+    if (!d) {
+      decode(path).then(() => { if (this.viewing === row) this.scheduleRender() })
+      return box.setContent(dim(t('loading')))
+    }
+    if (d instanceof Error) return box.setContent(dim(t('mediaUnreadable', row.type, esc(d.message))))
+    const about = this.describedAs(row)
+    const text = about ? wrapTagged(about, Math.min(iw, 80)) : []
+    const { cols, rows } = cellSize(d.w, d.h, iw, Math.max(1, ih - (text.length ? text.length + 1 : 0)), true)
+    const top = Math.max(0, Math.floor((ih - rows - (text.length ? text.length + 1 : 0)) / 2))
+    const left = Math.floor((iw - cols) / 2)
+    const block = Math.max(0, ...text.map(visibleWidth)), indent = ' '.repeat(Math.max(0, Math.floor((iw - block) / 2)))
+    const picture = this.kitty ? Array.from({ length: rows }, () => '') : halfBlocks(d, cols, rows).map(l => ' '.repeat(left) + l)
+    box.setContent([...Array.from({ length: top }, () => ''), ...picture, ...(text.length ? ['', ...text.map(l => indent + l)] : [])].join('\n'))
+    this.viewerImg = { d, path, x: 2 + 1 + left, y: 1 + 1 + top, cols, rows }
   }
 
   /**
@@ -2790,6 +2861,8 @@ export class Ui {
   private placeImages() {
     if (!this.kitty) return
     this.kitty.clear()
+    const v = this.viewerImg
+    if (v) return this.kitty.place(v.path, v.d, v.x + 1, v.y + 1, v.cols, v.rows)
     if (!this.images.length || !this.current || this.pickerOpen) return
     const clines = this.msgBox._clines
     if (!clines?.ftor) return
@@ -2826,11 +2899,24 @@ export class Ui {
     const olines = this.screenRows('olines')
     const cells: RgbCell[] = []
     const clines = this.msgBox._clines
+    const lines = this.screenRows('lines')
+    const rgbAt = (rgb: Uint8Array, i: number) => `${rgb[i * 3]};${rgb[i * 3 + 1]};${rgb[i * 3 + 2]}`
+    // Row `r` of a picture `cols` wide, drawn from screen cell (left, y).
+    const pictureRow = (grid: BlockGrid, cols: number, r: number, left: number, y: number) => {
+      const row = lines[y]
+      if (!row) return
+      for (let c = 0; c < cols; c++) {
+        const cell = blockCell(grid.idx, cols, r, c)
+        if (!cell) continue
+        const x = left + c, held = row[x]
+        const attr = held?.[0] ?? -1
+        if (held?.[1] !== cell.ch || attr >> 18 !== 0 || ((attr >> 9) & 0x1ff) !== (cell.fg < 0 ? 0x1ff : cell.fg) || (attr & 0x1ff) !== (cell.bg < 0 ? 0x1ff : cell.bg)) continue
+        cells.push({ x, y, ch: cell.ch, w: 1, sgr: `0;38;2;${rgbAt(grid.rgb, cell.fgAt)}${cell.bgAt < 0 ? '' : `;48;2;${rgbAt(grid.rgb, cell.bgAt)}`}` })
+      }
+    }
     if (this.current && !this.pickerOpen && !this.showingQr && clines?.ftor) {
-      const lines = this.screenRows('lines')
       const base = this.msgBox.childBase, innerH = this.innerHeight()
       const x0 = num(this.msgBox.aleft) + num(this.msgBox.ileft), y0 = num(this.msgBox.atop) + num(this.msgBox.itop)
-      const rgbAt = (rgb: Uint8Array, i: number) => `${rgb[i * 3]};${rgb[i * 3 + 1]};${rgb[i * 3 + 2]}`
       for (const img of this.mode === 'blocks' ? this.images : []) {
         if (!img.d) continue
         const top = clines.ftor[img.origLine]?.[0]
@@ -2838,19 +2924,14 @@ export class Ui {
         const visTop = Math.max(top, base), visBottom = Math.min(top + img.rows, base + innerH)
         if (visTop >= visBottom) continue
         const grid = blockGrid(img.d, img.cols, img.rows)
-        for (let ln = visTop; ln < visBottom; ln++) {
-          const y = y0 + ln - base, row = lines[y]
-          if (!row) continue
-          for (let c = 0; c < img.cols; c++) {
-            const cell = blockCell(grid.idx, img.cols, ln - top, c)
-            if (!cell) continue
-            const x = x0 + img.pad + c, held = row[x]
-            const attr = held?.[0] ?? -1
-            if (held?.[1] !== cell.ch || attr >> 18 !== 0 || ((attr >> 9) & 0x1ff) !== (cell.fg < 0 ? 0x1ff : cell.fg) || (attr & 0x1ff) !== (cell.bg < 0 ? 0x1ff : cell.bg)) continue
-            cells.push({ x, y, ch: cell.ch, w: 1, sgr: `0;38;2;${rgbAt(grid.rgb, cell.fgAt)}${cell.bgAt < 0 ? '' : `;48;2;${rgbAt(grid.rgb, cell.bgAt)}`}` })
-          }
-        }
+        for (let ln = visTop; ln < visBottom; ln++) pictureRow(grid, img.cols, ln - top, x0 + img.pad, y0 + ln - base)
       }
+    }
+    // The popup's picture, over the panel.
+    const v = this.mode === 'blocks' ? this.viewerImg : undefined
+    if (v) {
+      const grid = blockGrid(v.d, v.cols, v.rows)
+      for (let r = 0; r < v.rows; r++) pictureRow(grid, v.cols, r, v.x, v.y + r)
     }
     // The bubbles' cells: the message panel's, or, with the chat list open, the selected chat's row.
     const box = this.pickerOpen ? this.picker : this.current && !this.showingQr ? this.msgBox : null

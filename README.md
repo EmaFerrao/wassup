@@ -62,7 +62,9 @@ and on startup the terminal is asked for its real background colour to pick ligh
   it, and emoji on their own go bare; each day starts with a separator and a blank line. Mouse wheel or PgUp/PgDn;
   scrolling past the top brings older messages, first the stored ones and then from the phone, and Ctrl+↓ or Ctrl+PgDn
   goes back to the latest. An attachment not downloaded yet shows `⤓`: a click fetches it into the app's media folder,
-  where it stays, and the mark goes; once there, a click opens it with `xdg-open` (`open` on macOS). ↑ selects a
+  where it stays, and the mark goes; once there, a click opens it with `xdg-open` (`open` on macOS), except images and
+  stickers, which open in a popup in the client, as large as it fits, with the local model's description under them;
+  any key or click closes it. ↑ selects a
   message: typing replies to it, `:` reacts, Delete opens one of yours for editing. Mentions show the person's first
   name in their colour (`@Ana`); a click on one, or in a group on a member's name, opens the chat with them; a click
   on a pin (`📌 pinned a message`) goes to the message it's about. The `☺` next to a message under the pointer opens
