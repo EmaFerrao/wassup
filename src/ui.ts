@@ -692,7 +692,16 @@ export class Ui {
       if (this.pickerOpen) { this.redrawPickerRows([jid]); this.screen.render() }
       if (jid === this.current) { this.drawInput(); this.screen.render() }
     })
-    this.wa.on('messages', jid => { if (jid === '*' || jid === this.current) this.dirtyMessages = true; this.dirtyTabs = true; this.scheduleRender() })
+    this.wa.on('messages', jid => {
+      if (jid === '*' || jid === this.current) this.dirtyMessages = true
+      this.dirtyTabs = true
+      // The open list shows each chat's last message: a change to it (its state, an edit) redraws that row.
+      if (this.pickerOpen) {
+        if (jid === '*') this.refreshPicker()
+        else if (this.pickerLast.has(jid)) { this.pickerLast.set(jid, store.lastMessage(jid)); this.redrawPickerRows([jid]) }
+      }
+      this.scheduleRender()
+    })
     this.wa.on('notify', (jid, row) => {
       if (jid === this.current) {
         // Arriving in the chat in front of you, it's read only while you show as online (writing here lately): a
@@ -762,6 +771,8 @@ export class Ui {
       QRCode.toString(this.wa.qr, { type: 'terminal', small: true }, (err, qr) => {
         if (err) { logger.error({ err }, 'qr'); return }
         this.showingQr = true
+        // The QR goes in the message panel, which the chat list hides.
+        if (this.pickerOpen) this.closePicker(false)
         this.msgBox.setContent(['', `  {bold}${esc(t('qrTitle'))}{/bold}`, '', `  ${esc(t('qrHint'))}`, '', qr].join('\n'))
         this.lineMap = []; this.images = []; this.rows = []; this.selected = null
         this.screen.render()
@@ -1811,12 +1822,9 @@ export class Ui {
   private renderNow() {
     if (this.dirtyTabs) { this.dirtyTabs = false; this.drawTabs(); this.updateTitle() }
     if (this.dirtyMessages && !this.showingQr) { this.dirtyMessages = false; if (this.current) this.renderMessages() }
-    // With no tabs (startup with nothing saved, or chats arriving for the first time) the most recent chat opens;
-    // the picker only appears with "/".
-    if (!this.current && !this.pickerOpen && !this.showingQr) {
-      const recent = store.listChats().find(c => !c.archived)
-      if (recent) return this.openTab(recent.jid)
-    }
+    // With no chat open (startup without one asked for, or chats arriving for the first time, after the QR) the
+    // chat list opens, to pick from.
+    if (!this.current && !this.pickerOpen && !this.showingQr && store.listChats().some(c => !c.archived)) return this.openPicker()
     this.screen.render()
   }
 
