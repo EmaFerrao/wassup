@@ -32,11 +32,16 @@ interface ImageSlot { row: MessageRow; origLine: number; cols: number; rows: num
 /** What each terminal keeps in `state`: its tabs, the process that holds them, and the last interaction. */
 interface TerminalState { tabs: string[]; active: number; pid?: number; lastActive?: number; herdrTab?: string; herdrPane?: string }
 
+/**
+ * Whether a process is still alive: signal 0 only asks whether it exists (EPERM: it does, another user's). On Linux
+ * a zombie, ended but not yet reaped, still answers it, and /proc says it's gone; elsewhere (macOS) there's no /proc.
+ */
 function pidAlive(pid: number): boolean {
+  try { process.kill(pid, 0) } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'EPERM') return false }
   try {
     const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8')
     return stat.charAt(stat.lastIndexOf(')') + 2) !== 'Z'
-  } catch { return false }
+  } catch { return true }
 }
 
 /** A segment of the tab bar: which tab it corresponds to and where its × is (or whether it's the +). */
@@ -2780,8 +2785,10 @@ export class Ui {
       this.wa.ensureMedia(row)
       return this.flash(t('downloading'))
     }
-    const child = spawn('xdg-open', [file], { detached: true, stdio: 'ignore' })
-    child.on('error', e => this.flash(t('cannotOpen', e.message)))
+    // The desktop's own opener: `open` on macOS, `xdg-open` elsewhere.
+    const opener = process.platform === 'darwin' ? 'open' : 'xdg-open'
+    const child = spawn(opener, [file], { detached: true, stdio: 'ignore' })
+    child.on('error', e => this.flash(t('cannotOpen', opener, e.message)))
     child.unref()
   }
 }

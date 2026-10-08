@@ -38,7 +38,7 @@ const STRINGS = {
   mediaUnreadable: { pt: '[{0} ilegível: {1}]', en: '[{0} unreadable: {1}]' },
   attachmentExpired: { pt: 'anexo indisponível (expirou no WhatsApp)', en: 'attachment unavailable (expired on WhatsApp)' },
   downloading: { pt: 'a descarregar…', en: 'downloading…' },
-  cannotOpen: { pt: 'não consegui abrir (xdg-open): {0}', en: 'could not open (xdg-open): {0}' },
+  cannotOpen: { pt: 'não consegui abrir ({0}): {1}', en: 'could not open ({0}): {1}' },
   file: { pt: 'ficheiro', en: 'file' },
   voiceMessage: { pt: 'mensagem de voz', en: 'voice message' },
   audio: { pt: 'áudio', en: 'audio' },
