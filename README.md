@@ -113,7 +113,11 @@ With a local `llama-server` at `http://127.0.0.1:8080` (or `WA_LLM`), model `gem
 input asks for a suggestion shortly after the last key, with the latest messages as context: the letters missing from
 the word being typed, right at the cursor, and every wrong passage already written (spelling, accents, grammar, a
 missing comma) underlined in yellow, with the right word after `⇢` above the one the cursor is on, or the last. Tab or
-→ accept it; the others stay underlined. The prompt is in the user's language. `WA_LLM=off` disables it.
+→ accept it; the others stay underlined. The prompt is in the user's language. `WA_LLM=off` turns the model off.
+Without it (`WA_LLM=off`, or no server answering, then for a minute before asking again) a small local spell checker
+stands in, words only, in the same way: Hunspell in WebAssembly with LibreOffice's Portuguese (Portugal) and English
+dictionaries, a word being right in any of them; words you wrote yourself more than once and the names of contacts and
+chats count as known, unless all they lack is an accent.
 
 ## Data
 
@@ -147,4 +151,5 @@ History starts with what WhatsApp sends to new devices. `WA_FULL_HISTORY=1` asks
 | `src/hearts.ts` | Animated emoji rising from a single-emoji message or reaction |
 | `src/i18n.ts` | Interface strings in Portuguese and English |
 | `src/llm.ts` | Writing suggestions from the local `llama-server` |
+| `src/spell.ts` | Local spell checker (Hunspell, pt-PT and English) when there's no model |
 | `src/emoji.ts`, `src/italic.ts`, `src/rainbow.ts` | `:name:` table, italics in blessed, colours |

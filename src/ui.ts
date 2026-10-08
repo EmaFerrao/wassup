@@ -19,6 +19,7 @@ import { Hearts, reaction, emojiOnly } from './hearts.js'
 import { t } from './i18n.js'
 import { parseHex, mix, nearest256, type Rgb } from './rainbow.js'
 import { suggest, llmEnabled, type Suggestion, type Fix } from './llm.js'
+import { spellFixes } from './spell.js'
 import { patchBlessedItalic } from './italic.js'
 
 /** WhatsApp Web's quick reactions, in its order, plus "⋯" for typing any other. */
@@ -1965,7 +1966,7 @@ export class Ui {
     this.ghostAbort?.abort()
     this.ghostAbort = undefined
     const jid = this.current
-    if (!llmEnabled || !jid || this.focus !== 'input' || this.pickerOpen || this.reactTo || this.suggestions.length) return
+    if (!jid || this.focus !== 'input' || this.pickerOpen || this.reactTo || this.suggestions.length) return
     if (!this.cursorAtEnd() || this.inputValue.trim().length < 3 || this.ghost?.text === this.inputValue) return
     const text = this.inputValue
     this.ghostTimer = setTimeout(() => {
@@ -1973,8 +1974,18 @@ export class Ui {
       if (text !== this.inputValue) return
       const abort = new AbortController()
       this.ghostAbort = abort
-      const context = store.listMessages(jid, 6).filter(r => r.text && r.type !== 'deleted').map(r => ({ who: this.who(r), text: r.text }))
-      suggest(context, text, abort.signal).then(s => {
+      // The model when there's one, and while it answers; otherwise the local spell checker, words only (spell.ts).
+      // A model that doesn't answer (no server) is left alone for a minute, the spell checker standing in.
+      const local = () => spellFixes(text).then(fixes => (fixes.length ? { word: null, fixes } : null))
+      const viaModel = llmEnabled && Date.now() >= this.llmDownUntil
+      const context = viaModel ? store.listMessages(jid, 6).filter(r => r.text && r.type !== 'deleted').map(r => ({ who: this.who(r), text: r.text })) : []
+      const request = !viaModel ? local() : suggest(context, text, abort.signal).catch(e => {
+        if (abort.signal.aborted) throw e
+        logger.debug({ e: String(e) }, 'llm: no answer, spell checker instead')
+        this.llmDownUntil = Date.now() + 60000
+        return local()
+      })
+      request.then(s => {
         if (abort.signal.aborted || text !== this.inputValue) return
         if (this.ghostAbort === abort) this.ghostAbort = undefined
         if (!s) { this.acceptOnArrival = 0; return }
@@ -1984,9 +1995,12 @@ export class Ui {
         this.floatKey = this.floatOff = ''
         this.drawInput()
         this.screen.render()
-      }, e => { this.acceptOnArrival = 0; if (!abort.signal.aborted) logger.debug({ e }, 'llm') })
+      }, e => { this.acceptOnArrival = 0; if (!abort.signal.aborted) logger.debug({ e: String(e) }, 'suggestion') })
     }, delay)
   }
+
+  /** Until when the model is left alone after it didn't answer (scheduleGhost). */
+  private llmDownUntil = 0
 
   private clearGhost() {
     this.ghost = undefined
