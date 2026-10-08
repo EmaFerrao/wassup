@@ -8,7 +8,7 @@ SQLite database and draws the interface with panels, mouse and images right in t
 
 ```sh
 npm install -g github:lucio-ferrao/wassup
-wa              # from anywhere
+wa              # from anywhere: opens on the chat list
 wa emma         # opens straight into the chat whose name or number contains "emma"
 ```
 
@@ -44,11 +44,12 @@ and on startup the terminal is asked for its real background colour to pick ligh
   left unsent stays with each chat. While someone is typing, a braille spinner turns before their name in the tab and
   in place of their 👀 on the rule above the input. New messages in a chat without a tab open one without activating
   it, with a passing notice over it and the bell; an archived chat stays quiet.
-- **Chats**: `/`, or a click on the chat's name in the prompt, opens the list under the app's name, most recent at the
-  bottom, under day separators (today, yesterday, this week, older); each row has the name in its colour, 👀 while the
-  person is online, the last message (a spinner and "typing…" while someone types, the state of yours, mentions by
-  name), how long ago and the unread count. Typing after `wassup ❯` filters it word by word, ignoring accents and
-  case, with the matches underlined; Enter, Tab, → or a click opens.
+- **Chats**: `wa` starts on the list, and `/`, or a click on the chat's name in the prompt, opens it again, under the
+  app's name, most recent at the bottom, under day separators (today, yesterday, this week, older); each row has the
+  name in its colour, 👀 while the person is online, the last message (a spinner and "typing…" while someone types, the
+  state of yours, mentions by name), how long ago and the unread count, all kept up to date as messages and their
+  states arrive. Typing after `wassup ❯` filters it word by word, ignoring accents and case, with the matches
+  underlined; Enter, Tab, → or a click opens.
 - **Messages**: yours on the right, each in a bubble with WhatsApp Web's colours where the terminal takes 24-bit
   colour (yours, on a dark theme, toned down to the brightness of theirs) and two discreet greys otherwise, with the
   time and its state outside it (and 👀 over the time of the last of yours that was read) and a link's preview image
