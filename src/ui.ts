@@ -80,6 +80,20 @@ const EYES_MAX = 5
 const PAGE = 300
 /** How long without keys or mouse, in milliseconds, before a reply is offered in the empty input (workOutReply). */
 const REPLY_IDLE = 5000
+/** How long, in seconds, WhatsApp lets a message be edited after it was sent. */
+const EDIT_WINDOW = 15 * 60
+/** A message's text without the "(editada)" line an edit leaves at its end. */
+const bareText = (row: MessageRow) => row.text.replace(/\n\((editada|edited)\)$/, '')
+/** The wrong passages of a text between private-use marks, made the yellow underline once the text is markup. */
+function markFixes(text: string, fixes: Fix[]): string {
+  let out = '', at = 0
+  for (const f of [...fixes].sort((a, b) => a.start - b.start)) {
+    if (f.start < at || text.slice(f.start, f.end) !== f.from) continue
+    out += `${text.slice(at, f.start)}\uE000${f.from}\uE001`
+    at = f.end
+  }
+  return out + text.slice(at)
+}
 /** The notice for a message in another chat: time to appear, stay, and disappear, in milliseconds. */
 const NOTICE = { fadeIn: 400, hold: 6000, fadeOut: 800 }
 
@@ -195,6 +209,15 @@ export class Ui {
   private replyAbort: AbortController | undefined
   /** Each chat's last message a reply was already worked out for, offered or not, so it's only done once. */
   private replyFor = new Map<string, string>()
+  /** The corrections found in my recent messages, by chat, id and text: null while being checked, or with none. */
+  private sentFixes = new Map<string, Fix[] | null>()
+  private sentQueue: MessageRow[] = []
+  private sentChecking = false
+  /** Redraws the messages when the first of my marked ones leaves the editing window, taking its marks away. */
+  private sentExpiry: NodeJS.Timeout | undefined
+  /** The correction shown over one of my messages (a click on its marked passage), and the box it floats in. */
+  private sentFix: { row: MessageRow; fix: Fix } | undefined
+  private fixBox!: blessed.Widgets.BoxElement
   private ghostAbort: AbortController | undefined
   /** Right-arrow presses with the next suggestion still on the way: accepted on arrival, one per arrow, so → → → correct in a chain. */
   private acceptOnArrival = 0
@@ -460,6 +483,12 @@ export class Ui {
     })
     // A click on the correction floating above a word takes it, as Tab or → do.
     this.ghostBox.on('click', () => this.acceptGhost())
+    // The same over a passage of one of my messages, where a click edits the message with it.
+    this.fixBox = blessed.box({
+      parent: this.screen, top: 0, left: 0, width: 1, height: 1, tags: true, hidden: true, wrap: false,
+      style: { bg: this.selectedBg } as unknown as blessed.Widgets.Types.TStyle,
+    })
+    this.fixBox.on('click', () => this.applySentFix())
     // A click on a line of the emoji list selects that one.
     this.suggest.on('click', (data: { x: number; y: number }) => {
       const row = data.y - num(this.suggest.atop)
@@ -634,9 +663,12 @@ export class Ui {
         this.drawInput()
         return this.renderNow()
       }
-      // A click on a link copies it, whole; on a group member's name or a mention, it opens the chat with that person.
+      this.hideSentFix()
+      // A click on a link copies it, whole; on a group member's name or a mention, it opens the chat with that person;
+      // on a passage of mine marked wrong, its correction floats above it, to be clicked in turn.
       if (!dragged) {
         const url = this.linkAt(data.x, data.y); if (url) return this.copyToClipboard(url)
+        if (row) { const hit = this.fixAt(data.x, data.y, row); if (hit) return this.showSentFix(row, hit.fix, hit.x, data.y) }
         const who = lineAt(data.y, data.x)?.name; if (who) return this.openChat(canonicalJid(who))
       }
       if (!row) { this.setFocus('input'); return this.renderNow() }
@@ -654,7 +686,7 @@ export class Ui {
       }
       this.renderNow()
     })
-    this.msgBox.on('scroll', () => { this.updateAtBottom(); if (this.textSel) { this.textSel = undefined; this.screen.render() } })
+    this.msgBox.on('scroll', () => { this.updateAtBottom(); this.hideSentFix(); if (this.textSel) { this.textSel = undefined; this.screen.render() } })
     // Clicking the input places the cursor at the clicked position (or at the end of the line, if the click lands past the text).
     this.input.on('click', (data: { x: number; y: number }) => {
       if (this.textSelected()) return
@@ -903,6 +935,7 @@ export class Ui {
     // written straight to the terminal): blessed forgets what it believes is there and paints everything again.
     if (k === 'C-r') return this.redraw()
     if (this.viewing) return this.closeViewer()
+    if (this.sentFix) this.hideSentFix()
     if (k === 'paste') return this.paste(ch)
     // ESC closes, in order: the reply or reaction in progress, the selection, the picker filter, the picker, the
     // active tab, the program.
@@ -1540,6 +1573,8 @@ export class Ui {
     this.saveTabs()
     // Closing the last tab means quitting: there's no going back to the picker.
     if (!this.tabs.length) return this.quit()
+    // The prompt takes the name of the chat now in front.
+    this.drawInput()
     this.renderNow()
     const jid = this.current
     if (jid) this.markReadIfSeen(jid)
@@ -1573,8 +1608,6 @@ export class Ui {
       this.segments.push({ x0: x, x1: x + w, index: t.i, closeX0, closeX1: close ? closeX0 + 1 : closeX0 })
       const badge = t.badge ? ` {${FG.badge}-fg}{bold}${t.badge}{/bold}{/${FG.badge}-fg}` : ''
       const closeMark = close ? ` ${dim('×')}` : ''
-    // The prompt takes the name of the chat now in front.
-    this.drawInput()
       out += t.i === this.active && !this.pickerOpen
         ? `{${strong}-fg}{bold}${label}{/bold}{/${strong}-fg}${badge}${closeMark} `
         : `{${FG.tab}-fg}${label}{/${FG.tab}-fg}${badge}${closeMark} `
@@ -2173,6 +2206,105 @@ export class Ui {
     })
   }
 
+  /**
+   * The corrections for one of my text messages while it can still be edited (EDIT_WINDOW), or null: asked for once
+   * per text, one message at a time (checkSent), and remembered for the session.
+   */
+  private sentFixesFor(row: MessageRow): Fix[] | null {
+    if (!row.from_me || row.type !== 'text' || Date.now() / 1000 - row.ts >= EDIT_WINDOW) return null
+    const text = bareText(row)
+    if (text.trim().length < 3) return null
+    const key = `${row.chat_jid} ${row.id} ${text}`
+    const known = this.sentFixes.get(key)
+    if (known === undefined) { this.sentFixes.set(key, null); this.sentQueue.push(row); this.checkSent() }
+    return known ?? null
+  }
+
+  /**
+   * Checks the next of my messages waiting (sentFixesFor) as the writing suggestions check the input: the model, with
+   * the chat's latest messages as context, or the local spell checker without it. The message is whole, so a fix
+   * the model gives for its last word as the word half-typed counts too, unless it only completes it.
+   */
+  private checkSent() {
+    if (this.sentChecking) return
+    const row = this.sentQueue.shift()
+    if (!row) return
+    this.sentChecking = true
+    const text = bareText(row), key = `${row.chat_jid} ${row.id} ${text}`
+    const local = () => spellFixes(text)
+    const viaModel = llmEnabled && Date.now() >= this.llmDownUntil
+    const context = store.listMessages(row.chat_jid, 8).filter(r => r.id !== row.id && r.ts <= row.ts && r.text && r.type !== 'deleted').slice(-6).map(r => ({ who: this.who(r), text: r.text }))
+    const request = !viaModel ? local() : suggest(context, text, new AbortController().signal).then(s => {
+      if (!s) return []
+      const { word } = s
+      const last = word && !word.to.toLowerCase().startsWith(word.from.toLowerCase()) ? { from: word.from, to: word.to, start: text.length - word.from.length, end: text.length } : null
+      return last && !s.fixes.some(f => f.end > last.start) ? [...s.fixes, last] : s.fixes
+    }, e => {
+      logger.debug({ e: String(e) }, 'llm: no answer, spell checker instead')
+      this.llmDownUntil = Date.now() + 60000
+      return local()
+    })
+    request.then(fixes => {
+      if (fixes.length) { this.sentFixes.set(key, fixes); if (row.chat_jid === this.current) { this.dirtyMessages = true; this.scheduleRender() } }
+    }, e => logger.debug({ e: String(e) }, 'sent check')).finally(() => { this.sentChecking = false; this.checkSent() })
+  }
+
+  /**
+   * The correction for the passage marked wrong under screen cell (`x`, `y`) of one of my messages, and the column
+   * where that passage starts on the line: the cells underlined in yellow around the click, matched by their text.
+   */
+  private fixAt(x: number, y: number, row: MessageRow): { fix: Fix; x: number } | null {
+    const fixes = this.sentFixesFor(row)
+    const line = this.screenRows('lines')[y]
+    if (!fixes || !line) return null
+    const marked = (cx: number) => { const a = line[cx]?.[0]; return a != null && ((a >> 18) & 2) !== 0 && ((a >> 9) & 0x1ff) === 3 }
+    if (!marked(x)) return null
+    let a = x, b = x
+    while (a > 0 && marked(a - 1)) a--
+    while (marked(b + 1)) b++
+    const run = line.slice(a, b + 1).map(c => (c[1] === '\x03' ? '' : c[1])).join('').trim()
+    const fix = fixes.find(f => f.from === run) ?? fixes.find(f => f.from.includes(run))
+    return fix ? { fix, x: a } : null
+  }
+
+  /** Floats a correction over the passage of my message it fixes, starting on its column, the line above it if there's one. */
+  private showSentFix(row: MessageRow, fix: Fix, x: number, y: number) {
+    this.sentFix = { row, fix }
+    const top = num(this.msgBox.atop) + num(this.msgBox.itop)
+    this.fixBox.top = y > top ? y - 1 : y + 1
+    this.fixBox.left = Math.max(0, x - 1)
+    this.fixBox.width = strWidth(fix.to) + 2
+    this.fixBox.setContent(` ${dim(italic(esc(fix.to)))}`)
+    this.fixBox.show()
+    this.fixBox.setFront()
+    this.screen.render()
+  }
+
+  private hideSentFix() {
+    if (!this.sentFix) return
+    this.sentFix = undefined
+    this.fixBox.hide()
+  }
+
+  /**
+   * Edits my message with the correction shown over it. The others found in it stay marked, moved to their place in
+   * the new text, which isn't checked again.
+   */
+  private applySentFix() {
+    const shown = this.sentFix
+    this.hideSentFix()
+    if (!shown) return this.screen.render()
+    const { row, fix } = shown
+    if (Date.now() / 1000 - row.ts >= EDIT_WINDOW) return this.flash(t('editTooLate'))
+    const text = bareText(row)
+    if (text.slice(fix.start, fix.end) !== fix.from) return this.screen.render()
+    const value = text.slice(0, fix.start) + fix.to + text.slice(fix.end), delta = fix.to.length - (fix.end - fix.start)
+    const rest = (this.sentFixes.get(`${row.chat_jid} ${row.id} ${text}`) ?? []).filter(f => f !== fix).map(f => (f.start >= fix.end ? { ...f, start: f.start + delta, end: f.end + delta } : f))
+    this.sentFixes.set(`${row.chat_jid} ${row.id} ${value}`, rest.length ? rest : null)
+    this.wa.edit(row.chat_jid, row.id, value).catch(e => this.flash(`${t('error')}: ${(e as Error).message}`))
+    this.screen.render()
+  }
+
   /** A group message addressed to me: a reply to one of mine, a mention of me, or my first name in it. */
   private addressedToMe(row: MessageRow): boolean {
     const { name, lid } = myAccount()
@@ -2523,8 +2655,10 @@ export class Ui {
     this.dropDescribing()
     const headers = new Set<number>(), texts = new Map<number, { start: number; end: number }>(), names = new Map<number, { jid: string; start: number; width: number }>()
     const mentions = new Map<number, { start: number; end: number; jid: string }[]>()
-    // The text under the highlight is about to change.
+    // The text under the highlight is about to change, and so may the place of a correction floating over it.
     this.textSel = undefined
+    this.hideSentFix()
+    let expires = Infinity
     let lastDay = ''
     if (loading) {
       const label = t('loadingOlder')
@@ -2629,11 +2763,14 @@ export class Ui {
       if (row.text && (type === 'text' || type === 'image' || type === 'video' || type === 'gif' || type === 'document')) {
         // Mentions by first name, in the colour the person's name has in groups; where each lands is kept for a click.
         const marks = new Map<string, { jid: string; width: number }>()
-        const shown = withMentions(waMarkup(row.text), (jid, first) => {
+        // Mine still within the editing window: the passages the check found wrong, underlined in yellow (sentFixesFor).
+        const fixes = mine && type === 'text' ? this.sentFixesFor(row) : null
+        if (fixes) expires = Math.min(expires, row.ts + EDIT_WINDOW)
+        const shown = withMentions(waMarkup(fixes ? markFixes(row.text, fixes) : row.text), (jid, first) => {
           const color = colorFor(jid), token = `{${color}-fg}@${esc(first)}{/${color}-fg}`
           marks.set(token, { jid, width: strWidth(`@${first}`) })
           return token
-        })
+        }).replace(/\uE000/g, '{underline}{yellow-fg}').replace(/\uE001/g, '{/yellow-fg}{/underline}')
         const wrapped = shown.split('\n').flatMap(l => wrapTagged(l, wrapAt))
         wrapped.forEach((l, i) => {
           const tw = visibleWidth(l)
@@ -2683,6 +2820,9 @@ export class Ui {
       push('', null)
     }
 
+    // The marks go when the first marked message can no longer be edited.
+    if (this.sentExpiry) clearTimeout(this.sentExpiry)
+    this.sentExpiry = expires < Infinity ? setTimeout(() => { this.dirtyMessages = true; this.scheduleRender() }, Math.max(0, expires * 1000 - Date.now()) + 1000) : undefined
     this.lineMap = map
     this.headerLines = headers
     this.textLines = texts

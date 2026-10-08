@@ -21,6 +21,7 @@ const STRINGS = {
   me: { pt: 'eu', en: 'me' },
   onlyOwnText: { pt: 'só podes corrigir mensagens de texto tuas', en: 'you can only edit your own text messages' },
   onlyOwnEdit: { pt: 'só podes editar mensagens tuas', en: 'you can only edit your own messages' },
+  editTooLate: { pt: 'já passaram 15 minutos: o WhatsApp não deixa editar', en: 'more than 15 minutes ago: WhatsApp no longer lets it be edited' },
   unknownMessage: { pt: 'mensagem desconhecida', en: 'unknown message' },
   noConnection: { pt: 'sem ligação ao WhatsApp; espera pelo ● verde', en: 'no WhatsApp connection; wait for the green ●' },
   reactionRemoved: { pt: 'reacção retirada', en: 'reaction removed' },

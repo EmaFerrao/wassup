@@ -133,10 +133,15 @@ and English dictionaries, a word being right in any of them; words you wrote you
 contacts and chats count as known, unless all they lack is an accent.
 
 With the input empty, after 5 s without keys, the same gray italic offers a reply when the chat calls for one; → puts
-it in the input, to edit and send (Tab still switches tabs). When the last messages are the other side's, from the last three days, the
-model answers them if they ask for it (a question, a request, a greeting), with the latest messages and the time as
-context; in a group, only what's addressed to you (a reply to yours, a mention, your first name). Otherwise, with
-nothing written in the chat today, your own greeting for that time of day as you last wrote it there (`Bom dia mãe`).
+it in the input, to edit and send (Tab still switches tabs). When the last messages are the other side's, from the
+last three days, the model answers them if they ask for it (a question, a request, a greeting), with the latest
+messages and the time as context; in a group, only what's addressed to you (a reply to yours, a mention, your first
+name). Otherwise, with nothing written in the chat today, your own greeting for that time of day as you last wrote it
+there (`Bom dia mãe`).
+
+Your text messages are checked the same way once sent, while WhatsApp still lets them be edited (15 minutes): the
+wrong passages are underlined in yellow in the bubble; a click on one floats its correction above it, and a click on
+that edits the message with it. The marks go when the 15 minutes are up.
 
 ## Data
 
