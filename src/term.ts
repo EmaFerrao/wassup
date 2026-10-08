@@ -92,13 +92,25 @@ function ask(query: string, timeoutMs: number): Promise<string> {
 export async function probeTerminal(timeoutMs = 600): Promise<TermCaps> {
   const caps: TermCaps = { kittyGraphics: false, utf8: localeIsUtf8(), answersQueries: false, version: null, kittyKeyboard: false, fg: null, bg: null, truecolor: false }
   if (!process.stdin.isTTY || !process.stdout.isTTY) return caps
+  // The questions are asked on the alternate screen, left as soon as they're answered: a terminal that doesn't know
+  // one may print it as text (Termius prints the DCS ones, "+q524742;5463", "$qm"), and that goes with the screen
+  // instead of staying on the shell's. blessed then opens its own.
+  process.stdout.write('\x1b[?1049h')
+  try {
+    await askAll(caps, timeoutMs)
+  } finally {
+    process.stdout.write('\x1b[?1049l')
+  }
+  return caps
+}
 
+async function askAll(caps: TermCaps, timeoutMs: number) {
   // 1. Identification: XTVERSION and Kitty keyboard protocol query (CSI, harmless) and DA1.
   const first = await ask('\x1b[>0q\x1b[?u', timeoutMs)
   caps.kittyKeyboard = KITTY_KBD_RE.test(first)
   caps.answersQueries = DA1_RE.test(first)
   caps.version = XTVERSION_RE.exec(first)?.[1]?.trim() ?? null
-  if (!caps.answersQueries) return caps
+  if (!caps.answersQueries) return
 
   // 2. Default text and background colors (OSC 10 and 11): only for terminals that already answered, and an OSC
   // the terminal doesn't know is swallowed without a reply. Whoever doesn't answer is left without known colors,
@@ -107,7 +119,7 @@ export async function probeTerminal(timeoutMs = 600): Promise<TermCaps> {
 
   // 3. 24-bit colour, asked of the terminal itself: XTGETTCAP for the RGB and Tc terminfo capabilities (Herdr,
   // which doesn't answer DECRQSS, confirms both), and DECRQSS on an SGR set to a 24-bit colour, for terminals that
-  // answer that one instead. Both are DCS strings, which a terminal that doesn't know them swallows.
+  // answer that one instead. Both are DCS strings, which most terminals that don't know them swallow.
   const hex = (s: string) => Buffer.from(s).toString('hex')
   const rgb = await ask(`\x1bP+q${hex('RGB')};${hex('Tc')}\x1b\\\x1b[38;2;1;2;3m\x1bP$qm\x1b\\\x1b[0m`, timeoutMs)
   caps.truecolor = XTGETTCAP_RGB_RE.test(rgb) || DECRQSS_RGB_RE.test(rgb)
@@ -117,5 +129,4 @@ export async function probeTerminal(timeoutMs = 600): Promise<TermCaps> {
     const second = await ask('\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\', timeoutMs)
     caps.kittyGraphics = KITTY_OK_RE.test(second)
   }
-  return caps
 }
