@@ -147,14 +147,15 @@ export function visibleWidth(s: string): number {
 /**
  * Width of tag-free text as blessed counts it when deciding whether to wrap the line: in UTF-16 units, with the
  * marker it puts in the second cell of each wide character. An emoji outside the basic plane (surrogate pair)
- * or a pictograph with the U+FE0F variation selector thus counts one more than the cells it occupies. Wrapping and
- * aligning by this measure is what keeps blessed from wrapping the line again and throwing the last word onto the
- * next line.
+ * or a pictograph with the U+FE0F variation selector thus counts one more than the cells it occupies, and a flag
+ * drawn as such (two regional indicators and the marker, in 2 cells) three more. Wrapping and aligning by this
+ * measure is what keeps blessed from wrapping the line again and throwing the last word onto the next line.
  */
 function wrapUnits(plain: string): number {
   let extra = 0
   for (const c of plain) if (c.codePointAt(0)! > 0xffff) extra++
   extra += plain.match(/\p{Extended_Pictographic}️/gu)?.length ?? 0
+  extra += plain.match(/\p{Regional_Indicator}{2}/gu)?.length ?? 0
   return strWidth(plain) + extra
 }
 

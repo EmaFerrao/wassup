@@ -24,12 +24,16 @@ export interface TermCaps {
   bg: string | null
   /** 24-bit colour: the terminal confirmed the RGB or Tc capability (XTGETTCAP), or echoed a 24-bit SGR back (DECRQSS). */
   truecolor: boolean
+  /** Columns the terminal gives a flag (🇵🇹), measured by writing one and asking where the cursor went; null if it didn't say. */
+  flagWidth: number | null
 }
 
 const DA1_RE = /\x1b\[\?[\d;]*c/
 const XTVERSION_RE = /\x1bP>\|([^\x1b]*)\x1b\\/
 const KITTY_KBD_RE = /\x1b\[\?\d+u/
 const KITTY_OK_RE = /\x1b_Gi=31;OK\x1b\\/
+/** Cursor position report (`CSI row ; column R`). */
+const CPR_RE = /\x1b\[\d+;(\d+)R/
 /** XTGETTCAP reply confirming RGB or Tc (`DCS 1 + r <hex name>`): `0 + r` would mean the terminal doesn't have it. */
 const XTGETTCAP_RGB_RE = /\x1bP1\+r(?:524742|5463)/i
 /** DECRQSS reply carrying the 24-bit colour back, in any of the forms terminals write it (`38;2;1;2;3`, `38:2::1:2:3`). */
@@ -93,7 +97,7 @@ function ask(query: string, timeoutMs: number): Promise<string> {
 }
 
 export async function probeTerminal(timeoutMs = 600): Promise<TermCaps> {
-  const caps: TermCaps = { kittyGraphics: false, utf8: localeIsUtf8(), answersQueries: false, version: null, kittyKeyboard: false, fg: null, bg: null, truecolor: false }
+  const caps: TermCaps = { kittyGraphics: false, utf8: localeIsUtf8(), answersQueries: false, version: null, kittyKeyboard: false, fg: null, bg: null, truecolor: false, flagWidth: null }
   if (!process.stdin.isTTY || !process.stdout.isTTY) return caps
   // The questions are asked on the alternate screen, left as soon as they're answered: a terminal that doesn't know
   // one may print it as text (Termius prints the DCS ones, "+q524742;5463", "$qm"), and that goes with the screen
@@ -127,7 +131,14 @@ async function askAll(caps: TermCaps, timeoutMs: number) {
   const rgb = await ask(`\x1bP+q${hex('RGB')};${hex('Tc')}\x1b\\\x1b[38;2;1;2;3m\x1bP$qm\x1b\\\x1b[0m`, timeoutMs)
   caps.truecolor = XTGETTCAP_RGB_RE.test(rgb) || DECRQSS_RGB_RE.test(rgb)
 
-  // 4. Kitty graphics query (APC, id 31, 1×1 px image), only for those who identified as capable.
+  // 4. A flag's width: written at the top left, the cursor's column (CPR) says how many cells it took. Terminals
+  // disagree (one cell per regional indicator, two each, or the pair as one emoji), so it's measured, not assumed.
+  if (caps.utf8) {
+    const col = CPR_RE.exec(await ask('\x1b[H🇵🇹\x1b[6n', timeoutMs))?.[1]
+    if (col) caps.flagWidth = Number(col) - 1
+  }
+
+  // 5. Kitty graphics query (APC, id 31, 1×1 px image), only for those who identified as capable.
   if (caps.version && KITTY_TERMS.test(caps.version)) {
     const second = await ask('\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\', timeoutMs)
     caps.kittyGraphics = KITTY_OK_RE.test(second)
