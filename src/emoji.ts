@@ -264,15 +264,16 @@ export function emojify(text: string): string {
 export const emojiCodes = Object.keys(TABLE)
 
 /**
- * Emojis whose name starts with `prefix`, without repeating the emoji; each comes with the first matching name, to
- * display. Shorter names first, so an exact match ("fixe") comes before a longer one; ties keep the table order.
+ * Emojis whose name, in Portuguese or in English, starts with `prefix`, without repeating the emoji; each comes with
+ * the first matching name, to display, one in the user's language when both match. Shorter names first, so an exact
+ * match ("fixe") comes before a longer one; ties keep the table order.
  */
 export function completeEmoji(prefix: string): { emoji: string; name: string }[] {
   const p = prefix.toLowerCase()
   const out: { emoji: string; name: string }[] = []
   for (const [emoji, pt, en] of EMOJI) {
-    // Only the names in the user's language are suggested; `emojify` still accepts both.
-    const name = (lang === 'pt' ? pt : en).find(n => n.startsWith(p))
+    const [own, other] = lang === 'pt' ? [pt, en] : [en, pt]
+    const name = own.find(n => n.startsWith(p)) ?? other.find(n => n.startsWith(p))
     if (name && !out.some(o => o.emoji === emoji)) out.push({ emoji, name })
   }
   return out.map((o, i) => ({ o, i })).sort((a, b) => a.o.name.length - b.o.name.length || a.i - b.i).map(x => x.o)

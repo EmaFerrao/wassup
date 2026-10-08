@@ -65,7 +65,7 @@ and on startup the terminal is asked for its real background colour to pick ligh
 - **Input**: grows with the text up to half the screen; the rule above it shows 👀 near its right end while you show as
   online, a braille spinner instead while you type; Enter sends, Shift+Enter or Ctrl+J start a new line, and pasting
   several lines keeps them. Ctrl-U clears, Shift-Backspace deletes a word (with the Kitty keyboard protocol). `:` and
-  two letters open the emoji list; ↑/↓, Enter, Tab, → or a click pick one.
+  a letter open the emoji list; ↑/↓, Enter, Tab, → or a click pick one.
 - Esc closes, in order: the filter, the list, the active tab. Closing the last tab quits. Ctrl-C quits at once;
   Ctrl-R redraws the screen.
 - **Several terminals**: the first process is the server with the WhatsApp connection; the next ones connect to it
@@ -92,11 +92,11 @@ spinner while they type.
 WhatsApp markup is shown with terminal attributes: `*bold*`, `_italic_`, `~strikethrough~`, `` `code` ``, `> quote`.
 When sending, write the markup as on the phone. `:name:` codes are replaced by the emoji as soon as the second `:` is
 typed, with names in Portuguese and in English (`:thumbsup:` 👍, `:kissing_heart:` 😘, `:coffee:` ☕ …; the list is in
-`src/emoji.ts`), and classic smileys surrounded by spaces too (`:)`, `;)`, `<3` …). The suggestion list only shows the
-names in the user's language. Links are shown without what only tracks who shared them (`fbclid`, `utm_…`, `igsh`,
-`si` and the many others in [ClearURLs](https://github.com/ClearURLs/Rules)' rules, redirections through a site
-undone) and shortened (`instagram.com/p/DeNKVAJuamr`, a long path cut in the middle); a click copies the whole clean
-link.
+`src/emoji.ts`), and classic smileys surrounded by spaces too (`:)`, `;)`, `<3` …). The suggestion list (`:` and a
+letter) finds them by either language's names too, showing the user's language's when both match. Links are shown
+without what only tracks who shared them (`fbclid`, `utm_…`, `igsh`, `si` and the many others in
+[ClearURLs](https://github.com/ClearURLs/Rules)' rules, redirections through a site undone) and shortened
+(`instagram.com/p/DeNKVAJuamr`, a long path cut in the middle); a click copies the whole clean link.
 
 ### Images
 
