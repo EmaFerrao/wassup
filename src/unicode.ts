@@ -130,6 +130,11 @@ const ANGLES: Record<string, boolean> = Object.fromEntries([...'┘┐┌└┼�
  * pads it, lands one column to the left and covers the right half of the emoji. blessed's `draw` is rewritten with
  * a patch: right after one of those emoji the cursor moves, in absolute terms, to the cell blessed assumes, so the
  * cell next to the emoji is never touched, on terminals that measure 1 and on those that measure 2.
+ *
+ * The same patch writes a space for the marker of a wide character's second cell (U+0003) when that cell comes out
+ * on its own: something drawn over the first cell (the big emoji rising, hearts.ts) left the marker without its
+ * character, and blessed wrote it as it was. Terminals don't move the cursor for it, so what followed on the line
+ * in that frame landed a cell to the left, the time after an emoji eaten, and stayed there.
  */
 export function patchBlessedDraw() {
   const Screen = (blessed as unknown as { Screen: { prototype: { draw: (start: number, end: number) => void; _waPatched?: boolean } } }).Screen
@@ -138,7 +143,7 @@ export function patchBlessedDraw() {
   const src = Screen.prototype.draw.toString()
   const marker = 'out += ch;\n      attr = data;'
   if (!src.includes(marker)) throw new Error('blessed: draw changed; the ambiguous-width emoji patch does not apply')
-  const patched = src.replace(marker, 'out += ch;\n      if (ambiguous(ch)) out += this.tput.cup(y, x + 1);\n      attr = data;')
+  const patched = src.replace(marker, 'out += ch === \'\\x03\' ? \' \' : ch;\n      if (ambiguous(ch)) out += this.tput.cup(y, x + 1);\n      attr = data;')
   const u = (blessed as unknown as { unicode: BlessedUnicode }).unicode
   Screen.prototype.draw = new Function('unicode', 'angles', 'ambiguous', `return ${patched}`)(u, ANGLES, (ch: string) => AMBIGUOUS.test(ch))
 }
