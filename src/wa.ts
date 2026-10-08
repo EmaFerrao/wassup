@@ -237,7 +237,7 @@ export function storeReaction(m: WAMessage, meJid: string): Reaction | null {
   const chatJid = canonicalJid(m.key.remoteJid, m.key.remoteJidAlt)
   if (!chatJid) return null
   const fromMe = !!m.key.fromMe
-  const senderJid = fromMe ? meJid : isJidGroup(chatJid) ? canonicalJid(m.key.participant, m.key.participantAlt) : chatJid
+  const senderJid = fromMe ? meJid : isJidGroup(chatJid) ? canonicalJid(m.key.participant || m.participant, m.key.participantAlt) : chatJid
   const ts = r.senderTimestampMs ? toNumber(r.senderTimestampMs) : toNumber(m.messageTimestamp) * 1000
   const emoji = r.text ?? ''
   store.setReaction(chatJid, r.key.id, senderJid, emoji, ts)
@@ -252,7 +252,9 @@ export function parseMessage(m: WAMessage, meJid: string): Parsed | null {
   if (!chatJid || isJidStatusBroadcast(chatJid) || isJidNewsletter(chatJid) || isJidBroadcast(chatJid)) return null
   const isGroup = isJidGroup(chatJid)
   const fromMe = !!key.fromMe
-  const senderJid = fromMe ? meJid : isGroup ? canonicalJid(key.participant, key.participantAlt) : chatJid
+  // In a group the sender is the key's participant; messages from the history sync carry it in the message's own
+  // `participant` instead.
+  const senderJid = fromMe ? meJid : isGroup ? canonicalJid(key.participant || m.participant, key.participantAlt) : chatJid
 
   const content = normalizeMessageContent(m.message ?? undefined)
   if (!content) return null
@@ -384,7 +386,31 @@ export class Wa extends EventEmitter<WaEvents> {
     // Only the server process writes, so the stored delivery states are put right here, once per start.
     const fixed = store.repairStatuses()
     if (fixed.read || fixed.groupSent) logger.info(fixed, 'delivery states repaired')
+    const senders = this.repairSenders()
+    if (senders) logger.info({ senders }, 'group senders repaired')
     await this.connect()
+  }
+
+  /**
+   * Group messages stored with no sender, which showed as "+": the history sync names it in the message's own
+   * `participant`, which used to go unread (parseMessage). Their sender is taken from the message as it came, a lid
+   * turned into the number when it's known, and its pushName goes to the contact. Safe to repeat: only rows still
+   * without a sender are read.
+   */
+  private repairSenders(): number {
+    let n = 0
+    store.transaction(() => {
+      for (const row of store.messagesWithoutSender()) {
+        let m: WAMessage
+        try { m = JSON.parse(row.raw, BufferJSON.reviver) as WAMessage } catch { continue }
+        const sender = canonicalJid(m.key?.participant || m.participant, m.key?.participantAlt)
+        if (!sender) continue
+        store.setSender(row.chat_jid, row.id, sender)
+        if (m.pushName) store.upsertContact(sender, null, m.pushName)
+        n++
+      }
+    })
+    return n
   }
 
   /**

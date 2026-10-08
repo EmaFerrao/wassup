@@ -169,6 +169,8 @@ const q = {
   // groups, my pending messages followed by any other message in the group, which the server must have taken.
   repairRead: db.prepare(`UPDATE messages SET status = 4 WHERE from_me = 1 AND status IN (2, 3) AND chat_jid NOT LIKE '%@g.us'
     AND ts <= (SELECT MAX(n.ts) FROM messages n WHERE n.chat_jid = messages.chat_jid AND n.from_me = 1 AND n.status >= 4)`),
+  noSender: db.prepare(`SELECT chat_jid, id, raw FROM messages WHERE chat_jid LIKE '%@g.us' AND from_me = 0 AND sender_jid = ''`),
+  setSender: db.prepare(`UPDATE messages SET sender_jid = ? WHERE chat_jid = ? AND id = ?`),
   repairGroupPending: db.prepare(`UPDATE messages SET status = 2 WHERE from_me = 1 AND status = 1 AND chat_jid LIKE '%@g.us'
     AND EXISTS (SELECT 1 FROM messages n WHERE n.chat_jid = messages.chat_jid AND n.ts > messages.ts)`),
   setType: db.prepare(`UPDATE messages SET type = ?, text = ? WHERE chat_jid = ? AND id = ?`),
@@ -298,6 +300,13 @@ export const store = {
     q.markReadBefore.run(chat, ts)
   },
   /** The same rules on what's already stored; returns how many messages moved. */
+  /** Group messages from others stored with no sender, as they came (`raw`). */
+  messagesWithoutSender(): { chat_jid: string; id: string; raw: string }[] {
+    return q.noSender.all() as { chat_jid: string; id: string; raw: string }[]
+  },
+  setSender(chat: string, id: string, sender: string) {
+    q.setSender.run(sender, chat, id)
+  },
   repairStatuses(): { read: number; groupSent: number } {
     return { read: Number(q.repairRead.run().changes), groupSent: Number(q.repairGroupPending.run().changes) }
   },
