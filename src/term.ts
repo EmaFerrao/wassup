@@ -36,8 +36,11 @@ const XTGETTCAP_RGB_RE = /\x1bP1\+r(?:524742|5463)/i
 const DECRQSS_RGB_RE = /\x1bP1\$r[^\x1b]*38[:;]2[:;]+1[:;]2[:;]3/
 /** Reply to OSC 10/11: `OSC 1x ; rgb:rrrr/gggg/bbbb ST`, with 1 to 4 digits per component. */
 const OSC_COLOR_RE = /\x1b\](1[01]);rgba?:([0-9a-f]+)\/([0-9a-f]+)\/([0-9a-f]+)/gi
-/** Terminals whose XTVERSION identification authorizes us to send the Kitty graphics query. */
-const KITTY_TERMS = /ghostty|kitty|wezterm|konsole/i
+/**
+ * Terminals whose XTVERSION identification authorizes us to send the Kitty graphics query. iTerm2 takes the protocol
+ * besides its own (3.7 answers it); an older one without it just doesn't answer, and gets half-blocks.
+ */
+const KITTY_TERMS = /ghostty|kitty|wezterm|konsole|iterm/i
 
 /** A component of 1 to 4 hex digits (scale 0..16^n-1) reduced to two digits. */
 function hex2(c: string): string {
