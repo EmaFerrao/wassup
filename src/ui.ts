@@ -82,6 +82,8 @@ const PAGE = 300
 const NOTICE = { fadeIn: 400, hold: 6000, fadeOut: 800 }
 
 const HELP = t('help')
+/** Lines of the emoji list in view; ↑/↓ scroll through the rest. */
+const SUGGEST_ROWS = 5
 
 // Terminal theme colors, never assumed: default foreground and background, and the 16 named ones, which the theme
 // guarantees are readable over its background. Transient notices are discreet; only waiting for the QR code and
@@ -150,6 +152,8 @@ export class Ui {
   private suggest: blessed.Widgets.BoxElement
   private suggestions: { emoji: string; code: string; length: number }[] = []
   private suggestIndex = 0
+  /** The first option in view: the list scrolls to keep the chosen one in it. */
+  private suggestTop = 0
   /** Whether the suggestions are for a smiley: Enter then sends it as typed, and only Tab or → swap it. */
   private suggestFace = false
   /** Local model suggestion for the text `text` (continuation or correction), requested 150 ms after the last keystroke and shown for 4 s. */
@@ -441,9 +445,9 @@ export class Ui {
     })
     // A click on a line of the emoji list selects that one.
     this.suggest.on('click', (data: { x: number; y: number }) => {
-      const i = data.y - num(this.suggest.atop)
-      if (i < 0 || i >= this.suggestions.length) return
-      this.suggestIndex = i
+      const row = data.y - num(this.suggest.atop)
+      if (row < 0 || this.suggestTop + row >= this.suggestions.length) return
+      this.suggestIndex = this.suggestTop + row
       this.acceptSuggestion()
     })
 
@@ -1953,8 +1957,8 @@ export class Ui {
     const typed = m ? graphemes(`:${m[2]}`).length : 0
     const options = [
       ...face ? [{ emoji: face.emoji, code: face.face, length: graphemes(face.face).length }] : [],
-      ...(m ? completeEmoji(m[2]!).slice(0, 5) : []).map(o => ({ ...o, length: typed })),
-    ].filter((o, i, all) => all.findIndex(p => p.emoji === o.emoji) === i).slice(0, 5)
+      ...(m ? completeEmoji(m[2]!) : []).map(o => ({ ...o, length: typed })),
+    ].filter((o, i, all) => all.findIndex(p => p.emoji === o.emoji) === i)
     const same = options.length === this.suggestions.length && options.every((o, i) => o.emoji === this.suggestions[i]!.emoji)
     this.suggestions = options
     this.suggestFace = !!face
@@ -2105,12 +2109,17 @@ export class Ui {
     const lines = this.suggestions.map((o, i) => i === this.suggestIndex
       ? `{bold}› ${esc(o.emoji)}  ${esc(o.code)}{/bold}`
       : `  ${esc(o.emoji)}  ${esc(o.code)}`)
-    // One column of margin on the right, which also serves as padding: blessed wraps the line if a closing tag lands on the last column.
+    // SUGGEST_ROWS at a time, scrolled just enough to show the chosen one.
+    if (this.suggestIndex < this.suggestTop) this.suggestTop = this.suggestIndex
+    else if (this.suggestIndex >= this.suggestTop + SUGGEST_ROWS) this.suggestTop = this.suggestIndex - SUGGEST_ROWS + 1
+    const shown = lines.slice(this.suggestTop, this.suggestTop + SUGGEST_ROWS)
+    // As wide as the widest option, in view or not, so the box doesn't change width while scrolling. One column of
+    // margin on the right, which also serves as padding: blessed wraps the line if a closing tag lands on the last column.
     this.suggest.width = Math.max(...lines.map(visibleWidth)) + 2
-    this.suggest.height = lines.length
+    this.suggest.height = shown.length
     // Over the input's top rule, its last line on the rule.
-    this.suggest.top = `100%-${this.bottom + lines.length - 1}`
-    this.suggest.setContent(lines.join('\n'))
+    this.suggest.top = `100%-${this.bottom + shown.length - 1}`
+    this.suggest.setContent(shown.join('\n'))
     this.suggest.show()
   }
 
