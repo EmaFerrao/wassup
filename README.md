@@ -131,6 +131,12 @@ stands in, words only, in the same way: Hunspell in WebAssembly with LibreOffice
 dictionaries, a word being right in any of them; words you wrote yourself more than once and the names of contacts and
 chats count as known, unless all they lack is an accent.
 
+With the input empty, after 5 s without keys, the same gray italic offers a reply when the chat calls for one; → puts
+it in the input, to edit and send (Tab still switches tabs). When the last messages are the other side's, from the last three days, the
+model answers them if they ask for it (a question, a request, a greeting), with the latest messages and the time as
+context; in a group, only what's addressed to you (a reply to yours, a mention, your first name). Otherwise, with
+nothing written in the chat today, your own greeting for that time of day as you last wrote it there (`Bom dia mãe`).
+
 ## Data
 
 Everything lives in `~/.config/wa` (or `WA_HOME`), readable by this user only (mode 700, umask 077 for whatever is

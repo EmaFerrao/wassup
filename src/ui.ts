@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import QRCode from 'qrcode'
 import { store, type ChatRow, type MessageRow, type ReactionRow } from './db.js'
-import { chatName, contactName, shortName, canonicalJid, thumbPath, previewPath, hasPreviewImage, mediaFile, jidUser, withMentions, typeLabel, pinTarget, type ConnState } from './wa.js'
+import { chatName, contactName, shortName, canonicalJid, thumbPath, previewPath, hasPreviewImage, mediaFile, jidUser, withMentions, typeLabel, pinTarget, myAccount, type ConnState } from './wa.js'
 import { inHerdr, reportHerdr, doneHerdr, titleHerdr, tabNameHerdr, releaseHerdr, openChatHerdr, focusHerdr, focusNextChatHerdr, paneFocusedHerdr } from './herdr.js'
 import type { Backend } from './backend.js'
 import { waMarkup, clipTagged, esc, colorFor, setTheme, dim, faint, italic, padding, fmtTime, fmtDay, fmtWhen, daysAgo, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, wrapWidth, fold, graphemes, wrapChars } from './format.js'
@@ -18,7 +18,7 @@ import { enableBracketedPaste } from './paste.js'
 import { Hearts, reaction, emojiOnly } from './hearts.js'
 import { t } from './i18n.js'
 import { parseHex, mix, nearest256, type Rgb } from './rainbow.js'
-import { suggest, describe, llmEnabled, type Suggestion, type Fix } from './llm.js'
+import { suggest, describe, suggestReply, llmEnabled, type Suggestion, type Fix } from './llm.js'
 import { spellFixes } from './spell.js'
 import { patchBlessedItalic } from './italic.js'
 
@@ -78,6 +78,8 @@ const tick = (status: number) => faint(status >= 3 ? '✓' : status >= 2 ? '›'
 const EYES_MAX = 5
 /** How many of a chat's latest messages the panel draws at first, and how many more each scroll past the top adds. */
 const PAGE = 300
+/** How long without keys or mouse, in milliseconds, before a reply is offered in the empty input (workOutReply). */
+const REPLY_IDLE = 5000
 /** The notice for a message in another chat: time to appear, stay, and disappear, in milliseconds. */
 const NOTICE = { fadeIn: 400, hold: 6000, fadeOut: 800 }
 
@@ -187,6 +189,12 @@ export class Ui {
   /** Per group, how many of its followed members are online, for as many 👀 (up to EYES_MAX). */
   private groupOnline = new Map<string, number>()
   private ghostTimer: NodeJS.Timeout | undefined
+  /** The reply offered in each chat's empty input (replyShown): the last message it answers, and its text. */
+  private replies = new Map<string, { after: string; text: string }>()
+  private replyTimer: NodeJS.Timeout | undefined
+  private replyAbort: AbortController | undefined
+  /** Each chat's last message a reply was already worked out for, offered or not, so it's only done once. */
+  private replyFor = new Map<string, string>()
   private ghostAbort: AbortController | undefined
   /** Right-arrow presses with the next suggestion still on the way: accepted on arrival, one per arrow, so → → → correct in a chain. */
   private acceptOnArrival = 0
@@ -376,6 +384,7 @@ export class Ui {
       // Coming to the front is seeing the chat: what arrived meanwhile is read, and in Herdr the pane stops asking
       // for attention.
       if (focused && this.current) this.wa.markRead(this.current).catch(e => logger.warn({ e }, 'markRead'))
+      if (focused) this.replyLater()
     }
     this.screen.program.on('focus', () => focusChanged(true))
     this.screen.program.on('blur', () => focusChanged(false))
@@ -502,6 +511,7 @@ export class Ui {
     this.renderNow()
     // drawStatus has already left the tab bar drawn, so the renderNow above doesn't touch the title or Herdr.
     this.updateTitle()
+    this.replyLater()
   }
 
   private get current(): string | null {
@@ -726,7 +736,8 @@ export class Ui {
       if (jid === this.current) { this.drawInput(); this.screen.render() }
     })
     this.wa.on('messages', jid => {
-      if (jid === '*' || jid === this.current) this.dirtyMessages = true
+      // A reply offered no longer answers the chat's last message: it goes, and another may be worked out.
+      if (jid === '*' || jid === this.current) { this.dirtyMessages = true; this.replyLater(); if (this.replies.size) this.drawInput() }
       this.dirtyTabs = true
       // The open list shows each chat's last message: a change to it (its state, an edit) redraws that row.
       if (this.pickerOpen) {
@@ -929,6 +940,8 @@ export class Ui {
     // With text in the input, Tab accepts the suggestion in view: the emoji list, or the model's; with no text, it
     // switches tabs. The right arrow, with the cursor already at the end, does the same as Tab; mid-text it keeps
     // moving the cursor.
+    // With it empty, → takes the reply offered (replyShown), as text to edit and send, or not; Tab still switches tabs.
+    if (k === 'right' && this.focus === 'input' && !this.pickerOpen && !this.inputValue && this.replyShown()) return this.acceptReply()
     if ((k === 'tab' || (k === 'right' && this.cursorAtEnd() && (this.suggestions.length || this.ghostShown()))) && this.focus === 'input' && !this.pickerOpen && this.inputValue) {
       if (this.suggestions.length) return this.acceptSuggestion()
       if (this.ghostShown()) this.acceptGhost()
@@ -1424,6 +1437,7 @@ export class Ui {
   private touchActivity() {
     this.lastActive = Date.now()
     if (this.lastActive - this.lastActiveSaved > 2000) this.saveTabs()
+    this.replyLater()
   }
 
   /** Something was written in a chat: keeps this device "available" while it has the focus; every 10 seconds is enough. */
@@ -2096,6 +2110,109 @@ export class Ui {
   /** Until when the model is left alone after it didn't answer (scheduleGhost). */
   private llmDownUntil = 0
 
+  /**
+   * After REPLY_IDLE without keys or mouse (or a new message, or the terminal coming to the front), a reply is worked
+   * out for the chat in front (workOutReply); anything before then puts it off, and stops one being asked for.
+   */
+  private replyLater() {
+    if (this.replyTimer) clearTimeout(this.replyTimer)
+    this.replyAbort?.abort()
+    this.replyAbort = undefined
+    this.replyTimer = setTimeout(() => { this.replyTimer = undefined; this.workOutReply() }, REPLY_IDLE)
+  }
+
+  /** The chat is waiting on input: open, the input empty and in front, nothing being replied to, reacted to or edited. */
+  private replyIdle(): boolean {
+    return !!this.current && this.focus === 'input' && !this.pickerOpen && !this.inputValue && !this.replyTo && !this.reactTo && !this.editing && !this.viewing && this.hasFocus !== false
+  }
+
+  /**
+   * The reply the chat in front calls for, once per last message. When the last messages are the other side's, from
+   * the last three days, the model answers them if they ask for it (a question, a request, a greeting); in a group,
+   * only when they're addressed to me: replying to mine, mentioning me or saying my first name. Failing that, with
+   * nothing written in the chat today, my own greeting for this time of day (bom dia, boa tarde, boa noite) as I
+   * last wrote it there, when I have.
+   */
+  private workOutReply() {
+    const jid = this.current
+    if (!jid || !this.replyIdle()) return
+    const last = store.lastMessage(jid)
+    if (!last || this.replyFor.get(jid) === last.id) return
+    this.replyFor.set(jid, last.id)
+    const offer = (text: string | null) => {
+      if (!text || this.current !== jid || store.lastMessage(jid)?.id !== last.id) return
+      this.replies.set(jid, { after: last.id, text })
+      this.drawInput()
+      this.screen.render()
+    }
+    const greeting = () => (new Date(last.ts * 1000).toDateString() === new Date().toDateString() ? null : this.myGreeting(jid))
+    const rows = store.listMessages(jid, 12).filter(r => r.type !== 'deleted')
+    let mineAt = rows.length
+    while (mineAt > 0 && !rows[mineAt - 1]!.from_me) mineAt--
+    const theirs = rows.slice(mineAt)
+    if (last.from_me || !llmEnabled || Date.now() < this.llmDownUntil || Date.now() / 1000 - last.ts > 3 * 86400 || (jid.endsWith('@g.us') && !theirs.some(r => this.addressedToMe(r)))) return offer(greeting())
+    const abort = new AbortController()
+    this.replyAbort = abort
+    const group = jid.endsWith('@g.us'), me = t('me')
+    const messages = rows.map(r => ({ when: `${fmtDay(r.ts)} ${fmtTime(r.ts)}`, who: r.from_me ? me : group ? contactName(r.sender_jid) : chatName(jid), text: r.text || typeLabel(r) }))
+    suggestReply({ name: chatName(jid), group, me: myAccount().name }, messages, abort.signal).then(text => {
+      if (abort.signal.aborted) return
+      this.replyAbort = undefined
+      offer(text ?? greeting())
+    }, e => {
+      if (abort.signal.aborted) { if (this.replyFor.get(jid) === last.id) this.replyFor.delete(jid); return }
+      this.replyAbort = undefined
+      this.replyFor.delete(jid)
+      logger.debug({ e: String(e) }, 'llm: no reply')
+      this.llmDownUntil = Date.now() + 60000
+    })
+  }
+
+  /** A group message addressed to me: a reply to one of mine, a mention of me, or my first name in it. */
+  private addressedToMe(row: MessageRow): boolean {
+    const { name, lid } = myAccount()
+    const quoted = row.quoted?.split('\t')[0]
+    if (quoted && (quoted === this.wa.me || (lid && jidUser(quoted) === lid))) return true
+    const mentions = [jidUser(this.wa.me), lid].filter(Boolean).map(n => `@${n}`)
+    if (mentions.some(m => row.text.includes(m))) return true
+    const first = name?.split(' ')[0]
+    return !!first && new RegExp(`(?<![\\p{L}\\p{N}])${fold(first)}(?![\\p{L}\\p{N}])`, 'u').test(fold(row.text))
+  }
+
+  /**
+   * My last greeting in the chat for this time of day (bom dia until noon, boa tarde until 20h, boa noite then), as I
+   * wrote it: whole when at most a word follows it ("Bom dia mãe", "Bom dia 😘"), otherwise just the greeting.
+   */
+  private myGreeting(jid: string): string | null {
+    const h = new Date().getHours()
+    const re = h >= 5 && h < 12 ? /^(bom dia|good morning)\b/i : h >= 12 && h < 20 ? /^(boa tarde|good afternoon)\b/i : /^(boa noite|good (night|evening))\b/i
+    const text = store.listMessages(jid, 300).filter(r => r.from_me && r.type === 'text' && re.test(r.text.trim())).at(-1)?.text.trim()
+    if (!text) return null
+    const greeting = re.exec(text)![0], rest = text.slice(greeting.length).trim()
+    return rest.split(/\s+/).length <= 1 && !rest.includes('?') ? text : greeting
+  }
+
+  /** The reply offered (workOutReply), while it still answers the chat's last message and the input waits empty. */
+  private replyShown(): string | null {
+    const jid = this.current, r = jid ? this.replies.get(jid) : undefined
+    if (!jid || !r || !this.replyIdle()) return null
+    return store.lastMessage(jid)?.id === r.after ? r.text : null
+  }
+
+  /** Puts the reply offered in the input, as if typed, to edit and send. */
+  private acceptReply() {
+    const text = this.replyShown()!
+    this.replies.delete(this.current!)
+    this.inputValue = text
+    this.cursor = graphemes(text).length
+    this.promoteActive()
+    this.noteWriting()
+    this.noteComposing()
+    this.updateSuggestions()
+    this.drawInput()
+    this.screen.render()
+  }
+
   private clearGhost() {
     this.ghost = undefined
     this.ghostBox.hide()
@@ -2228,6 +2345,9 @@ export class Ui {
         ghostCol = Math.max(0, Math.min(strWidth(lines[wl]!.slice(0, at).join('')) - 2, width - strWidth(ghostAbove)))
       }
     }
+    // In the empty input, the reply offered, in the same gray italic, the cursor on its first letter.
+    const reply = !chars.length ? this.replyShown() : null
+    if (reply) ghostNext = truncate(reply.replace(/\s+/g, ' '), width)
     // The input grows with the text, up to half the screen.
     const rows = Math.max(1, Math.min(lines.length, Math.floor(num(this.screen.height) / 2)))
     if (rows !== this.inputRows) this.resizeInput(rows)

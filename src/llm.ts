@@ -2,8 +2,9 @@
  * Writing suggestions from a local model (llama-server, an OpenAI-compatible API), of only two kinds: the word
  * that's half-typed at the cursor, completed or corrected, and the corrections of the wrong words already written in
  * the sentence (spelling, words stuck together, a word swapped in an expression, grammar, punctuation), all of them.
- * Also a short description of an image, for the selected one when images are drawn in half-blocks. Turned off with
- * WA_LLM=off; with no server responding, suggestions and descriptions simply don't appear.
+ * Also a short description of an image, for the selected one when images are drawn in half-blocks, and the reply
+ * the chat in front calls for, when there is one, offered in the empty input. Turned off with WA_LLM=off; with no
+ * server responding, suggestions, descriptions and replies simply don't appear.
  */
 import { logger } from './log.js'
 import { fold } from './format.js'
@@ -214,4 +215,54 @@ export async function describe(png: Buffer, signal: AbortSignal): Promise<string
   if (!res.ok) { logger.warn({ status: res.status }, 'llm: describe'); return null }
   const data = (await res.json()) as { choices?: { message?: { content?: string } }[] }
   return data.choices?.[0]?.message?.content?.replace(/\s+/g, ' ').trim() || null
+}
+
+const REPLY_PT = `Ajudas-me a responder no WhatsApp. Recebes o meu nome, a hora de agora e as mensagens recentes de uma conversa, cada uma com o dia e a hora; as minhas vêm como "eu". As últimas são do outro lado e ainda não lhes respondi.
+Primeiro decide se pedem resposta minha ("needed"): sim, se houver uma pergunta ou um pedido dirigido a mim, um convite, ou um cumprimento ou uma despedida; não, se forem um comentário, uma notícia, um link, uma imagem, um "ok", ou conversa entre outras pessoas.
+Se pedirem, escreve a resposta ("reply"): curta, na língua, no tom e no estilo das minhas mensagens nesta conversa. Só começa por um cumprimento se me cumprimentaram, e então com o certo para a hora de agora. Não inventes factos, horas nem compromissos que a conversa não diga.
+Responde só com JSON: {"needed": true|false, "reply": "..."}.`
+
+const REPLY_EN = `You help me reply on WhatsApp. You get my name, the time now and the recent messages of a chat, each with its day and time; mine come as "me". The last ones are from the other side and I haven't answered them yet.
+First decide whether they call for an answer from me ("needed"): yes, if there's a question or a request addressed to me, an invitation, or a greeting or a goodbye; no, if they're a remark, news, a link, an image, an "ok", or talk between other people.
+If they do, write the answer ("reply"): short, in the language, tone and style of my messages in this chat. Only open with a greeting if they greeted me, and then with the right one for the time now. Don't make up facts, times or commitments the chat doesn't state.
+Answer only with JSON: {"needed": true|false, "reply": "..."}.`
+
+const REPLY_LABELS = lang === 'pt'
+  ? { me: 'Eu sou', now: 'Agora:', chat: 'Conversa com', group: 'Grupo' }
+  : { me: 'I am', now: 'Now:', chat: 'Chat with', group: 'Group' }
+
+const REPLY_SCHEMA = {
+  type: 'object',
+  properties: { needed: { type: 'boolean' }, reply: { type: 'string', maxLength: 300 } },
+  required: ['needed', 'reply'],
+  additionalProperties: false,
+}
+
+/**
+ * My answer to the other side's last messages in a chat, still unanswered, from its latest messages (`when` already
+ * as day and time, `who` "eu"/"me" for mine): null when they don't call for one (a remark, a link, an "ok").
+ */
+export async function suggestReply(chat: { name: string; group: boolean; me: string | null }, messages: { when: string; who: string; text: string }[], signal: AbortSignal): Promise<string | null> {
+  const now = new Date().toLocaleString(lang === 'pt' ? 'pt-PT' : 'en-GB', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
+  const user = [
+    ...(chat.me ? [`${REPLY_LABELS.me} ${chat.me}.`] : []),
+    `${REPLY_LABELS.now} ${now}`,
+    `${chat.group ? REPLY_LABELS.group : REPLY_LABELS.chat} ${chat.name}:`,
+    ...messages.map(m => `[${m.when}] ${m.who}: ${m.text.replace(/\s+/g, ' ').slice(0, 300)}`),
+  ].join('\n')
+  const body = {
+    model: MODEL,
+    temperature: 0,
+    max_tokens: 150,
+    reasoning_effort: 'none',
+    chat_template_kwargs: { enable_thinking: false },
+    response_format: { type: 'json_schema', json_schema: { name: 'reply', schema: REPLY_SCHEMA } },
+    messages: [{ role: 'system', content: lang === 'pt' ? REPLY_PT : REPLY_EN }, { role: 'user', content: user }],
+  }
+  const res = await fetch(`${URL}/v1/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal })
+  if (!res.ok) { logger.warn({ status: res.status }, 'llm: reply'); return null }
+  const data = (await res.json()) as { choices?: { message?: { content?: string } }[] }
+  let parsed: { needed?: unknown; reply?: unknown }
+  try { parsed = JSON.parse(data.choices?.[0]?.message?.content ?? '') } catch { return null }
+  return parsed.needed === true && typeof parsed.reply === 'string' ? parsed.reply.trim().replace(/^["“](.*)["”]$/s, '$1') || null : null
 }

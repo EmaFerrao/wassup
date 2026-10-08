@@ -64,6 +64,14 @@ export function jidUser(jid: string): string {
 /** WhatsApp sends the masked number ("+351∙∙∙∙∙∙∙35") as `name` when the contact isn't saved: that's not a name. */
 const looksLikeNumber = (s: string) => /^[+\d\s∙·.()-]+$/.test(s)
 
+/** My own account as the credentials keep it: my name, as WhatsApp has it, and my lid's number; nulls before linking. */
+export function myAccount(): { name: string | null; lid: string | null } {
+  try {
+    const me = (JSON.parse(fs.readFileSync(path.join(dirs.auth, 'creds.json'), 'utf8')) as { me?: { name?: string; lid?: string } }).me
+    return { name: me?.name || null, lid: me?.lid ? jidUser(me.lid).split(':')[0]! : null }
+  } catch { return { name: null, lid: null } }
+}
+
 export function contactName(jid: string): string {
   const c = store.getContact(jid)
   if (c?.name && !looksLikeNumber(c.name)) return c.name
