@@ -44,10 +44,11 @@ who wrote most recently, and a braille spinner in place of the 👀 while they t
 more than two names, or a group's name). No frames or backgrounds of its own: the colours are the terminal theme's,
 and on startup the terminal is asked for its real background colour to pick light or dark shades.
 
-- **Tabs**: one per open chat, with the unread count in red and an `×` to close. Tab cycles through them; whatever is
-  left unsent stays with each chat. While someone is typing, a braille spinner turns before their name in the tab and
-  in place of their 👀 on the rule above the input. New messages in a chat without a tab open one without activating
-  it, with a passing notice over it and the bell; an archived chat stays quiet.
+- **Tabs**: one per open chat, with the unread count in red and an `×` to close. Tab cycles through them, or, with
+  only one open, opens the chat list; whatever is left unsent stays with each chat. While someone is typing, a braille
+  spinner turns before their name in the tab and in place of their 👀 on the rule above the input. New messages in a
+  chat without a tab open one without activating it, with a passing notice over it and the bell; an archived chat
+  stays quiet.
 - **Chats**: `wa` starts on the list, and `/`, or a click on the chat's name in the prompt, opens it again, under the
   app's name, most recent at the bottom, under day separators (today, yesterday, this week, older); each row has the
   name in its colour, 👀 while the person is online, the last message (a spinner and "typing…" while someone types, the
@@ -85,11 +86,11 @@ Inside [Herdr](https://herdr.dev) wassup starts in single-chat mode and each cha
 Enter puts the chat in this pane, → opens it in a new pane beside it and Tab in a new tab (all three focus the one
 that already has it), and a message from a chat without one (and not archived) opens it in the background, in a pane
 when its tab is already split and in a tab otherwise, still unread (so the phone notifies) until you go to it. Tab,
-with nothing typed, moves to the next conversation's pane or tab, in the order Herdr shows them. wassup shows up in
-Herdr's agent list under the chat's name alone: `working` while the other person types, `done` (blue) from a new
-message (or when they stop typing) until you look at its pane, `idle` otherwise; alone in its tab, the tab takes the
-contact's first name. Outside Herdr the terminal window title carries the name, with `●` for unread messages or the
-spinner while they type.
+with nothing typed, moves to the next conversation's pane or tab, in the order Herdr shows them, or, with no other
+one, opens the chat list. wassup shows up in Herdr's agent list under the chat's name alone: `working` while the other
+person types, `done` (blue) from a new message (or when they stop typing) until you look at its pane, `idle`
+otherwise; alone in its tab, the tab takes the contact's first name. Outside Herdr the terminal window title carries
+the name, with `●` for unread messages or the spinner while they type.
 
 ### Formatting and emoji
 

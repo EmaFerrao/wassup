@@ -905,8 +905,12 @@ export class Ui {
       return this.pickChat((this.picker as unknown as { selected: number }).selected, !inHerdr ? 'here' : k === 'tab' ? 'tab' : 'pane')
     }
     if (k === 'tab') {
-      // In Herdr each conversation is a pane or tab of its own: Tab moves to the next one, in Herdr's order.
-      if (inHerdr && !this.pickerOpen) return void focusNextChatHerdr().catch(e => logger.warn({ e: String(e) }, 'herdr: next chat'))
+      // In Herdr each conversation is a pane or tab of its own: Tab moves to the next one, in Herdr's order. With no
+      // other conversation open to go to, there or here, it opens the chat list.
+      if (inHerdr && !this.pickerOpen) {
+        return void focusNextChatHerdr().then(moved => { if (!moved) this.openPicker() }).catch(e => logger.warn({ e: String(e) }, 'herdr: next chat'))
+      }
+      if (!this.pickerOpen && this.tabs.length < 2) return this.openPicker()
       if (!this.tabs.length) return
       return this.activateTab(this.pickerOpen ? this.active : (this.active + 1) % this.tabs.length)
     }
