@@ -462,6 +462,12 @@ export class Wa extends EventEmitter<WaEvents> {
 
     sock.ev.on('connection.update', async update => {
       const { connection, lastDisconnect, qr } = update
+      // Once the notifications kept while offline are through (WhatsApp's own app-state syncs among them), the
+      // address book is asked for again if it's due, and then the contacts known only by lid are resolved.
+      if (update.receivedPendingNotifications) {
+        this.resyncContacts().catch(e => logger.warn({ e }, 'resyncContacts'))
+          .then(() => this.resolveLidContacts()).catch(e => logger.warn({ e }, 'resolveLidContacts'))
+      }
       if (qr) {
         this.qr = qr
         this.setState('qr')
@@ -474,8 +480,6 @@ export class Wa extends EventEmitter<WaEvents> {
         this.markAvailable(false)
         this.setState('open', this.me)
         this.refreshGroups().catch(e => logger.warn({ e }, 'refreshGroups'))
-        this.resyncContacts().catch(e => logger.warn({ e }, 'resyncContacts'))
-          .then(() => this.resolveLidContacts()).catch(e => logger.warn({ e }, 'resolveLidContacts'))
       } else if (connection === 'close') {
         const code = (lastDisconnect?.error as Boom | undefined)?.output?.statusCode
         const loggedOut = code === DisconnectReason.loggedOut
@@ -626,16 +630,20 @@ export class Wa extends EventEmitter<WaEvents> {
   }
 
   /**
-   * The address book from scratch, once per database: names that came before the masked numbers stopped replacing them
-   * (see upsertContact) were lost, and only a snapshot of the collection sends every contact again. Forgetting the
-   * collection's version is what makes WhatsApp send the snapshot instead of the patches since the last sync.
+   * The address book from scratch, once per database: names that came before the masked numbers stopped replacing
+   * them (see upsertContact) were lost, and only a snapshot of the collection sends every contact again. Forgetting
+   * the collection's version is what makes WhatsApp send the snapshot instead of the patches since the last sync.
+   * It runs after the pending notifications and under baileys' own app-state lock, so it doesn't cross another sync
+   * of the same collection.
    */
   private async resyncContacts() {
     const key = 'contactsResynced'
     if (store.getState<boolean>(key)) return
     const sock = this.sock!
-    await sock.authState.keys.set({ 'app-state-sync-version': { critical_unblock_low: null } })
-    await sock.resyncAppState(['critical_unblock_low'], false)
+    await sock.appStatePatchMutex.mutex(async () => {
+      await sock.authState.keys.set({ 'app-state-sync-version': { critical_unblock_low: null } })
+      await sock.resyncAppState(['critical_unblock_low'], false)
+    })
     store.setState(key, true)
     logger.info('contacts resynced')
   }
@@ -675,8 +683,10 @@ export class Wa extends EventEmitter<WaEvents> {
     if (jid.endsWith('@lid') && c.phoneNumber) jid = jidNormalizedUser(c.phoneNumber)
     if (!jid) return
     // The history sync names each chat with the masked number when it has nothing better, even for contacts saved in
-    // the address book: stored as the name, it would replace the real one that came before.
-    const name = c.name && !looksLikeNumber(c.name) ? c.name : null
+    // the address book: stored as the name, it would replace the real one that came before. With no name stored yet
+    // it's kept, better than none ("lid:…" for someone known only by lid).
+    const masked = !!c.name && looksLikeNumber(c.name)
+    const name = masked && store.getContact(jid)?.name ? null : c.name ?? null
     store.upsertContact(jid, name, c.notify ?? null)
   }
 
