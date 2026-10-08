@@ -1573,6 +1573,8 @@ export class Ui {
       this.segments.push({ x0: x, x1: x + w, index: t.i, closeX0, closeX1: close ? closeX0 + 1 : closeX0 })
       const badge = t.badge ? ` {${FG.badge}-fg}{bold}${t.badge}{/bold}{/${FG.badge}-fg}` : ''
       const closeMark = close ? ` ${dim('×')}` : ''
+    // The prompt takes the name of the chat now in front.
+    this.drawInput()
       out += t.i === this.active && !this.pickerOpen
         ? `{${strong}-fg}{bold}${label}{/bold}{/${strong}-fg}${badge}${closeMark} `
         : `{${FG.tab}-fg}${label}{/${FG.tab}-fg}${badge}${closeMark} `
