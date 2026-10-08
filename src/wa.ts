@@ -474,7 +474,8 @@ export class Wa extends EventEmitter<WaEvents> {
         this.markAvailable(false)
         this.setState('open', this.me)
         this.refreshGroups().catch(e => logger.warn({ e }, 'refreshGroups'))
-        this.resolveLidContacts().catch(e => logger.warn({ e }, 'resolveLidContacts'))
+        this.resyncContacts().catch(e => logger.warn({ e }, 'resyncContacts'))
+          .then(() => this.resolveLidContacts()).catch(e => logger.warn({ e }, 'resolveLidContacts'))
       } else if (connection === 'close') {
         const code = (lastDisconnect?.error as Boom | undefined)?.output?.statusCode
         const loggedOut = code === DisconnectReason.loggedOut
@@ -625,6 +626,21 @@ export class Wa extends EventEmitter<WaEvents> {
   }
 
   /**
+   * The address book from scratch, once per database: names that came before the masked numbers stopped replacing them
+   * (see upsertContact) were lost, and only a snapshot of the collection sends every contact again. Forgetting the
+   * collection's version is what makes WhatsApp send the snapshot instead of the patches since the last sync.
+   */
+  private async resyncContacts() {
+    const key = 'contactsResynced'
+    if (store.getState<boolean>(key)) return
+    const sock = this.sock!
+    await sock.authState.keys.set({ 'app-state-sync-version': { critical_unblock_low: null } })
+    await sock.resyncAppState(['critical_unblock_low'], false)
+    store.setState(key, true)
+    logger.info('contacts resynced')
+  }
+
+  /**
    * Contacts with a name that WhatsApp delivered only by lid: we ask baileys' mapping repository for each one's
    * number and also store the name under the number, which is how chats are keyed.
    */
@@ -658,7 +674,10 @@ export class Wa extends EventEmitter<WaEvents> {
     if (c.lid && c.phoneNumber) store.setLid(jidNormalizedUser(c.lid), jidNormalizedUser(c.phoneNumber))
     if (jid.endsWith('@lid') && c.phoneNumber) jid = jidNormalizedUser(c.phoneNumber)
     if (!jid) return
-    store.upsertContact(jid, c.name ?? null, c.notify ?? null)
+    // The history sync names each chat with the masked number when it has nothing better, even for contacts saved in
+    // the address book: stored as the name, it would replace the real one that came before.
+    const name = c.name && !looksLikeNumber(c.name) ? c.name : null
+    store.upsertContact(jid, name, c.notify ?? null)
   }
 
   private upsertChat(c: { id?: string | null; name?: string | null; unreadCount?: number | null; conversationTimestamp?: number | Long | null; archived?: boolean | null; pnJid?: string | null; lidJid?: string | null }) {
