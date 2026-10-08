@@ -2491,7 +2491,7 @@ export class Ui {
       // A link's preview image, inside the bubble above the text, as WhatsApp Web shows it.
       if (type === 'text' && hasPreviewImage(row) && !fs.existsSync(`${previewPath(row.chat_jid, row.id)}.none`)) {
         const from = lines.length
-        this.pushImage(row, push, images, lines, width, mine, undefined, { src: previewPath(row.chat_jid, row.id), maxCols: 30, maxRows: 8, indent }, textWidth)
+        this.pushImage(row, push, images, lines, width, mine, undefined, { src: previewPath(row.chat_jid, row.id), maxCols: 40, maxRows: 12, indent }, textWidth)
         // Beside it, the lines stay out of the bubble's measure, so the time keeps its place after the text.
         const aside = row.id === selectedId ? this.imageAside(row) : undefined
         if (aside && this.placeAside(lines, images.at(-1), row, aside, width, mine, false)) for (let i = from; i < lines.length; i++) pictures.add(i)
@@ -2653,7 +2653,7 @@ export class Ui {
     // In block mode the image takes up to 40 columns: each cell is a color pair the terminal (and a multiplexer
     // in between) has to paint, and a chat full of photos scrolls at the cost of those cells. In Kitty, with
     // real pixels, its natural size up to 60 columns is enough. The height never exceeds the panel.
-    const maxRows = preview ? preview.maxRows : row.type === 'sticker' ? 8 : Math.max(4, this.innerHeight() - 2)
+    const maxRows = preview ? preview.maxRows : row.type === 'sticker' ? 12 : Math.max(4, this.innerHeight() - 2)
     const limit = Math.min(mine && stamp ? Math.max(1, width - 2 - visibleWidth(stamp)) : width, preview?.maxCols ?? width)
     // Mine end where the text ends (`textEdge`), short of the message's time, beside the image or not.
     const edge = textEdge ?? (mine && stamp ? Math.max(1, width - 2 - visibleWidth(stamp)) : width)
