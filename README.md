@@ -63,8 +63,8 @@ and on startup the terminal is asked for its real background colour to pick ligh
   scrolling past the top brings older messages, first the stored ones and then from the phone, and Ctrl+↓ or Ctrl+PgDn
   goes back to the latest. An attachment not downloaded yet shows `⤓`: a click fetches it into the app's media folder,
   where it stays, and the mark goes; once there, a click opens it with `xdg-open` (`open` on macOS), except images and
-  stickers, which open in a popup in the client, as large as it fits, with the local model's description under them;
-  any key or click closes it. ↑ selects a
+  stickers, which open in a popup in the client, as large as it fits, with the local model's description under them,
+  as do link previews; any key or click closes it. ↑ selects a
   message: typing replies to it, `:` reacts, Delete opens one of yours for editing. Mentions show the person's first
   name in their colour (`@Ana`); a click on one, or in a group on a member's name, opens the chat with them; a click
   on a pin (`📌 pinned a message`) goes to the message it's about. The `☺` next to a message under the pointer opens
@@ -113,8 +113,8 @@ graphics protocol (Ghostty, Kitty, WezTerm, Konsole, iTerm2 3.7) images, sticker
 inside the panel; elsewhere, and inside Herdr (which doesn't pass the placements through), they are drawn with
 coloured half-blocks, each the average colour of the area it covers: in 24-bit colour when the terminal confirms it
 (XTGETTCAP or DECRQSS; Herdr does), in the 256-colour palette otherwise. `WA_IMAGES=kitty|blocks|none` forces the
-mode, and `WA_COLORS=truecolor|256` the colours. In half-blocks, the selected image or sticker gets a sentence or two
-from the local model (see below) on what it shows, beside it, or under it when there's no room.
+mode, and `WA_COLORS=truecolor|256` the colours. In half-blocks, the selected image, sticker or link preview gets a
+sentence or two from the local model (see below) on what it shows, beside it, or under it when there's no room.
 
 ## Writing suggestions
 

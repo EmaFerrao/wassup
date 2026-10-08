@@ -633,8 +633,10 @@ export class Ui {
       // image itself; a pin or unpin goes to the message it's about. A click anywhere else on a message does nothing.
       const onIcon = hit?.icon != null && data.y === hit.y && Math.abs(data.x - hit.icon) <= 1
       const hasImage = this.images.some(i => i.row.id === row.id)
+      const picture = this.imageAt(data.x, data.y)
       if (onIcon) this.quickFor = row
       else if (row.type === 'pinInChat') return this.jumpTo(pinTarget(row))
+      else if (picture?.src && picture.row.id === row.id) return this.openViewer(row)
       else if (row.media_mime && (!hasImage || this.imageAt(data.x, data.y)?.row.id === row.id)) {
         if (hasImage && this.mode !== 'none' && (row.type === 'image' || row.type === 'sticker')) return this.openViewer(row)
         this.openMedia(row)
@@ -2478,7 +2480,12 @@ export class Ui {
 
       // A link's preview image, inside the bubble above the text, as WhatsApp Web shows it.
       if (type === 'text' && hasPreviewImage(row) && !fs.existsSync(`${previewPath(row.chat_jid, row.id)}.none`)) {
+        const from = lines.length
         this.pushImage(row, push, images, lines, width, mine, undefined, { src: previewPath(row.chat_jid, row.id), maxCols: 30, maxRows: 8, indent }, textWidth)
+        // Beside it, the lines stay out of the bubble's measure, so the time keeps its place after the text.
+        const aside = row.id === selectedId ? this.imageAside(row) : undefined
+        if (aside && this.placeAside(lines, images.at(-1), row, aside, width, mine, false)) for (let i = from; i < lines.length; i++) pictures.add(i)
+        else if (aside) out(aside, row)
       }
       // Bare, the time goes at the end of the message's last line when it fits there with two cells of gap; beside an
       // image's last row it went in above. Otherwise it gets its own line.
@@ -2701,23 +2708,37 @@ export class Ui {
     return { start: bStart, end: bEnd }
   }
 
-  /** The selected image or sticker's description, beside it, when images are drawn in half-blocks (which lose its detail). */
+  /** The selected message's picture description, beside it, when images are drawn in half-blocks (which lose its detail). */
   private imageAside(row: MessageRow): string | undefined {
-    return this.mode === 'blocks' && (row.type === 'image' || row.type === 'sticker') ? this.describedAs(row) : undefined
+    const path = this.mode === 'blocks' ? this.pictureOf(row) : null
+    return path ? this.describedAs(row, path) : undefined
   }
 
   /**
-   * What an image or sticker shows, from the model, ready for the screen: "a descrever…" while it answers, nothing
-   * when it can't. Asked for once the full file is decoded (not the thumbnail, while the file is still coming), kept
-   * for the session, and given up if neither the selection nor the popup is on it any more (dropDescribing). A model
-   * that doesn't answer is left alone for a minute, as for the writing suggestions.
+   * The message's picture to describe or show in the popup: an image or sticker's full file once it's here (the
+   * thumbnail, when the file expired), or a link preview's image.
    */
-  private describedAs(row: MessageRow): string | undefined {
+  private pictureOf(row: MessageRow): string | null {
+    if (row.type === 'image' || row.type === 'sticker') {
+      const path = this.imagePathFor(row)
+      return path && (path === mediaFile(row) || row.media_err) ? path : null
+    }
+    const preview = previewPath(row.chat_jid, row.id)
+    return row.type === 'text' && hasPreviewImage(row) && fs.existsSync(preview) ? preview : null
+  }
+
+  /**
+   * What the message's picture (`path`, see pictureOf) shows, from the model, ready for the screen: "a descrever…"
+   * while it answers, nothing when it can't. Asked for once the picture is decoded, kept for the session, and given
+   * up if neither the selection nor the popup is on it any more (dropDescribing). A model that doesn't answer is left
+   * alone for a minute, as for the writing suggestions.
+   */
+  private describedAs(row: MessageRow, path: string): string | undefined {
     if (!llmEnabled) return undefined
     const key = `${row.chat_jid} ${row.id}`
     if (this.descriptions.has(key)) { const text = this.descriptions.get(key); return text ? dim(italic(esc(text))) : undefined }
-    const path = this.imagePathFor(row), d = path ? cached(path) : undefined
-    if (!d || d instanceof Error || (path !== mediaFile(row) && !row.media_err)) return undefined
+    const d = cached(path)
+    if (!d || d instanceof Error) return undefined
     if (this.describing?.key !== key && Date.now() >= this.llmDownUntil) {
       const abort = new AbortController()
       this.describing = { key, abort }
@@ -2748,10 +2769,14 @@ export class Ui {
     }
   }
 
-  /** Opens the image or sticker in the popup, once its full file is here (fetched first otherwise, like openMedia). */
+  /**
+   * Opens the message's picture in the popup: a link preview's once it's here, an image or sticker's once its full
+   * file is (fetched first otherwise, like openMedia).
+   */
   private openViewer(row: MessageRow) {
-    const path = this.imagePathFor(row)
-    if (!path || path !== mediaFile(row)) {
+    const path = this.pictureOf(row), media = row.type === 'image' || row.type === 'sticker'
+    if (!path || (media && path !== mediaFile(row))) {
+      if (!media) return
       if (row.media_err) return this.flash(t('attachmentExpired'))
       this.wa.ensureMedia(row)
       return this.flash(t('downloading'))
@@ -2772,23 +2797,25 @@ export class Ui {
 
   /**
    * The popup's content: the picture as large as the box allows, centred, with its description under it (up to 80
-   * columns wide, for reading), the two together centred in height. In half-blocks the picture is in the lines;
-   * with Kitty, placeImages puts it there.
+   * columns wide, for reading), the two together centred in height. The description's room (four lines and a blank
+   * one above) is kept from the start, so the picture doesn't shrink when it arrives; only a longer one takes more.
+   * In half-blocks the picture is in the lines; with Kitty, placeImages puts it there.
    */
   private drawViewer() {
     const row = this.viewing!, box = this.viewerBox
     const iw = Math.max(1, num(this.screen.width) - 4 - 2), ih = Math.max(1, num(this.screen.height) - 2 - 2)
-    const path = this.imagePathFor(row)!, d = cached(path)
+    const path = this.pictureOf(row)!, d = cached(path)
     this.viewerImg = undefined
     if (!d) {
       decode(path).then(() => { if (this.viewing === row) this.scheduleRender() })
       return box.setContent(dim(t('loading')))
     }
     if (d instanceof Error) return box.setContent(dim(t('mediaUnreadable', row.type, esc(d.message))))
-    const about = this.describedAs(row)
+    const about = this.describedAs(row, path)
     const text = about ? wrapTagged(about, Math.min(iw, 80)) : []
-    const { cols, rows } = cellSize(d.w, d.h, iw, Math.max(1, ih - (text.length ? text.length + 1 : 0)), true)
-    const top = Math.max(0, Math.floor((ih - rows - (text.length ? text.length + 1 : 0)) / 2))
+    const below = Math.max(llmEnabled ? 5 : 0, text.length ? text.length + 1 : 0)
+    const { cols, rows } = cellSize(d.w, d.h, iw, Math.max(1, ih - below), true)
+    const top = Math.max(0, Math.floor((ih - rows - below) / 2))
     const left = Math.floor((iw - cols) / 2)
     const block = Math.max(0, ...text.map(visibleWidth)), indent = ' '.repeat(Math.max(0, Math.floor((iw - block) / 2)))
     const picture = this.kitty ? Array.from({ length: rows }, () => '') : halfBlocks(d, cols, rows).map(l => ' '.repeat(left) + l)
@@ -2797,12 +2824,13 @@ export class Ui {
   }
 
   /**
-   * Puts `text` beside the message's image, just drawn in half-blocks, from its top row: to its right for theirs,
-   * short of the time on its last row; to its left for mine, the block of lines ending two cells before it. Returns
-   * false, touching nothing, when there's less than 16 columns there or the text needs more rows than the image has.
+   * Puts `text` beside the message's picture (its image or its link preview), just drawn in half-blocks, from its
+   * top row: to its right for theirs, short of the time on its last row; to its left for mine, the block of lines
+   * ending two cells before it. Returns false, touching nothing, when there's less than 16 columns there or the text
+   * needs more rows than the picture has.
    */
   private placeAside(lines: string[], img: ImageSlot | undefined, row: MessageRow, text: string, width: number, mine: boolean, stamped: boolean): boolean {
-    if (!img?.d || img.row !== row || img.src) return false
+    if (!img?.d || img.row !== row) return false
     const room = mine ? img.pad - 2 : width - img.pad - img.cols - 2
     if (room < 16) return false
     const wrapped = wrapTagged(text, room)
