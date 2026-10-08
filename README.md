@@ -51,10 +51,10 @@ and on startup the terminal is asked for its real background colour to pick ligh
   stays quiet.
 - **Chats**: `wa` starts on the list, and `/`, or a click on the chat's name in the prompt, opens it again, under the
   app's name, most recent at the bottom, under day separators (today, yesterday, this week, older); each row has the
-  name in its colour, 👀 while the person is online, the last message (a spinner and "typing…" while someone types, the
-  state of yours, mentions by name), how long ago and the unread count, all kept up to date as messages and their
-  states arrive. Typing after `wassup ❯` filters it word by word, ignoring accents and case, with the matches
-  underlined; Enter, Tab, → or a click opens.
+  name in its colour, 👀 while the person is online, the last message (a spinner and "typing…" while someone types,
+  mentions by name), how long ago, with the state of yours as in the chat, and the unread count, all kept up to date
+  as messages and their states arrive. Typing after `wassup ❯` filters it word by word, ignoring accents and case,
+  with the matches underlined; Enter, Tab, → or a click opens.
 - **Messages**: yours on the right, each in a bubble with WhatsApp Web's colours where the terminal takes 24-bit
   colour (yours, on a dark theme, toned down to the brightness of theirs) and two discreet greys otherwise, with the
   time outside it, yours with their state in its separator (`14 06` not sent yet, `14.06` sent, `14:06` delivered;

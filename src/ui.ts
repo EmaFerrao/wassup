@@ -70,11 +70,6 @@ const WORDMARK = [
 ]
 const spinnerFrame = () => SPINNER[Math.floor(Date.now() / 80) % SPINNER.length]!
 /**
- * The state of a message of mine, one cell in the time's own faint colour, told apart by shape alone: "∘" waiting to
- * leave, "›" sent, "✓" delivered or read. Which was read the "❮" after the time of the last one says (renderMessages).
- */
-const tick = (status: number) => faint(status >= 3 ? '✓' : status >= 2 ? '›' : '∘')
-/**
  * The time of a message of mine, carrying its state in the separator: "14 06" waiting to leave, "14.06" sent (one
  * dot), "14:06" delivered or read (two). Which was read the "❮" after the time of the last one says (renderMessages).
  */
@@ -1793,9 +1788,10 @@ export class Ui {
 
   /**
    * A chat's row in the list: its name in the colour it has as a sender in groups (bold with unread messages, the
-   * filter's words underlined), 👀 while the person is online and "·" when it has a tab; then a mark (the braille
-   * spinner while someone types there, my last message's state) and an excerpt of the last message; at the right
-   * edge, how long ago, and before it the unread count, both in WhatsApp's green.
+   * filter's words underlined), 👀 while the person is online and "·" when it has a tab; then the braille spinner
+   * while someone types there and an excerpt of the last message; at the right edge, how long ago (with my last
+   * message's state as in the panel, see myTime: in the time's separator when it's today's, and "❮" once read), and
+   * before it the unread count, both in WhatsApp's green.
    */
   private pickerItem(c: ChatRow, width: number): string {
     const nameW = Math.min(28, Math.max(12, Math.floor(width * 0.35)))
@@ -1807,10 +1803,11 @@ export class Ui {
     const color = colorFor(c.jid)
     const named = `{${color}-fg}${this.underlineMatches(name)}{/${color}-fg}`
     const left = `${c.unread > 0 ? `{bold}${named}{/bold}` : named}${eyes}${dim(open)}`
-    const mark = typing ? `{${this.green}-fg}${spinnerFrame()}{/${this.green}-fg}` : last?.from_me ? tick(last.status ?? 0) : ' '
+    const mark = typing ? `{${this.green}-fg}${spinnerFrame()}{/${this.green}-fg}` : ' '
     const prefix = `${left}${' '.repeat(Math.max(1, nameW - visibleWidth(left)))}${mark} `
     const ts = last?.ts ?? c.last_ts
-    const when = ts ? esc(fmtWhen(ts)) : ''
+    const mine = last?.from_me ? last.status ?? 0 : null
+    const when = !ts ? '' : esc(mine != null && daysAgo(ts) <= 0 ? myTime(ts, mine) : fmtWhen(ts)) + (mine != null && mine >= 4 ? ' ❮' : '')
     const right = c.unread > 0 ? `{${this.green}-fg}{bold}${c.unread}{/bold}  ${when}{/${this.green}-fg}` : faint(when)
     const body = typing ? '' : last ? this.excerpt(last, !!c.is_group) : ''
     const text = (s: string) => (typing ? `{${this.green}-fg}${esc(t('typingShort'))}{/${this.green}-fg}` : dim(esc(s)))
