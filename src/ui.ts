@@ -1889,11 +1889,11 @@ export class Ui {
 
   // ---------- emoji suggestions ----------
 
-  /** A `:prefix` with two or more letters right before the cursor opens the list of emojis whose name starts that way. */
+  /** A `:prefix` right before the cursor opens the list of emojis whose name starts that way, from its first letter. */
   private updateSuggestions(ghostDelay = 150) {
     const chars = graphemes(this.inputValue)
     const at = Math.min(this.cursor, chars.length)
-    const m = /(^|[^\w:]):([a-z0-9_+-]{2,})$/i.exec(chars.slice(0, at).join(''))
+    const m = /(^|[^\w:]):([a-z0-9_+-]+)$/i.exec(chars.slice(0, at).join(''))
     const options = m ? completeEmoji(m[2]!).slice(0, 5) : []
     const same = options.length === this.suggestions.length && options.every((o, i) => o.emoji === this.suggestions[i]!.emoji)
     this.suggestions = options
