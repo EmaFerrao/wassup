@@ -65,7 +65,7 @@ type GhostView = { kind: 'suffix' | 'word'; text: string; word: { from: string; 
 const APP = 'wassup'
 const WORDMARK = [
   '╷ ╷ ╷ ╭─╮ ╭─╴ ╭─╴ ╷ ╷ ╭─╮',
-  '╰─┴─╯ ╰─┤ ╶─╯ ╶─╯ ╰─╯ ├─╯',
+  '╰─┴─╯ ╰─┴ ╶─╯ ╶─╯ ╰─╯ ├─╯',
   '                      ╵',
 ]
 const spinnerFrame = () => SPINNER[Math.floor(Date.now() / 80) % SPINNER.length]!
