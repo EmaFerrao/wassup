@@ -882,6 +882,13 @@ export class Ui {
       if (this.current) return this.closeTab(this.active)
       return this.quit()
     }
+    // With the chat list open, PgUp and PgDn move its selection a page, the rows in view less one, past the day
+    // separators like the arrows.
+    if ((k === 'pageup' || k === 'pagedown') && this.pickerOpen) {
+      const page = Math.max(1, num(this.picker.height) - num(this.picker.iheight) - 1)
+      ;(this.picker as unknown as { move: (n: number) => void }).move(k === 'pageup' ? -page : page)
+      return this.screen.render()
+    }
     if (k === 'pageup') { this.msgBox.scroll(-(this.innerHeight() - 1)); if (this.msgBox.childBase === 0) this.loadOlder(); return this.screen.render() }
     if (k === 'pagedown') { this.msgBox.scroll(this.innerHeight() - 1); return this.screen.render() }
     // Ctrl+↓ or Ctrl+PgDn: straight to the latest message, leaving any selection.
