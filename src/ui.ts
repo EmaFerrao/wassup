@@ -205,8 +205,11 @@ export class Ui {
   private pickerAt = -1
   /** The chat to select when the list opens (openPicker): the one in front, or null for the most recent. */
   private pickerFocus: string | null | undefined
-  /** When the list was last closed. */
+  /** When the list was last closed, and the chat selected then with its row on the screen (from the list's top). */
   private pickerClosedAt = 0
+  private pickerLeft: { jid: string; row: number } | undefined
+  /** The row on the screen the chat to select goes back to (openPicker), when it's the one the list was left on. */
+  private pickerFocusRow: number | undefined
   /** Over the list, always: the app's name, big (or on one line without UTF-8), and the counts. */
   private pickerHead!: blessed.Widgets.BoxElement
   /** WhatsApp's green, in the palette: the app's name and the unread counts in the list. */
@@ -1586,8 +1589,11 @@ export class Ui {
     this.pickerHead.show()
     this.msgBox.hide()
     // Back within 30 s of leaving it, the list opens on the chat in front of you, selected and in view however far up
-    // it is; later, on the most recent ones, at the bottom.
-    this.pickerFocus = Date.now() - this.pickerClosedAt < 30000 ? this.current : null
+    // it is, on the same row of the screen when it's the one it was left on; later, on the most recent ones, at the
+    // bottom.
+    const back = Date.now() - this.pickerClosedAt < 30000
+    this.pickerFocus = back ? this.current : null
+    this.pickerFocusRow = back && this.current && this.pickerLeft?.jid === this.current ? this.pickerLeft.row : undefined
     this.refreshPicker()
     this.setFocus('picker')
     this.renderNow()
@@ -1596,6 +1602,9 @@ export class Ui {
   private closePicker(render = true) {
     this.pickerOpen = false
     this.pickerClosedAt = Date.now()
+    const list = this.picker as unknown as { selected: number; childBase: number }
+    const left = this.pickerSlots[list.selected]?.jid
+    this.pickerLeft = left ? { jid: left, row: list.selected - list.childBase } : undefined
     this.dirtyTabs = true
     this.filter = ''
     this.picker.hide()
@@ -1704,6 +1713,15 @@ export class Ui {
     const keep = want ? slots.findIndex(c => c?.jid === want) : -1
     this.pickerAt = keep >= 0 ? keep : Math.max(0, slots.length - 1)
     this.picker.select(this.pickerAt)
+    // The chat goes back to the row of the screen it was on, as far as the list's ends allow.
+    if (this.pickerFocusRow !== undefined && keep >= 0) {
+      const list = this.picker as unknown as { childBase: number; childOffset: number }
+      const visible = num(this.picker.height) - num(this.picker.iheight)
+      const base = Math.max(0, Math.min(keep - this.pickerFocusRow, slots.length - visible))
+      list.childBase = base
+      list.childOffset = keep - base
+    }
+    this.pickerFocusRow = undefined
     this.drawInput()
   }
 
