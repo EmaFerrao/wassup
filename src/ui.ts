@@ -2262,9 +2262,10 @@ export class Ui {
       if (!showCursor || r !== row) return paint(line, from)
       const before = paint(line.slice(0, col), from)
       if (ghostNext) {
-        // The cursor sits on the suggestion's first letter, with no empty cell in between; the rest follows in italic.
+        // The cursor sits on the suggestion's first letter, with no empty cell in between; the rest follows in italic,
+        // opened again after the cursor, as closing the inverse (ESC[27m) clears every flag in blessed.
         const g = graphemes(ghostNext)
-        return before + dim(italic('{inverse}' + esc(g[0]!) + '{/inverse}' + esc(g.slice(1).join(''))))
+        return before + dim('{inverse}' + italic(esc(g[0]!)) + '{/inverse}' + italic(esc(g.slice(1).join(''))))
       }
       const under = line[col] == null || line[col] === '\n' ? ' ' : line[col]!
       return before + '{inverse}' + esc(under) + '{/inverse}' + paint(line.slice(col + 1), from + col + 1)

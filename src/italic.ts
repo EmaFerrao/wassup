@@ -45,7 +45,9 @@ export function patchBlessedItalic(screen: blessed.Widgets.Screen) {
         rest.push(...parts.slice(i + 1, i + 1 + n)); i += n
       }
     }
-    const out = attrCode.call(this, `\x1b[${rest.join(';')}m`, cur & ~ITALIC, def)
+    // ESC[3m or ESC[23m on its own leaves nothing else to read: passed on as ESC[m, blessed would take it as a reset
+    // and drop the colour around it.
+    const out = rest.length ? attrCode.call(this, `\x1b[${rest.join(';')}m`, cur & ~ITALIC, def) : cur
     return italic ? out | ITALIC : out & ~ITALIC
   }
 
