@@ -203,6 +203,10 @@ export class Ui {
   private pickerWords: string[] = []
   /** The row selected before, to know which way the selection was going when it lands on a separator. */
   private pickerAt = -1
+  /** The chat to select when the list opens (openPicker): the one in front, or null for the most recent. */
+  private pickerFocus: string | null | undefined
+  /** When the list was last closed. */
+  private pickerClosedAt = 0
   /** Over the list, always: the app's name, big (or on one line without UTF-8), and the counts. */
   private pickerHead!: blessed.Widgets.BoxElement
   /** WhatsApp's green, in the palette: the app's name and the unread counts in the list. */
@@ -1581,6 +1585,9 @@ export class Ui {
     this.picker.show()
     this.pickerHead.show()
     this.msgBox.hide()
+    // Back within 30 s of leaving it, the list opens on the chat in front of you, selected and in view however far up
+    // it is; later, on the most recent ones, at the bottom.
+    this.pickerFocus = Date.now() - this.pickerClosedAt < 30000 ? this.current : null
     this.refreshPicker()
     this.setFocus('picker')
     this.renderNow()
@@ -1588,6 +1595,7 @@ export class Ui {
 
   private closePicker(render = true) {
     this.pickerOpen = false
+    this.pickerClosedAt = Date.now()
     this.dirtyTabs = true
     this.filter = ''
     this.picker.hide()
@@ -1691,7 +1699,9 @@ export class Ui {
     this.picker.top = this.barRows + head + gap
     this.picker.height = Math.max(1, room - gap)
     this.drawPickerHead(big)
-    const keep = sameFilter ? slots.findIndex(c => c?.jid === selectedJid) : -1
+    const want = this.pickerFocus !== undefined ? this.pickerFocus : sameFilter ? selectedJid : null
+    this.pickerFocus = undefined
+    const keep = want ? slots.findIndex(c => c?.jid === want) : -1
     this.pickerAt = keep >= 0 ? keep : Math.max(0, slots.length - 1)
     this.picker.select(this.pickerAt)
     this.drawInput()
