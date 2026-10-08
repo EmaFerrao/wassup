@@ -145,7 +145,7 @@ export class Ui {
   private toast: blessed.Widgets.BoxElement
   /** Emoji suggestions for the :prefix before the cursor: the box above the input, the options, the chosen one, and where the prefix starts. */
   private suggest: blessed.Widgets.BoxElement
-  private suggestions: { emoji: string; name: string }[] = []
+  private suggestions: { emoji: string; code: string }[] = []
   private suggestIndex = 0
   private suggestStart = 0
   /** Local model suggestion for the text `text` (continuation or correction), requested 150 ms after the last keystroke and shown for 4 s. */
@@ -1928,11 +1928,14 @@ export class Ui {
 
   // ---------- emoji suggestions ----------
 
-  /** A `:prefix` right before the cursor opens the list of emojis whose name starts that way, from its first letter. */
+  /**
+   * A `:` right before the cursor opens the list with the basic smileys (":)", ":D"...); what's typed after it
+   * narrows it to the smileys and the emojis whose name starts that way.
+   */
   private updateSuggestions(ghostDelay = 150) {
     const chars = graphemes(this.inputValue)
     const at = Math.min(this.cursor, chars.length)
-    const m = /(^|[^\w:]):([a-z0-9_+-]+)$/i.exec(chars.slice(0, at).join(''))
+    const m = /(^|[^\w:]):([^\s:]*)$/.exec(chars.slice(0, at).join(''))
     const options = m ? completeEmoji(m[2]!).slice(0, 5) : []
     const same = options.length === this.suggestions.length && options.every((o, i) => o.emoji === this.suggestions[i]!.emoji)
     this.suggestions = options
@@ -2080,8 +2083,8 @@ export class Ui {
   private drawSuggestions() {
     if (!this.suggestions.length) { this.suggest.hide(); return }
     const lines = this.suggestions.map((o, i) => i === this.suggestIndex
-      ? `{bold}› ${esc(o.emoji)}  :${esc(o.name)}:{/bold}`
-      : `  ${esc(o.emoji)}  :${esc(o.name)}:`)
+      ? `{bold}› ${esc(o.emoji)}  ${esc(o.code)}{/bold}`
+      : `  ${esc(o.emoji)}  ${esc(o.code)}`)
     // One column of margin on the right, which also serves as padding: blessed wraps the line if a closing tag lands on the last column.
     this.suggest.width = Math.max(...lines.map(visibleWidth)) + 2
     this.suggest.height = lines.length

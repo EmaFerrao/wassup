@@ -264,18 +264,27 @@ export function emojify(text: string): string {
 export const emojiCodes = Object.keys(TABLE)
 
 /**
- * Emojis whose name, in Portuguese or in English, starts with `prefix`, without repeating the emoji; each comes with
- * the first matching name, to display, one in the user's language when both match. Shorter names first, so an exact
- * match ("fixe") comes before a longer one; ties keep the table order.
+ * The list for what follows a `:` being typed (`prefix`), each emoji once with the code to display: first the classic
+ * smileys that start that way (":D" for "D"; on its own, the basic ones: ":)", ":D", ":("...), in the table's order;
+ * then the emojis whose name, in Portuguese or in English, starts with `prefix`, with the first matching name, one in
+ * the user's language when both match. Shorter names first, so an exact match ("fixe") comes before a longer one;
+ * ties keep the table order.
  */
-export function completeEmoji(prefix: string): { emoji: string; name: string }[] {
+export function completeEmoji(prefix: string): { emoji: string; code: string }[] {
+  const out: { emoji: string; code: string }[] = []
+  for (const [faces, emoji] of EMOTICONS) {
+    const face = faces.find(f => f.startsWith(`:${prefix}`))
+    if (face && !out.some(o => o.emoji === emoji)) out.push({ emoji, code: face })
+  }
+  if (!/^[a-z0-9_+-]+$/i.test(prefix)) return out
   const p = prefix.toLowerCase()
-  const out: { emoji: string; name: string }[] = []
+  const named: { emoji: string; name: string }[] = []
   for (const [emoji, pt, en] of EMOJI) {
     const [own, other] = lang === 'pt' ? [pt, en] : [en, pt]
     const name = own.find(n => n.startsWith(p)) ?? other.find(n => n.startsWith(p))
-    if (name && !out.some(o => o.emoji === emoji)) out.push({ emoji, name })
+    if (name && !out.some(o => o.emoji === emoji) && !named.some(o => o.emoji === emoji)) named.push({ emoji, name })
   }
-  return out.map((o, i) => ({ o, i })).sort((a, b) => a.o.name.length - b.o.name.length || a.i - b.i).map(x => x.o)
+  named.sort((a, b) => a.name.length - b.name.length)
+  return [...out, ...named.map(o => ({ emoji: o.emoji, code: `:${o.name}:` }))]
 }
 
