@@ -4,6 +4,12 @@
  * message per line. The bytes are read before blessed and the whole block comes out as a single "paste" key, with
  * the text in `ch`. The block can arrive split across several packets, even mid-sequence.
  */
+
+/**
+ * How long what could be the start of `ESC[200~` waits for the rest before going out as typed: a lone Esc is just
+ * that, and a terminal sends the whole sequence at once, so the rest of one comes within this if at all.
+ */
+const LONE_MS = 50
 const ENABLE = '\x1b[?2004h'
 const DISABLE = '\x1b[?2004l'
 const START = '\x1b[200~'
@@ -21,8 +27,10 @@ export function enableBracketedPaste(input: Input, write: (s: string) => void): 
   const emit = input.emit.bind(input)
   let pending: string | null = null
   let carry = ''
+  let lone: NodeJS.Timeout | undefined
   input.emit = (event: string, ...args: unknown[]) => {
     if (event !== 'data' || !Buffer.isBuffer(args[0])) return emit(event, ...args)
+    if (lone) { clearTimeout(lone); lone = undefined }
     let s = carry + args[0].toString('latin1')
     carry = ''
     let handled = true
@@ -53,8 +61,18 @@ export function enableBracketedPaste(input: Input, write: (s: string) => void): 
         emit('keypress', text, { name: 'paste', sequence: text, ctrl: false, meta: false, shift: false })
       }
     }
+    // Kept as the possible start of a paste, with nothing more after LONE_MS it goes out as typed: otherwise a lone
+    // Esc would wait for the next key, and only the second Esc would seem to do anything.
+    if (carry && pending == null) {
+      lone = setTimeout(() => {
+        lone = undefined
+        const c = carry
+        carry = ''
+        if (c) emit('data', Buffer.from(c, 'latin1'))
+      }, LONE_MS)
+    }
     return handled
   }
   write(ENABLE)
-  return () => { write(DISABLE); input.emit = emit }
+  return () => { if (lone) clearTimeout(lone); write(DISABLE); input.emit = emit }
 }
