@@ -202,7 +202,7 @@ export class Ui {
   private pickerWords: string[] = []
   /** The row selected before, to know which way the selection was going when it lands on a separator. */
   private pickerAt = -1
-  /** Over the list: the app's name, big in the free space above a short list, or on one line, and the counts. */
+  /** Over the list, always: the app's name, big (or on one line without UTF-8), and the counts. */
   private pickerHead!: blessed.Widgets.BoxElement
   /** WhatsApp's green, in the palette: the app's name and the unread counts in the list. */
   private green = 0
@@ -1664,14 +1664,15 @@ export class Ui {
     this.picker.setItems(items as unknown as string[])
     // List flush to the bottom when it's shorter than the panel, with a blank line separating it from the prompt.
     // Never shorter than one line: blessed skips an element of zero height altogether, leaving what was drawn there
-    // and the list's scroll state stale until the next refresh. The app's name goes big in the free space above it
-    // when there's room for it and a blank line; otherwise on one line, which the list starts under.
+    // and the list's scroll state stale until the next refresh. The app's name heads it always, however small the
+    // terminal: big (WORDMARK) with a UTF-8 locale, on one line otherwise; the list takes what's left under it.
     const panel = num(this.screen.height) - this.bottom - this.barRows - 1
     const rows = Math.max(1, items.length)
-    const big = this.ruleChar === '─' && panel - rows >= WORDMARK.length + 1
-    const room = big ? panel : panel - 1
+    const big = this.ruleChar === '─'
+    const head = big ? WORDMARK.length : 1
+    const room = Math.max(1, panel - head)
     const gap = Math.max(0, room - rows)
-    this.picker.top = this.barRows + (big ? 0 : 1) + gap
+    this.picker.top = this.barRows + head + gap
     this.picker.height = Math.max(1, room - gap)
     this.drawPickerHead(big)
     const keep = sameFilter ? slots.findIndex(c => c?.jid === selectedJid) : -1
@@ -1747,20 +1748,26 @@ export class Ui {
   }
 
   /**
-   * Over the list: the app's name in WhatsApp's green, big (WORDMARK) in the free space above a short list, with the
-   * counts at the right of its second row; on one line otherwise, the counts after it.
+   * Over the list: the app's name in WhatsApp's green, big (WORDMARK), with the counts at the right of its second
+   * row, or of its third (where only the p's tail is) when the terminal is too narrow for them there, cut to fit at
+   * worst; without UTF-8 on one line, the counts after it.
    */
   private drawPickerHead(big: boolean) {
     const unread = this.chats.filter(c => c.unread > 0).length
-    const counts = dim(esc([t('chatsCount', this.chats.length), ...(unread ? [t('unreadCount', unread)] : [])].join(' · ')))
+    const plain = [t('chatsCount', this.chats.length), ...(unread ? [t('unreadCount', unread)] : [])].join(' · ')
+    const counts = dim(esc(plain))
     const green = (s: string) => `{${this.green}-fg}${esc(s)}{/${this.green}-fg}`
     this.pickerHead.top = this.barRows
     if (big) {
       // The counts end where the rows' times end, a column short of the edge (see refreshPicker's width).
       const w = num(this.pickerHead.width) - num(this.pickerHead.iwidth) - 1
-      const fill = w - strWidth(WORDMARK[1]!) - visibleWidth(counts)
+      const after = (row: number) => w - strWidth(WORDMARK[row]!) - strWidth(plain)
+      const row = after(1) >= 2 ? 1 : 2
+      const room = w - strWidth(WORDMARK[row]!) - 2
+      const shown = after(row) >= 2 ? counts : room > 3 ? dim(esc(truncate(plain, room))) : ''
+      const fill = w - strWidth(WORDMARK[row]!) - visibleWidth(shown)
       this.pickerHead.height = WORDMARK.length
-      this.pickerHead.setContent(WORDMARK.map((l, i) => green(l) + (i === 1 && fill >= 2 ? ' '.repeat(fill) + counts : '')).join('\n'))
+      this.pickerHead.setContent(WORDMARK.map((l, i) => green(l) + (i === row && shown ? ' '.repeat(fill) + shown : '')).join('\n'))
     } else {
       this.pickerHead.height = 1
       this.pickerHead.setContent(`{bold}${green(APP)}{/bold}  ${counts}`)
