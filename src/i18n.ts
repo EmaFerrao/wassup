@@ -68,6 +68,7 @@ const STRINGS = {
   unknownOp: { pt: 'operação desconhecida: {0}', en: 'unknown operation: {0}' },
   group: { pt: 'grupo {0}', en: 'group {0}' },
   loading: { pt: 'a carregar…', en: 'loading…' },
+  describing: { pt: 'a descrever…', en: 'describing…' },
   linkPreview: { pt: 'pré-visualização', en: 'preview' },
   typingShort: { pt: 'a escrever…', en: 'typing…' },
   thisWeek: { pt: 'esta semana', en: 'this week' },

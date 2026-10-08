@@ -2,7 +2,8 @@
  * Writing suggestions from a local model (llama-server, an OpenAI-compatible API), of only two kinds: the word
  * that's half-typed at the cursor, completed or corrected, and the corrections of the wrong words already written in
  * the sentence (spelling, words stuck together, a word swapped in an expression, grammar, punctuation), all of them.
- * Turned off with WA_LLM=off; with no server responding, suggestions simply don't appear.
+ * Also a short description of an image, for the selected one when images are drawn in half-blocks. Turned off with
+ * WA_LLM=off; with no server responding, suggestions and descriptions simply don't appear.
  */
 import { logger } from './log.js'
 import { fold } from './format.js'
@@ -187,4 +188,30 @@ export async function suggest(context: { who: string; text: string }[], text: st
   }
   fixes.sort((a, b) => a.start - b.start)
   return word || fixes.length ? { word, fixes } : null
+}
+
+const DESCRIBE = lang === 'pt'
+  ? 'Esta imagem chegou numa conversa de WhatsApp e quem a recebeu só a vê em baixa resolução, num terminal. Descreve-a em uma ou duas frases curtas, em português de Portugal: o que mostra (pessoas, objectos, lugar, o que se passa) e, se tiver texto legível, o que diz (sem texto, não o menciones). Responde só com a descrição.'
+  : "This image arrived in a WhatsApp chat and whoever got it only sees it in low resolution, in a terminal. Describe it in one or two short sentences: what it shows (people, objects, place, what is going on) and, if it has legible text, what it says (with no text, don't mention it). Answer only with the description."
+
+/** What an image shows, in a sentence or two in the user's language, from the PNG already decoded for drawing it. */
+export async function describe(png: Buffer, signal: AbortSignal): Promise<string | null> {
+  const body = {
+    model: MODEL,
+    temperature: 0,
+    max_tokens: 200,
+    reasoning_effort: 'none',
+    chat_template_kwargs: { enable_thinking: false },
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'text', text: DESCRIBE },
+        { type: 'image_url', image_url: { url: `data:image/png;base64,${png.toString('base64')}` } },
+      ],
+    }],
+  }
+  const res = await fetch(`${URL}/v1/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal })
+  if (!res.ok) { logger.warn({ status: res.status }, 'llm: describe'); return null }
+  const data = (await res.json()) as { choices?: { message?: { content?: string } }[] }
+  return data.choices?.[0]?.message?.content?.replace(/\s+/g, ' ').trim() || null
 }

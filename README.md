@@ -111,7 +111,8 @@ graphics protocol (Ghostty, Kitty, WezTerm, Konsole, iTerm2 3.7) images, sticker
 inside the panel; elsewhere, and inside Herdr (which doesn't pass the placements through), they are drawn with
 coloured half-blocks, each the average colour of the area it covers: in 24-bit colour when the terminal confirms it
 (XTGETTCAP or DECRQSS; Herdr does), in the 256-colour palette otherwise. `WA_IMAGES=kitty|blocks|none` forces the
-mode, and `WA_COLORS=truecolor|256` the colours.
+mode, and `WA_COLORS=truecolor|256` the colours. In half-blocks, the selected image or sticker gets a sentence or two
+from the local model (see below) on what it shows, beside it, or under it when there's no room.
 
 ## Writing suggestions
 
@@ -156,6 +157,6 @@ History starts with what WhatsApp sends to new devices. `WA_FULL_HISTORY=1` asks
 | `src/herdr.ts` | Agent state, titles and tabs in Herdr |
 | `src/hearts.ts` | Animated emoji rising from a single-emoji message or reaction |
 | `src/i18n.ts` | Interface strings in Portuguese and English |
-| `src/llm.ts` | Writing suggestions from the local `llama-server` |
+| `src/llm.ts` | Writing suggestions and image descriptions from the local `llama-server` |
 | `src/spell.ts` | Local spell checker (Hunspell, pt-PT and English) when there's no model |
 | `src/emoji.ts`, `src/italic.ts`, `src/rainbow.ts` | `:name:` table, italics in blessed, colours |

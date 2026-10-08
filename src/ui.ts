@@ -18,7 +18,7 @@ import { enableBracketedPaste } from './paste.js'
 import { Hearts, reaction, emojiOnly } from './hearts.js'
 import { t } from './i18n.js'
 import { parseHex, mix, nearest256, type Rgb } from './rainbow.js'
-import { suggest, llmEnabled, type Suggestion, type Fix } from './llm.js'
+import { suggest, describe, llmEnabled, type Suggestion, type Fix } from './llm.js'
 import { spellFixes } from './spell.js'
 import { patchBlessedItalic } from './italic.js'
 
@@ -290,6 +290,9 @@ export class Ui {
   /** How wide the chat's name is at the start of the prompt (0 with none), where a click opens the chat list. */
   private promptNameWidth = 0
   private images: ImageSlot[] = []
+  /** What the model says each image shows (by chat and message), null when it gave nothing; the one on its way. */
+  private descriptions = new Map<string, string | null>()
+  private describing: { key: string; abort: AbortController } | undefined
   private mode: ImageMode
   private kitty: KittyImages | undefined
   /** Half-block images and message bubbles repainted in 24-bit colour, when the terminal takes it. */
@@ -2365,6 +2368,11 @@ export class Ui {
     const lastRead = this.ruleChar === '─' ? [...rows].reverse().find(r => r.from_me === 1 && (r.status ?? 0) >= 4)?.id : undefined
     this.rows = rows
     this.selected = rows.find(r => r.id === selectedId) ?? null
+    // A description on its way for an image no longer selected is given up.
+    if (this.describing && this.describing.key !== (this.selected ? `${this.selected.chat_jid} ${this.selected.id}` : '')) {
+      this.describing.abort.abort()
+      this.describing = undefined
+    }
     const headers = new Set<number>(), texts = new Map<number, { start: number; end: number }>(), names = new Map<number, { jid: string; start: number; width: number }>()
     const mentions = new Map<number, { start: number; end: number; jid: string }[]>()
     // The text under the highlight is about to change.
@@ -2445,6 +2453,9 @@ export class Ui {
         if (this.pushImage(row, push, images, lines, width, mine, beside ? stamp : undefined, undefined, textWidth)) { stampAt = map.length - 1; headers.add(stampAt); stamped = true }
         for (let i = from; i < lines.length; i++) pictures.add(i)
         last = null
+        // The selected one's description beside it, or under it when it doesn't fit there.
+        const aside = row.id === selectedId ? this.imageAside(row) : undefined
+        if (aside && !this.placeAside(lines, images.at(-1), row, aside, width, mine, stamped)) out(aside, row)
         if (type === 'video' || type === 'gif') out(`{magenta-fg}▶ ${type === 'gif' ? t('gif') : t('video')}{/magenta-fg}${mediaHint}`, row)
       } else if (type === 'document') {
         out(`{yellow-fg}📎 ${esc(row.media_name ?? t('file'))}{/yellow-fg}${mediaHint}`, row)
@@ -2679,6 +2690,58 @@ export class Ui {
       lines[i] = ' '.repeat(bStart) + on(' '.repeat(start - bStart)) + on(blank ? '' : line.slice(sp.start)) + on(' '.repeat(Math.max(0, bEnd - end)))
     }
     return { start: bStart, end: bEnd }
+  }
+
+  /**
+   * What the selected image or sticker shows, from the model, when images are drawn in half-blocks (which lose its
+   * detail): "a descrever…" while it answers, nothing when it can't. Asked for once the full file is decoded (not the
+   * thumbnail, while the file is still coming), kept for the session, and given up if the selection moves on first.
+   * A model that doesn't answer is left alone for a minute, as for the writing suggestions.
+   */
+  private imageAside(row: MessageRow): string | undefined {
+    if (this.mode !== 'blocks' || !llmEnabled || (row.type !== 'image' && row.type !== 'sticker')) return undefined
+    const key = `${row.chat_jid} ${row.id}`
+    if (this.descriptions.has(key)) { const text = this.descriptions.get(key); return text ? dim(italic(esc(text))) : undefined }
+    const path = this.imagePathFor(row), d = path ? cached(path) : undefined
+    if (!d || d instanceof Error || (path !== mediaFile(row) && !row.media_err)) return undefined
+    if (this.describing?.key !== key && Date.now() >= this.llmDownUntil) {
+      const abort = new AbortController()
+      this.describing = { key, abort }
+      const done = () => {
+        this.describing = undefined
+        if (this.current === row.chat_jid) { this.dirtyMessages = true; this.scheduleRender() }
+      }
+      describe(d.png, abort.signal).then(text => {
+        if (abort.signal.aborted) return
+        this.descriptions.set(key, text)
+        done()
+      }, e => {
+        if (abort.signal.aborted) return
+        logger.debug({ e: String(e) }, 'llm: no description')
+        this.llmDownUntil = Date.now() + 60000
+        done()
+      })
+    }
+    return this.describing?.key === key ? dim(t('describing')) : undefined
+  }
+
+  /**
+   * Puts `text` beside the message's image, just drawn in half-blocks, from its top row: to its right for theirs,
+   * short of the time on its last row; to its left for mine, the block of lines ending two cells before it. Returns
+   * false, touching nothing, when there's less than 16 columns there or the text needs more rows than the image has.
+   */
+  private placeAside(lines: string[], img: ImageSlot | undefined, row: MessageRow, text: string, width: number, mine: boolean, stamped: boolean): boolean {
+    if (!img?.d || img.row !== row || img.src) return false
+    const room = mine ? img.pad - 2 : width - img.pad - img.cols - 2
+    if (room < 16) return false
+    const wrapped = wrapTagged(text, room)
+    if (wrapped.length > img.rows - (stamped && !mine ? 1 : 0)) return false
+    const block = Math.max(...wrapped.map(visibleWidth))
+    wrapped.forEach((l, i) => {
+      const at = img.origLine + i, line = lines[at]!
+      lines[at] = mine ? `${' '.repeat(img.pad - 2 - block)}${l}${' '.repeat(block - visibleWidth(l) + 2)}${line.slice(img.pad)}` : `${line}  ${l}`
+    })
+    return true
   }
 
   /** Drawn lines [start, end) of an image, and the panel's visible window. */
