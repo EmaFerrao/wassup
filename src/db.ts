@@ -152,6 +152,8 @@ const q = {
   listMessages: db.prepare(`SELECT * FROM (SELECT * FROM messages WHERE chat_jid = ? ORDER BY ts DESC LIMIT ?) ORDER BY ts ASC`),
   countMessages: db.prepare(`SELECT COUNT(*) AS n FROM messages WHERE chat_jid = ?`),
   countMessagesSince: db.prepare(`SELECT COUNT(*) AS n FROM messages WHERE chat_jid = ? AND ts >= ?`),
+  myTexts: db.prepare(`SELECT text FROM messages WHERE from_me = 1 AND type = 'text' AND text <> ''`),
+  names: db.prepare(`SELECT name FROM contacts WHERE name IS NOT NULL UNION SELECT notify FROM contacts WHERE notify IS NOT NULL UNION SELECT name FROM chats WHERE name IS NOT NULL`),
   recentSenders: db.prepare(`SELECT sender_jid FROM messages WHERE chat_jid = ? AND from_me = 0 AND sender_jid <> '' GROUP BY sender_jid ORDER BY MAX(ts) DESC LIMIT ?`),
   oldestMessage: db.prepare(`SELECT * FROM messages WHERE chat_jid = ? ORDER BY ts ASC LIMIT 1`),
   listMedia: db.prepare(`SELECT * FROM messages WHERE chat_jid = ? AND media_mime IS NOT NULL ORDER BY ts ASC`),
@@ -255,6 +257,14 @@ export const store = {
   },
   countMessages(chat: string): number {
     return (q.countMessages.get(chat) as { n: number }).n
+  },
+  /** The text of every message I wrote. */
+  myTexts(): string[] {
+    return (q.myTexts.all() as { text: string }[]).map(r => r.text)
+  },
+  /** Every name known: contacts' (as saved and as they call themselves) and chats'. */
+  names(): string[] {
+    return (q.names.all() as { name: string }[]).map(r => r.name)
   },
   /** How many of a chat's messages are from `ts` on: how far back the panel has to draw to reach one of that time. */
   countMessagesSince(chat: string, ts: number): number {
