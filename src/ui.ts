@@ -50,10 +50,10 @@ interface TabSegment { x0: number; x1: number; index: number; closeX0: number; c
 
 const num = (x: unknown): number => x as number
 
-// Internal blessed fields the UI uses: the lines already wrapped to the panel width and the maps between
-// original line and drawn line (ftor: original→drawn, rtof: drawn→original).
+// Internal blessed fields the UI uses: the lines already wrapped to the panel width, the original ones (`fake`, tags
+// already made SGR) and the maps between original line and drawn line (ftor: original→drawn, rtof: drawn→original).
 interface ClinesBox extends blessed.Widgets.BoxElement {
-  _clines: string[] & { ftor: number[][]; rtof: number[] }
+  _clines: string[] & { ftor: number[][]; rtof: number[]; fake: string[] }
   childBase: number
 }
 
@@ -1127,7 +1127,17 @@ export class Ui {
     for (let cx = a; cx <= b; cx++) run += ch(cx)
     // Punctuation stuck to the link ("(https://…)") is in the run but not in the link, and vice versa. The run is
     // the link as shown (clean and short); what's copied is the whole clean link.
-    return linksIn(row.text).find(l => l.shown.includes(run) || run.includes(l.shown))?.url ?? null
+    const links = linksIn(row.text)
+    const hit = links.find(l => l.shown.includes(run) || run.includes(l.shown))
+    const same = hit ? links.filter(l => l.shown === hit.shown) : []
+    if (same.length < 2) return hit?.url ?? null
+    // The same text for more than one link (their identifiers shown as "…", see shortUrl): the one clicked is the
+    // one after as many of them as come before it in the message's text, its earlier lines and this one up to the run.
+    const fake = this.msgBox._clines.fake
+    let before = ''
+    for (let i = orig! - 1; i >= 0 && this.lineMap[i]?.id === row.id; i--) if (this.textLines.has(i)) before = (fake[i] ?? '').replace(/\x1b\[[\d;]*m/g, '').trim() + before
+    for (let cx = xi + cols.start; cx < a; cx++) before += ch(cx)
+    return same[Math.min(same.length - 1, before.split(hit!.shown).length - 1)]!.url
   }
 
   // ---------- reactions ----------

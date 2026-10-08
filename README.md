@@ -103,8 +103,11 @@ typed, with names in Portuguese and in English (`:thumbsup:` 👍, `:kissing_hea
 user's language's when both match; `:` on its own lists the basic smileys. Classic smileys (`:)`, `;)`, `<3` …) are
 sent as typed: after one, on its own after a space, the list offers its emoji, which Tab or → take. Links are shown
 without what only tracks who shared them (`fbclid`, `utm_…`, `igsh`, `si` and the many others in
-[ClearURLs](https://github.com/ClearURLs/Rules)' rules, redirections through a site undone) and shortened
-(`instagram.com/p/DeNKVAJuamr`, a long path cut in the middle); a click copies the whole clean link.
+[ClearURLs](https://github.com/ClearURLs/Rules)' rules, redirections through a site undone) and shortened (a long
+path cut in the middle); from social networks and short links (Facebook, Instagram, YouTube, Spotify, TikTok, X,
+`maps.app.goo.gl` …) only the readable parts stay, the opaque identifiers made `…` and the parameters left out
+(`instagram.com/reel/…`, `instagram.com/stories/half.caught/…`, `youtube.com/watch`). A click copies the whole clean
+link.
 
 ### Images
 

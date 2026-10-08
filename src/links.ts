@@ -105,14 +105,54 @@ export function cleanUrl(url: string, depth = 0): string {
 const SHOWN_MAX = 60
 
 /**
+ * Social networks and the like, and short links, whose paths are mostly identifiers that say nothing to whoever
+ * reads them (`instagram.com/p/DeNKVAJuamr`, `youtu.be/SA-v8z87GAk`, `maps.app.goo.gl/dFstnkQYmxpS2MWT7`).
+ */
+const NOISY = /(?:^|\.)(?:facebook\.com|fb\.com|fb\.watch|instagram\.com|threads\.(?:net|com)|tiktok\.com|x\.com|twitter\.com|youtube\.com|youtu\.be|linkedin\.com|spotify\.com|spotify\.link|pinterest\.[a-z.]+|pin\.it|reddit\.com|redd\.it|bsky\.app|snapchat\.com|chat\.whatsapp\.com|(?:maps|photos)\.app\.goo\.gl|forms\.gle|share\.google)$/i
+/** Of those, the short links, whose path is only ever an identifier. */
+const ID_ONLY = /(?:^|\.)(?:youtu\.be|vm\.tiktok\.com|vt\.tiktok\.com|spotify\.link|pin\.it|redd\.it|fb\.watch|(?:maps|photos)\.app\.goo\.gl|forms\.gle)$/i
+
+/** How many times a text switches between upper and lower case letters. */
+function caseSwitches(s: string): number {
+  let n = 0, prev = ''
+  for (const c of s) {
+    const k = /[A-Z]/.test(c) ? 'U' : /[a-z]/.test(c) ? 'l' : ''
+    if (k && prev && k !== prev) n++
+    if (k) prev = k
+  }
+  return n
+}
+
+/**
+ * An opaque identifier, as a part of a path: five or more letters, digits, "_" or "-", all digits, or digits with
+ * capitals, or digits in two or more places among letters (`1de58pw59f`), or capitals and small letters switching
+ * three or more times. Names, even with a digit (`play7scout`), aren't. On the short links (ID_ONLY) any such part is.
+ */
+function opaque(part: string, idOnly: boolean): boolean {
+  if (!/^[A-Za-z0-9_-]{5,}$/.test(part)) return false
+  return idOnly || /^\d+$/.test(part) || (/\d/.test(part) && /[A-Z]/.test(part)) || /\d[^\d]+\d/.test(part) || caseSwitches(part) >= 3
+}
+
+/**
  * A clean link as shown: without "https://", "www." or a final "/"; when that's still long, the path's middle gives
  * way to "…" (the domain stays whole, and the first and last parts of the path, then the query), and past that its
- * end. The parameters that are left after cleaning (a search, an id, a video's start) stay.
+ * end. The parameters that are left after cleaning (a search, an id, a video's start) stay. From the sites in NOISY
+ * only the domain and the readable parts of the path are shown, each run of identifiers made one "…", without the
+ * parameters: `facebook.com/share/v/…`, `instagram.com/stories/half.caught/…`, `youtube.com/watch`.
  */
 export function shortUrl(url: string): string {
   const m = /^https?:\/\/(?:www\.)?([^/?#]+)([^?#]*)(.*)$/i.exec(url)
   if (!m) return url
   const host = m[1]!, path = m[2]!.replace(/\/$/, ''), tail = m[3]!
+  if (NOISY.test(host)) {
+    const parts: string[] = [], idOnly = ID_ONLY.test(host)
+    for (const part of path.split('/').filter(Boolean)) {
+      if (!opaque(part, idOnly)) parts.push(part)
+      else if (parts.at(-1) !== '…') parts.push('…')
+    }
+    const shown = [host, ...parts].join('/')
+    return shown.length <= SHOWN_MAX ? shown : `${shown.slice(0, SHOWN_MAX - 1)}…`
+  }
   let shown = host + path + tail
   if (shown.length <= SHOWN_MAX) return shown
   const parts = path.split('/').filter(Boolean)
