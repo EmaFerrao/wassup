@@ -9,7 +9,7 @@ import type { Backend } from './backend.js'
 import { waMarkup, clipTagged, esc, colorFor, setTheme, dim, faint, italic, padding, fmtTime, fmtDay, fmtWhen, daysAgo, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, fold, graphemes, wrapChars } from './format.js'
 import { decode, cached, cellSize, halfBlocks, blockGrid, blockCell, detectImageMode, detectRgb, KittyImages, RgbPainter, type BlockGrid, type Decoded, type ImageMode, type RgbCell } from './image.js'
 import { logger, uiLog } from './log.js'
-import { linksIn, showLinks } from './links.js'
+import { linksIn, showLinks, URL_RE } from './links.js'
 import { patchBlessedDraw, patchBlessedUnicode } from './unicode.js'
 import type { TermCaps } from './term.js'
 import { emojify, emoticonify, completeEmoji, emoticonAt } from './emoji.js'
@@ -91,6 +91,35 @@ function markFixes(text: string, fixes: Fix[]): string {
     at = f.end
   }
   return out + text.slice(at)
+}
+/** The characters of `text` (as `[...text]`) the folded `words` cover wherever they occur, accents and case aside. */
+function matchedChars(text: string, words: string[]): Set<number> {
+  let flat = ''
+  const owner: number[] = []
+  ;[...text].forEach((ch, i) => { for (const f of fold(ch)) { flat += f; owner.push(i) } })
+  const marked = new Set<number>()
+  for (const w of words) {
+    if (w) for (let at = flat.indexOf(w); at >= 0; at = flat.indexOf(w, at + 1)) for (let k = at; k < at + w.length; k++) marked.add(owner[k]!)
+  }
+  return marked
+}
+/**
+ * The search's words in a message's raw text between private-use marks, made its underline once the text is markup;
+ * an accent written apart goes with its letter, and links are left alone (shortened for showing, they'd be mangled).
+ */
+function markSearch(text: string, words: string[]): string {
+  const chars = [...text], marked = matchedChars(text, words)
+  for (const m of text.matchAll(URL_RE)) {
+    const a = [...text.slice(0, m.index)].length
+    for (let i = a; i < a + [...m[0]].length; i++) marked.delete(i)
+  }
+  let out = '', on = false
+  chars.forEach((ch, i) => {
+    const want = marked.has(i) || (on && fold(ch) === '')
+    if (want !== on) { out += want ? '\uE002' : '\uE003'; on = want }
+    out += ch
+  })
+  return on ? `${out}\uE003` : out
 }
 /** The notice for a message in another chat: time to appear, stay, and disappear, in milliseconds. */
 const NOTICE = { fadeIn: 400, hold: 6000, fadeOut: 800 }
@@ -210,6 +239,14 @@ export class Ui {
   /** The correction shown over one of my messages (a click on its marked passage), and the box it floats in. */
   private sentFix: { row: MessageRow; fix: Fix } | undefined
   private fixBox!: blessed.Widgets.BoxElement
+  /**
+   * The search in the open chat (Ctrl+F): what's typed and its words, folded, the messages found (the most recent
+   * first) and which of them is selected.
+   */
+  private search: { query: string; cursor: number; words: string[]; hits: MessageRow[]; at: number } | null = null
+  /** The messages the list found for its filter (searchAll), and which rows they are. */
+  private pickerHits = new Map<number, MessageRow>()
+  private pickerFound: { query: string; rows: MessageRow[] } | undefined
   private ghostAbort: AbortController | undefined
   /** Right-arrow presses with the next suggestion still on the way: accepted on arrival, one per arrow, so → → → correct in a chain. */
   private acceptOnArrival = 0
@@ -925,6 +962,8 @@ export class Ui {
     if (k === 'C-r') return this.redraw()
     if (this.viewing) return this.closeViewer()
     if (this.sentFix) this.hideSentFix()
+    if (this.search) return this.searchKey(k, ch, key)
+    if (k === 'C-f' && this.current && !this.pickerOpen) return this.openSearch()
     if (k === 'paste') return this.paste(ch)
     // ESC closes, in order: the reply or reaction in progress, the selection, the picker filter, the picker, the
     // active tab, the program.
@@ -1273,17 +1312,83 @@ export class Ui {
    * Selects a message of the open chat and scrolls to it, drawing the stored messages back as far as it when it's
    * older than those in the panel; one that isn't stored (from before what the phone handed over) is only flashed.
    */
-  private jumpTo(id: string | null) {
+  private jumpTo(id: string | null, focus = true) {
     const jid = this.current
     const target = jid && id ? store.getMessage(jid, id) : undefined
     if (!jid || !target) return this.flash(t('messageNotFound'))
     const limit = this.shown.get(jid) ?? PAGE
     const need = store.countMessagesSince(jid, target.ts)
     if (limit !== -1 && need > limit) this.shown.set(jid, need)
-    this.select(target)
+    // Without `focus` the selection moves but the keys stay where they were (the search, typing on).
+    if (focus) this.select(target)
+    else { this.selected = target; this.dirtyMessages = true }
     this.renderNow()
     this.scrollToSelected()
     this.screen.render()
+  }
+
+  /** Opens the search in the chat in front: the input becomes its line, with "procurar ❯" as the prompt. */
+  private openSearch() {
+    this.search = { query: '', cursor: 0, words: [], hits: [], at: 0 }
+    this.suggestions = []
+    this.drawSuggestions()
+    this.ghostBox.hide()
+    if (this.selected) { this.selected = null; this.dirtyMessages = true }
+    this.setFocus('input')
+    this.drawInput()
+    this.renderNow()
+  }
+
+  /**
+   * Keys while searching: typing narrows it, every change finding again in the chat's whole stored history; ↑ goes
+   * to an older match and ↓ to a newer one, the message selected and in view, older history drawn as it needs;
+   * Enter closes it on the match, left selected; Esc closes it.
+   */
+  private searchKey(k: string, ch: string, key: blessed.Widgets.Events.IKeyEventArg) {
+    const s = this.search!
+    if (k === 'escape') return this.closeSearch(false)
+    if (k === 'enter' || k === 'return') return this.closeSearch(true)
+    if (k === 'up' || k === 'down') {
+      const at = s.at + (k === 'up' ? 1 : -1)
+      if (at >= 0 && at < s.hits.length) { s.at = at; this.showSearchHit() }
+      return
+    }
+    const chars = graphemes(s.query)
+    const e = k === 'paste'
+      ? { value: [...chars.slice(0, s.cursor), ...graphemes(ch.replace(/\s+/g, ' ')), ...chars.slice(s.cursor)].join(''), cursor: s.cursor + graphemes(ch.replace(/\s+/g, ' ')).length }
+      : edit(s.query, s.cursor, k, ch, key)
+    if (!e) return
+    s.cursor = e.cursor
+    if (e.value !== s.query) {
+      s.query = e.value
+      s.words = fold(e.value).split(/\s+/).filter(Boolean)
+      s.hits = store.searchMessages(e.value, this.current!, 1000)
+      s.at = 0
+      this.dirtyMessages = true
+      if (s.hits.length) return this.showSearchHit()
+      this.selected = null
+    }
+    this.drawInput()
+    this.renderNow()
+  }
+
+  private showSearchHit() {
+    const s = this.search!
+    this.jumpTo(s.hits[s.at]!.id, false)
+    this.drawInput()
+    this.screen.render()
+  }
+
+  /** Closes the search: with `stay`, on the match in view, which stays selected for the keys that act on a message. */
+  private closeSearch(stay: boolean) {
+    const s = this.search!
+    this.search = null
+    this.dirtyMessages = true
+    const hit = stay ? s.hits[s.at] : undefined
+    if (hit && this.selected?.id === hit.id) this.setFocus('messages')
+    else { this.selected = null; this.setFocus('input') }
+    this.drawInput()
+    this.renderNow()
   }
 
   /** Scrolls the panel just enough for the selected message to become fully visible. */
@@ -1501,6 +1606,7 @@ export class Ui {
     const jid = this.tabs[i]
     if (!jid) return
     if (i !== this.active) {
+      this.search = null
       this.stopComposing()
       const prev = this.current
       if (prev) this.shown.delete(prev)
@@ -1548,6 +1654,7 @@ export class Ui {
     if (!closing) return
     uiLog.info({ jid: closing, index: i }, 'close tab')
     const wasActive = this.active === i
+    if (wasActive) this.search = null
     this.tabs.splice(i, 1)
     if (this.active > i) this.active--
     else if (wasActive) { this.active = Math.min(i, this.tabs.length - 1); this.atBottom = true }
@@ -1711,7 +1818,45 @@ export class Ui {
   private pickChat(index: number, how: 'here' | 'pane' | 'tab' = 'here') {
     const jid = this.pickerSlots[index]?.jid
     uiLog.info({ index, jid, how }, 'pick chat')
+    // A message found opens its chat here, on that message, selected.
+    const hit = this.pickerHits.get(index)
+    if (hit) { this.openChat(hit.chat_jid); if (this.current === hit.chat_jid) this.jumpTo(hit.id); return }
     if (jid) this.openChat(jid, how)
+  }
+
+  /** The messages in every chat with each of the filter's words, the most recent first; found again only when it changes. */
+  private searchAll(filter: string): MessageRow[] {
+    const query = filter.trim()
+    if (this.pickerFound?.query !== query) this.pickerFound = { query, rows: store.searchMessages(query, null, 100).reverse() }
+    return this.pickerFound.rows
+  }
+
+  /**
+   * A message found, as a row of the list: its chat's name, as the chats' rows have it; who wrote it and its text
+   * from a little before the first match, the matches underlined; at the right edge, when.
+   */
+  private pickerHitItem(m: MessageRow, c: ChatRow, width: number): string {
+    const nameW = Math.min(28, Math.max(12, Math.floor(width * 0.35)))
+    const color = colorFor(c.jid)
+    const named = `{${color}-fg}${esc(truncate(chatName(c.jid), nameW - 1))}{/${color}-fg}`
+    const prefix = `${named}${' '.repeat(Math.max(1, nameW - visibleWidth(named)))}  `
+    const right = faint(`${esc(fmtWhen(m.ts))} `)
+    const who = m.from_me ? `${t('me')}: ` : c.is_group ? `${contactName(m.sender_jid).split(' ')[0]}: ` : ''
+    const room = Math.max(4, width - visibleWidth(prefix) - visibleWidth(right) - 2 - strWidth(who))
+    let text = showLinks(withMentions(m.text)).replace(/\s+/g, ' ')
+    // The first match stays in view: past a third of the room, the text starts a little before it, after "…".
+    const first = Math.min(...matchedChars(text, this.pickerWords))
+    if (Number.isFinite(first) && strWidth(text) > room && first > room / 3) text = `…${[...text].slice(first - Math.floor(room / 3)).join('')}`
+    text = truncate(text, room)
+    const marked = matchedChars(text, this.pickerWords)
+    let shown = '', on = false
+    ;[...text].forEach((ch, i) => {
+      if (marked.has(i) !== on) { shown += on ? '{/underline}' : '{underline}'; on = !on }
+      shown += esc(ch)
+    })
+    if (on) shown += '{/underline}'
+    const base = `${prefix}${dim(`${esc(who)}${shown}`)}`
+    return `${base}${' '.repeat(Math.max(1, padding(`${base}${right}`, width)))}${right}`
   }
 
   /** Opens the chat the way the list does: in this pane or tab ('here'), or, in Herdr, in a new pane or tab. */
@@ -1734,7 +1879,10 @@ export class Ui {
 
   private refreshPicker() {
     // Keep the selection on the same chat: WhatsApp events redraw the list all the time and used to reset it to the top.
-    const selectedJid = this.pickerSlots[(this.picker as unknown as { selected: number }).selected]?.jid
+    // On a message found, on that message.
+    const selectedAt = (this.picker as unknown as { selected: number }).selected
+    const selectedHit = this.pickerHits.get(selectedAt)?.id
+    const selectedJid = selectedHit ? undefined : this.pickerSlots[selectedAt]?.jid
     const sameFilter = this.pickerFilterShown === this.filter
     this.pickerFilterShown = this.filter
     // Most recent at the bottom, like the messages; the default selection is the last one (the most recent).
@@ -1763,6 +1911,21 @@ export class Ui {
     // most recent at the bottom. A filter orders them by how well they match, which no separator would follow.
     const bucket = (ts: number) => { const d = daysAgo(ts); return d <= 0 ? t('today') : d === 1 ? t('yesterday') : d < 7 ? t('thisWeek') : t('older') }
     const slots: (ChatRow | null)[] = [], items: string[] = []
+    // With two or more characters typed, the messages that have every word go above the chats (searchAll), the most
+    // recent nearest them, under a heading of their own, and the chats under theirs.
+    const hits = words.length && this.filter.trim().length >= 2 ? this.searchAll(this.filter) : []
+    const heading = (label: string) => dim(esc(`${this.ruleChar.repeat(2)} ${label} ${this.ruleChar.repeat(Math.max(2, width - strWidth(label) - 4))}`))
+    this.pickerHits.clear()
+    if (hits.length) {
+      slots.push(null); items.push(heading(t('messagesHeading')))
+      for (const m of hits) {
+        const chat = store.getChat(m.chat_jid)
+        if (!chat) continue
+        this.pickerHits.set(slots.length, m)
+        slots.push(chat); items.push('')
+      }
+      if (this.filtered.length) { slots.push(null); items.push(heading(t('chatsHeading'))) }
+    }
     let lastBucket = ''
     this.pickerLast.clear()
     for (const c of this.filtered) {
@@ -1777,7 +1940,7 @@ export class Ui {
       items.push('')
     }
     this.pickerSlots = slots
-    slots.forEach((c, i) => { if (c) items[i] = this.pickerItem(c, width) })
+    slots.forEach((c, i) => { if (c) { const m = this.pickerHits.get(i); items[i] = m ? this.pickerHitItem(m, c, width) : this.pickerItem(c, width) } })
     this.picker.setItems(items as unknown as string[])
     // List flush to the bottom when it's shorter than the panel, with a blank line separating it from the prompt.
     // Never shorter than one line: blessed skips an element of zero height altogether, leaving what was drawn there
@@ -1794,7 +1957,8 @@ export class Ui {
     this.drawPickerHead(big)
     const want = this.pickerFocus !== undefined ? this.pickerFocus : sameFilter ? selectedJid : null
     this.pickerFocus = undefined
-    const keep = want ? slots.findIndex(c => c?.jid === want) : -1
+    const keep = selectedHit && sameFilter ? [...this.pickerHits].find(([, m]) => m.id === selectedHit)?.[0] ?? -1
+      : want ? slots.findIndex((c, i) => c?.jid === want && !this.pickerHits.has(i)) : -1
     this.pickerAt = keep >= 0 ? keep : Math.max(0, slots.length - 1)
     this.picker.select(this.pickerAt)
     // The chat goes back to the row of the screen it was on, as far as the list's ends allow.
@@ -1909,7 +2073,7 @@ export class Ui {
     if (!this.pickerOpen) return
     const want = new Set(jids)
     const width = num(this.picker.width) - num(this.picker.iwidth) - 1
-    this.pickerSlots.forEach((c, i) => { if (c && want.has(c.jid)) this.picker.setItem(i as unknown as blessed.Widgets.BlessedElement, this.pickerItem(c, width)) })
+    this.pickerSlots.forEach((c, i) => { if (c && want.has(c.jid) && !this.pickerHits.has(i)) this.picker.setItem(i as unknown as blessed.Widgets.BlessedElement, this.pickerItem(c, width)) })
   }
 
   // ---------- state ----------
@@ -2348,23 +2512,26 @@ export class Ui {
     const name = this.pickerOpen || !this.current ? null : shortName(this.current, true)
     // The prompt ends in "❯", groups and one-to-one chats alike.
     const mark = '❯'
-    const promptPlain = this.pickerOpen ? `${APP} ${mark} ` : name ? `${name} ${mark} ` : `${mark} `
+    // Searching the chat (Ctrl+F), the line is the search's, after "procurar ❯".
+    const searching = !!this.search && !this.pickerOpen
+    const promptPlain = this.pickerOpen ? `${APP} ${mark} ` : searching ? `${t('search')} ${mark} ` : name ? `${name} ${mark} ` : `${mark} `
     const pw = this.promptWidth = strWidth(promptPlain)
-    this.promptNameWidth = !this.pickerOpen && name ? strWidth(name) : 0
-    const target = this.pickerOpen ? null : this.replyTo ?? this.reactTo ?? this.editing
-    const header = !target ? null : this.editing
+    this.promptNameWidth = !this.pickerOpen && !searching && name ? strWidth(name) : 0
+    const target = this.pickerOpen || searching ? null : this.replyTo ?? this.reactTo ?? this.editing
+    const found = searching && this.search!.query ? (this.search!.hits.length ? t('searchHeader', this.search!.at + 1, this.search!.hits.length) : t('searchNone')) : null
+    const header = found ?? (!target ? null : this.editing
       ? t('editHeader', this.snippet(target))
       : this.replyTo
         ? `↩ ${target.chat_jid.endsWith('@g.us') && !target.from_me ? `${this.who(target)}: ` : ''}${this.snippet(target)}`
-        : t('reactHeader', this.who(target), this.snippet(target))
+        : t('reactHeader', this.who(target), this.snippet(target)))
     // Model suggestion, discreet, in gray italic: the letters missing from the word mid-typing, attached to the cursor
     // (which sits on the first one); a correction, whether of the mid-typed word or of a wrong word further back,
     // floating on the line above the word, starting on its column. Tab accepts. Every wrong passage the model found
     // is underlined in yellow while it applies; what floats is the cursor's one (ghostShown).
-    const view = this.ghostShown()
+    const view = searching ? null : this.ghostShown()
     const width = Math.max(4, w - pw)
-    const chars = graphemes(this.pickerOpen ? this.filter : this.inputValue)
-    const cursor = Math.min(this.pickerOpen ? this.filterCursor : this.cursor, chars.length)
+    const chars = graphemes(this.pickerOpen ? this.filter : searching ? this.search!.query : this.inputValue)
+    const cursor = Math.min(this.pickerOpen ? this.filterCursor : searching ? this.search!.cursor : this.cursor, chars.length)
     const lines = wrapChars(chars, width)
     // Cursor's line and column: at the end of the text it sits after the last grapheme, and moves to a new line if it doesn't fit.
     let row = 0, start = 0
@@ -2408,7 +2575,7 @@ export class Ui {
     const showCursor = this.focus === 'input' || this.focus === 'picker'
     // The graphemes of the passages the model found wrong, by their place in the whole text, and where each line starts.
     const marked = new Set<number>()
-    if (!this.pickerOpen) {
+    if (!this.pickerOpen && !searching) {
       for (const f of this.liveFixes()) {
         const a = graphemes(this.inputValue.slice(0, f.start)).length, b = graphemes(this.inputValue.slice(0, f.end)).length
         for (let i = a; i < b; i++) marked.add(i)
@@ -2444,8 +2611,8 @@ export class Ui {
     const visible = lines.slice(this.inputTop, this.inputTop + rowsAvail)
     // The prompt says who the line talks to: the chat's name, in the colour it has as a sender in groups (colorFor
     // of the same jid; a group's own jid for a group), or, with the chat list open, the app, in WhatsApp's green.
-    const color = this.pickerOpen ? this.green : this.current ? colorFor(this.current) : 0
-    const who = this.pickerOpen ? APP : name
+    const color = this.pickerOpen || searching ? this.green : this.current ? colorFor(this.current) : 0
+    const who = this.pickerOpen ? APP : searching ? t('search') : name
     const prompt = who ? `{${color}-fg}${esc(who)}{/${color}-fg} ${mark} ` : `${mark} `
     const out = visible.map((l, i) => (this.inputTop + i === 0 ? prompt : ' '.repeat(pw)) + render(l, this.inputTop + i))
     this.input.setContent(out.join('\n'))
@@ -2677,14 +2844,17 @@ export class Ui {
       if (row.text && (type === 'text' || type === 'image' || type === 'video' || type === 'gif' || type === 'document')) {
         // Mentions by first name, in the colour the person's name has in groups; where each lands is kept for a click.
         const marks = new Map<string, { jid: string; width: number }>()
-        // Mine still within the editing window: the passages the check found wrong, underlined in yellow (sentFixesFor).
-        const fixes = mine && type === 'text' ? this.sentFixesFor(row) : null
+        // Mine still within the editing window: the passages the check found wrong, underlined in yellow (sentFixesFor);
+        // while searching, the search's words instead, underlined in bold.
+        const words = this.search?.words.length ? this.search.words : null
+        const fixes = !words && mine && type === 'text' ? this.sentFixesFor(row) : null
         if (fixes) expires = Math.min(expires, row.ts + EDIT_WINDOW)
-        const shown = withMentions(waMarkup(fixes ? markFixes(row.text, fixes) : row.text), (jid, first) => {
+        const shown = withMentions(waMarkup(words ? markSearch(row.text, words) : fixes ? markFixes(row.text, fixes) : row.text), (jid, first) => {
           const color = colorFor(jid), token = `{${color}-fg}@${esc(first)}{/${color}-fg}`
           marks.set(token, { jid, width: strWidth(`@${first}`) })
           return token
         }).replace(/\uE000/g, '{underline}{yellow-fg}').replace(/\uE001/g, '{/yellow-fg}{/underline}')
+          .replace(/\uE002/g, '{underline}{bold}').replace(/\uE003/g, '{/bold}{/underline}')
         const wrapped = shown.split('\n').flatMap(l => wrapTagged(l, wrapAt))
         wrapped.forEach((l, i) => {
           const tw = visibleWidth(l)

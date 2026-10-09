@@ -45,6 +45,9 @@ export interface MessageRow {
 
 // timeout: several processes share the database (server writes, clients read and save their tabs); instead of SQLITE_BUSY, it waits.
 const db = new DatabaseSync(dirs.db, { timeout: 3000 })
+/** Text for comparing without accents or case, as format.ts's fold; in SQL as fold(), for searching messages. */
+const fold = (s: string) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
+db.function('fold', { deterministic: true }, (s: unknown) => (typeof s === 'string' ? fold(s) : null))
 db.exec(`
   PRAGMA journal_mode = WAL;
   PRAGMA synchronous = NORMAL;
@@ -273,6 +276,18 @@ export const store = {
     return (q.names.all() as { name: string }[]).map(r => r.name)
   },
   /** How many of a chat's messages are from `ts` on: how far back the panel has to draw to reach one of that time. */
+  /**
+   * Messages whose text has every word of `query` somewhere, in any order, ignoring accents and case: in `chat`, or
+   * in all of them; the most recent first.
+   */
+  searchMessages(query: string, chat: string | null, limit: number): MessageRow[] {
+    const words = fold(query).split(/\s+/).filter(Boolean)
+    if (!words.length) return []
+    const like = words.map(() => `fold(text) LIKE ? ESCAPE '\\'`).join(' AND ')
+    const sql = `SELECT * FROM messages WHERE ${chat ? 'chat_jid = ? AND ' : ''}type NOT IN ('secretEncrypted', 'deleted') AND ${like} ORDER BY ts DESC LIMIT ?`
+    const args = [...(chat ? [chat] : []), ...words.map(w => `%${w.replace(/[\\%_]/g, '\\$&')}%`), limit]
+    return db.prepare(sql).all(...args) as unknown as MessageRow[]
+  },
   countMessagesSince(chat: string, ts: number): number {
     return (q.countMessagesSince.get(chat, ts) as { n: number }).n
   },

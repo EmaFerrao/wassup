@@ -10,8 +10,8 @@ export const lang: Lang = /^pt/i.test(locale) ? 'pt' : 'en'
 
 const STRINGS = {
   help: {
-    pt: 'Tab muda de tab (com texto, aceita a sugestão) · / conversas · Esc fecha · PgUp/PgDn histórico, Ctrl+↓ fim · ↑ ou clique selecciona mensagem, escrever responde, : reage · :fixe: emoji',
-    en: 'Tab switches tabs (with text, accepts the suggestion) · / chats · Esc closes · PgUp/PgDn history, Ctrl+↓ end · ↑ or click selects a message, typing replies, : reacts · :thumbsup: emoji',
+    pt: 'Tab muda de tab (com texto, aceita a sugestão) · / conversas e mensagens · Ctrl+F procura na conversa · Esc fecha · PgUp/PgDn histórico, Ctrl+↓ fim · ↑ ou clique selecciona mensagem, escrever responde, : reage · :fixe: emoji',
+    en: 'Tab switches tabs (with text, accepts the suggestion) · / chats and messages · Ctrl+F searches the chat · Esc closes · PgUp/PgDn history, Ctrl+↓ end · ↑ or click selects a message, typing replies, : reacts · :thumbsup: emoji',
   },
   connecting: { pt: 'a ligar…', en: 'connecting…' },
   waitingQr: { pt: 'à espera do QR', en: 'waiting for the QR' },
@@ -87,6 +87,11 @@ const STRINGS = {
   unsupported: { pt: 'mensagem não suportada', en: 'unsupported message' },
   messageNotFound: { pt: 'mensagem não encontrada', en: 'message not found' },
   loadingOlder: { pt: 'a carregar mensagens anteriores…', en: 'loading earlier messages…' },
+  search: { pt: 'procurar', en: 'search' },
+  searchHeader: { pt: '{0} de {1} · ↑ mais antiga, ↓ mais recente · Enter fica nela · Esc fecha', en: '{0} of {1} · ↑ older, ↓ newer · Enter stays on it · Esc closes' },
+  searchNone: { pt: 'sem resultados', en: 'no results' },
+  messagesHeading: { pt: 'mensagens', en: 'messages' },
+  chatsHeading: { pt: 'conversas', en: 'chats' },
 } as const
 
 export type Key = keyof typeof STRINGS

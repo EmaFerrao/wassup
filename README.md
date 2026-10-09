@@ -54,7 +54,9 @@ and on startup the terminal is asked for its real background colour to pick ligh
   name in its colour, 👀 while the person is online, the last message (a spinner and "typing…" while someone types,
   mentions by name), how long ago, with the state of yours as in the chat, and the unread count, all kept up to date
   as messages and their states arrive. Typing after `wassup ❯` filters it word by word, ignoring accents and case,
-  with the matches underlined; Enter, Tab, → or a click opens.
+  with the matches underlined; Enter, Tab, → or a click opens. From two characters on, the messages of every chat
+  that have all the words go above the chats, under their own heading, the most recent nearest them: chat, who wrote
+  it, the text from a little before the match, underlined, and when; Enter or a click opens the chat on that message.
 - **Messages**: yours on the right, each in a bubble with WhatsApp Web's colours where the terminal takes 24-bit
   colour (yours, on a dark theme, toned down to the brightness of theirs) and two discreet greys otherwise, with the
   time outside it, yours with their state in its separator (`14 06` not sent yet, `14.06` sent, `14:06` delivered;
@@ -69,7 +71,10 @@ and on startup the terminal is asked for its real background colour to pick ligh
   message: typing replies to it, `:` reacts, Delete opens one of yours for editing. Mentions show the person's first
   name in their colour (`@Ana`); a click on one, or in a group on a member's name, opens the chat with them; a click
   on a pin (`📌 pinned a message`) goes to the message it's about. The `☺` next to a message under the pointer opens
-  its quick reactions; a double click, dragging it to the right, or → with it selected, starts a reply.
+  its quick reactions; a double click, dragging it to the right, or → with it selected, starts a reply. Ctrl+F searches
+  the open chat's whole history, accents and case aside: the input becomes `procurar ❯`, the matches are underlined in
+  bold and the most recent one selected, ↑ goes to an older one and ↓ to a newer one, with a count above the input;
+  Enter stays on it, Esc closes.
 - **Input**: grows with the text up to half the screen; the rule above it shows 👀 near its right end while you show as
   online, a braille spinner instead while you type; Enter sends, Shift+Enter or Ctrl+J start a new line, and pasting
   several lines keeps them. Ctrl-U clears, Shift-Backspace deletes a word (with the Kitty keyboard protocol). `:` and
