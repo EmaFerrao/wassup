@@ -263,6 +263,8 @@ export class Ui {
   private profiles = new Map<string, ProfileRow>()
   private profileAsked = new Set<string>()
   private pickerAvatars = new Map<number, { path: string; d: Decoded }>()
+  /** The photos whose small copy is being decoded (loadVisibleProfiles). */
+  private thumbWaiting = new Set<string>()
   /** The last press on the list, and whether it was on a chat's photo (see the list's 'select'). */
   private pickerPress: { at: number; photo: boolean } | undefined
   private pickerFound: { query: string; rows: MessageRow[] } | undefined
@@ -2149,7 +2151,13 @@ export class Ui {
       if (!this.profileAsked.has(c.jid) && this.wa.state === 'open') { this.profileAsked.add(c.jid); this.wa.ensureProfile(c.jid) }
       const avatar = this.profiles.get(c.jid)?.avatar
       const file = avatar ? path.join(mediaDir(c.jid), avatar) : null
-      if (file && !thumbCached(file)) decodeThumb(file).then(() => { if (this.pickerOpen) { this.redrawPickerRows([c.jid]); this.screen.render() } })
+      // Each photo is waited for once: asked again at every frame while it decoded, each frame added a redraw for when
+      // it was done, all drawn at once then, each adding more to the photos still decoding, a storm that kept the
+      // client busy while the list was open. The redraw is a scheduled one, not a frame drawn on the spot.
+      if (file && !thumbCached(file) && !this.thumbWaiting.has(file)) {
+        this.thumbWaiting.add(file)
+        decodeThumb(file).then(() => { this.thumbWaiting.delete(file); if (this.pickerOpen) { this.redrawPickerRows([c.jid]); this.scheduleRender() } })
+      }
     }
   }
 
