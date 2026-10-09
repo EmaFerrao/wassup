@@ -104,7 +104,7 @@ function matchedChars(text: string, words: string[]): Set<number> {
   return marked
 }
 /**
- * The search's words in a message's raw text between private-use marks, made its underline once the text is markup;
+ * The search's words in a message's raw text between private-use marks, made reverse video once the text is markup;
  * an accent written apart goes with its letter, and links are left alone (shortened for showing, they'd be mangled).
  */
 function markSearch(text: string, words: string[]): string {
@@ -244,8 +244,13 @@ export class Ui {
    * first) and which of them is selected.
    */
   private search: { query: string; cursor: number; words: string[]; hits: MessageRow[]; at: number } | null = null
-  /** The messages the list found for its filter (searchAll), and which rows they are. */
+  /**
+   * The list searching messages instead of names (Ctrl+F in it): the messages found for its text (searchAll), the row
+   * each one starts on, and the rows that continue one, with the row it starts on.
+   */
+  private pickerSearch = false
   private pickerHits = new Map<number, MessageRow>()
+  private pickerCont = new Map<number, number>()
   private pickerFound: { query: string; rows: MessageRow[] } | undefined
   private ghostAbort: AbortController | undefined
   /** Right-arrow presses with the next suggestion still on the way: accepted on arrival, one per arrow, so → → → correct in a chain. */
@@ -603,8 +608,8 @@ export class Ui {
     // The click lands on the item (a child of the list) and arrives as 'element click', after blessed has already
     // moved the selection; on a day separator it opens nothing.
     this.picker.on('element click', (el: blessed.Widgets.BlessedElement) => {
-      const i = this.picker.getItemIndex(el)
-      if (this.pickerSlots[i]) this.pickChat(i)
+      const i = this.picker.getItemIndex(el), at = this.pickerCont.get(i) ?? i
+      if (this.pickerSlots[at]) this.pickChat(at)
     })
     // The selection never rests on a day separator: it goes on past it the way it was going, or back when there's
     // nothing further.
@@ -964,6 +969,7 @@ export class Ui {
     if (this.sentFix) this.hideSentFix()
     if (this.search) return this.searchKey(k, ch, key)
     if (k === 'C-f' && this.current && !this.pickerOpen) return this.openSearch()
+    if (k === 'C-f' && this.pickerOpen) { this.pickerSearch = !this.pickerSearch; this.refreshPicker(); return this.screen.render() }
     if (k === 'paste') return this.paste(ch)
     // ESC closes, in order: the reply or reaction in progress, the selection, the picker filter, the picker, the
     // active tab, the program.
@@ -974,6 +980,7 @@ export class Ui {
       if (this.editing) { this.editing = null; this.inputValue = ''; this.cursor = 0; this.updateSuggestions(); this.drawInput(); return this.screen.render() }
       if (this.focus === 'messages') { this.setFocus('input'); return this.renderNow() }
       if (this.pickerOpen) {
+        if (this.pickerSearch) { this.pickerSearch = false; this.filter = ''; this.filterCursor = 0; this.refreshPicker(); return this.screen.render() }
         if (this.filter) { this.filter = ''; this.filterCursor = 0; this.refreshPicker(); return this.screen.render() }
         // With no tabs there's nowhere to go back to: the picker is the only panel, and closing it means quitting.
         return this.tabs.length ? this.closePicker() : this.quit()
@@ -1772,6 +1779,7 @@ export class Ui {
   // ---------- picker ----------
 
   private openPicker(filter = '') {
+    this.pickerSearch = false
     this.filter = filter
     this.filterCursor = graphemes(filter).length
     this.pickerOpen = true
@@ -1832,31 +1840,28 @@ export class Ui {
   }
 
   /**
-   * A message found, as a row of the list: its chat's name, as the chats' rows have it; who wrote it and its text
-   * from a little before the first match, the matches underlined; at the right edge, when.
+   * A message found, as rows of the list: its chat's name in its colour, who wrote it and, at the right edge, when;
+   * then up to two lines of its text, indented, from a little before the first match, the matches in reverse video.
    */
-  private pickerHitItem(m: MessageRow, c: ChatRow, width: number): string {
-    const nameW = Math.min(28, Math.max(12, Math.floor(width * 0.35)))
+  private pickerHitRows(m: MessageRow, c: ChatRow, width: number): string[] {
     const color = colorFor(c.jid)
-    const named = `{${color}-fg}${esc(truncate(chatName(c.jid), nameW - 1))}{/${color}-fg}`
-    const prefix = `${named}${' '.repeat(Math.max(1, nameW - visibleWidth(named)))}  `
+    const who = m.from_me ? t('me') : c.is_group ? contactName(m.sender_jid) : ''
     const right = faint(esc(fmtWhen(m.ts)))
-    const who = m.from_me ? `${t('me')}: ` : c.is_group ? `${contactName(m.sender_jid).split(' ')[0]}: ` : ''
-    const room = Math.max(4, width - visibleWidth(prefix) - visibleWidth(right) - 2 - strWidth(who))
+    const head = `{${color}-fg}${esc(truncate(chatName(c.jid), Math.max(8, width - visibleWidth(right) - 4)))}{/${color}-fg}${who ? dim(` · ${esc(truncate(who, 24))}`) : ''}`
+    const indent = '    ', room = Math.max(8, width - indent.length - 1)
     let text = showLinks(withMentions(m.text)).replace(/\s+/g, ' ')
-    // The first match stays in view: past a third of the room, the text starts a little before it, after "…".
+    // The first match stays in view: past a third of the first line, the text starts a little before it, after "…".
     const first = Math.min(...matchedChars(text, this.pickerWords))
-    if (Number.isFinite(first) && strWidth(text) > room && first > room / 3) text = `…${[...text].slice(first - Math.floor(room / 3)).join('')}`
-    text = truncate(text, room)
-    const marked = matchedChars(text, this.pickerWords)
-    let shown = '', on = false
-    ;[...text].forEach((ch, i) => {
-      if (marked.has(i) !== on) { shown += on ? '{/underline}' : '{underline}'; on = !on }
-      shown += esc(ch)
-    })
-    if (on) shown += '{/underline}'
-    const base = `${prefix}${dim(`${esc(who)}${shown}`)}`
-    return `${base}${' '.repeat(Math.max(1, padding(`${base}${right}`, width)))}${right}`
+    if (Number.isFinite(first) && first > room / 3) text = `…${[...text].slice(first - Math.floor(room / 3)).join('')}`
+    const lines = wrapChars(graphemes(text), room).map(l => l.join('').trim()).filter(Boolean)
+    if (lines.length > 2) lines[1] = truncate(`${lines[1]} ${lines[2]}`, room)
+    const marked = (line: string) => {
+      const at = matchedChars(line, this.pickerWords)
+      let out = '', on = false
+      ;[...line].forEach((ch, i) => { if (at.has(i) !== on) { out += on ? '{/inverse}' : '{inverse}'; on = !on }; out += esc(ch) })
+      return on ? `${out}{/inverse}` : out
+    }
+    return [`${head}${' '.repeat(Math.max(1, padding(`${head}${right}`, width)))}${right}`, ...lines.slice(0, 2).map(l => indent + marked(l))]
   }
 
   /** Opens the chat the way the list does: in this pane or tab ('here'), or, in Herdr, in a new pane or tab. */
@@ -1911,24 +1916,22 @@ export class Ui {
     // most recent at the bottom. A filter orders them by how well they match, which no separator would follow.
     const bucket = (ts: number) => { const d = daysAgo(ts); return d <= 0 ? t('today') : d === 1 ? t('yesterday') : d < 7 ? t('thisWeek') : t('older') }
     const slots: (ChatRow | null)[] = [], items: string[] = []
-    // With two or more characters typed, the messages that have every word go above the chats (searchAll), the most
-    // recent nearest them, under a heading of their own, and the chats under theirs.
-    const hits = words.length && this.filter.trim().length >= 2 ? this.searchAll(this.filter) : []
-    const heading = (label: string) => dim(esc(`${this.ruleChar.repeat(2)} ${label} ${this.ruleChar.repeat(Math.max(2, width - strWidth(label) - 4))}`))
+    // Searching messages (Ctrl+F), from two characters on, the list holds only the messages found in every chat, the
+    // most recent at the bottom, each on its first row (selectable) and the rows of text after it (skipped over).
     this.pickerHits.clear()
-    if (hits.length) {
-      slots.push(null); items.push(heading(t('messagesHeading')))
-      for (const m of hits) {
-        const chat = store.getChat(m.chat_jid)
-        if (!chat) continue
-        this.pickerHits.set(slots.length, m)
-        slots.push(chat); items.push('')
-      }
-      if (this.filtered.length) { slots.push(null); items.push(heading(t('chatsHeading'))) }
+    this.pickerCont.clear()
+    const hits = this.pickerSearch && this.filter.trim().length >= 2 ? this.searchAll(this.filter) : []
+    for (const m of hits) {
+      const chat = store.getChat(m.chat_jid)
+      if (!chat) continue
+      const start = slots.length, rows = this.pickerHitRows(m, chat, width)
+      this.pickerHits.set(start, m)
+      slots.push(chat); items.push(rows[0]!)
+      for (const r of rows.slice(1)) { this.pickerCont.set(slots.length, start); slots.push(null); items.push(r) }
     }
     let lastBucket = ''
     this.pickerLast.clear()
-    for (const c of this.filtered) {
+    for (const c of this.pickerSearch ? [] : this.filtered) {
       const b = bucket(c.last_ts)
       if (!words.length && b !== lastBucket) {
         lastBucket = b
@@ -1940,7 +1943,7 @@ export class Ui {
       items.push('')
     }
     this.pickerSlots = slots
-    slots.forEach((c, i) => { if (c) { const m = this.pickerHits.get(i); items[i] = m ? this.pickerHitItem(m, c, width) : this.pickerItem(c, width) } })
+    slots.forEach((c, i) => { if (c && !this.pickerHits.has(i)) items[i] = this.pickerItem(c, width) })
     this.picker.setItems(items as unknown as string[])
     // List flush to the bottom when it's shorter than the panel, with a blank line separating it from the prompt.
     // Never shorter than one line: blessed skips an element of zero height altogether, leaving what was drawn there
@@ -1959,7 +1962,10 @@ export class Ui {
     this.pickerFocus = undefined
     const keep = selectedHit && sameFilter ? [...this.pickerHits].find(([, m]) => m.id === selectedHit)?.[0] ?? -1
       : want ? slots.findIndex((c, i) => c?.jid === want && !this.pickerHits.has(i)) : -1
-    this.pickerAt = keep >= 0 ? keep : Math.max(0, slots.length - 1)
+    // By default the last row that can be selected: a message found ends in rows of its text.
+    let last = slots.length - 1
+    while (last > 0 && !slots[last]) last--
+    this.pickerAt = keep >= 0 ? keep : Math.max(0, last)
     this.picker.select(this.pickerAt)
     // The chat goes back to the row of the screen it was on, as far as the list's ends allow.
     if (this.pickerFocusRow !== undefined && keep >= 0) {
@@ -2513,7 +2519,7 @@ export class Ui {
     const mark = '❯'
     // Searching the chat (Ctrl+F), the line is the search's, after "procurar ❯".
     const searching = !!this.search && !this.pickerOpen
-    const promptPlain = this.pickerOpen ? `${APP} ${mark} ` : searching ? `${t('search')} ${mark} ` : name ? `${name} ${mark} ` : `${mark} `
+    const promptPlain = this.pickerOpen ? `${this.pickerSearch ? t('search') : APP} ${mark} ` : searching ? `${t('search')} ${mark} ` : name ? `${name} ${mark} ` : `${mark} `
     const pw = this.promptWidth = strWidth(promptPlain)
     this.promptNameWidth = !this.pickerOpen && !searching && name ? strWidth(name) : 0
     const target = this.pickerOpen || searching ? null : this.replyTo ?? this.reactTo ?? this.editing
@@ -2611,7 +2617,7 @@ export class Ui {
     // The prompt says who the line talks to: the chat's name, in the colour it has as a sender in groups (colorFor
     // of the same jid; a group's own jid for a group), or, with the chat list open, the app, in WhatsApp's green.
     const color = this.pickerOpen || searching ? this.green : this.current ? colorFor(this.current) : 0
-    const who = this.pickerOpen ? APP : searching ? t('search') : name
+    const who = this.pickerOpen ? (this.pickerSearch ? t('search') : APP) : searching ? t('search') : name
     const prompt = who ? `{${color}-fg}${esc(who)}{/${color}-fg} ${mark} ` : `${mark} `
     const out = visible.map((l, i) => (this.inputTop + i === 0 ? prompt : ' '.repeat(pw)) + render(l, this.inputTop + i))
     this.input.setContent(out.join('\n'))
@@ -2844,7 +2850,7 @@ export class Ui {
         // Mentions by first name, in the colour the person's name has in groups; where each lands is kept for a click.
         const marks = new Map<string, { jid: string; width: number }>()
         // Mine still within the editing window: the passages the check found wrong, underlined in yellow (sentFixesFor);
-        // while searching, the search's words instead, underlined in bold.
+        // while searching, the search's words instead, in reverse video.
         const words = this.search?.words.length ? this.search.words : null
         const fixes = !words && mine && type === 'text' ? this.sentFixesFor(row) : null
         if (fixes) expires = Math.min(expires, row.ts + EDIT_WINDOW)
@@ -2853,7 +2859,7 @@ export class Ui {
           marks.set(token, { jid, width: strWidth(`@${first}`) })
           return token
         }).replace(/\uE000/g, '{underline}{yellow-fg}').replace(/\uE001/g, '{/yellow-fg}{/underline}')
-          .replace(/\uE002/g, '{underline}{bold}').replace(/\uE003/g, '{/bold}{/underline}')
+          .replace(/\uE002/g, '{inverse}').replace(/\uE003/g, '{/inverse}')
         const wrapped = shown.split('\n').flatMap(l => wrapTagged(l, wrapAt))
         wrapped.forEach((l, i) => {
           const tw = visibleWidth(l)
