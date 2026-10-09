@@ -16,6 +16,16 @@ export interface ContactRow {
   notify: string | null
 }
 
+/** What WhatsApp says of a chat, asked at most once a day (Wa.ensureProfile): its picture, "about" and group size. */
+export interface ProfileRow {
+  jid: string
+  about: string | null
+  members: number | null
+  /** The picture's file in the chat's media folder; '' with none, or none to be seen. */
+  avatar: string
+  fetched: number
+}
+
 export interface ReactionRow {
   chat_jid: string
   msg_id: string
@@ -101,6 +111,13 @@ db.exec(`
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS profiles (
+    jid TEXT PRIMARY KEY,
+    about TEXT,
+    members INTEGER,
+    avatar TEXT NOT NULL DEFAULT '',
+    fetched INTEGER NOT NULL
+  );
 `)
 
 const q = {
@@ -129,6 +146,9 @@ const q = {
   setLid: db.prepare(`INSERT OR REPLACE INTO lids (lid, pn) VALUES (?, ?)`),
   getPn: db.prepare(`SELECT pn FROM lids WHERE lid = ?`),
   getLid: db.prepare(`SELECT lid FROM lids WHERE pn = ?`),
+  getProfile: db.prepare(`SELECT * FROM profiles WHERE jid = ?`),
+  listProfiles: db.prepare(`SELECT * FROM profiles`),
+  setProfile: db.prepare(`INSERT OR REPLACE INTO profiles (jid, about, members, avatar, fetched) VALUES (?, ?, ?, ?, ?)`),
   upsertMessage: db.prepare(`
     INSERT INTO messages (id, chat_jid, sender_jid, from_me, ts, type, text, push_name, quoted,
       media_path, media_mime, media_name, media_w, media_h, status, raw)
@@ -231,6 +251,15 @@ export const store = {
   },
   getContact(jid: string): ContactRow | undefined {
     return q.getContact.get(jid) as unknown as ContactRow | undefined
+  },
+  getProfile(jid: string): ProfileRow | undefined {
+    return q.getProfile.get(jid) as unknown as ProfileRow | undefined
+  },
+  listProfiles(): ProfileRow[] {
+    return q.listProfiles.all() as unknown as ProfileRow[]
+  },
+  setProfile(p: ProfileRow) {
+    q.setProfile.run(p.jid, p.about, p.members, p.avatar, p.fetched)
   },
 
   setLid(lid: string, pn: string) {

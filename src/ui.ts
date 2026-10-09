@@ -1,13 +1,14 @@
 import blessed from 'blessed'
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
+import path from 'node:path'
 import QRCode from 'qrcode'
-import { store, type ChatRow, type MessageRow, type ReactionRow } from './db.js'
-import { chatName, contactName, shortName, canonicalJid, thumbPath, previewPath, hasPreviewImage, mediaFile, jidUser, withMentions, typeLabel, pinTarget, type ConnState } from './wa.js'
+import { store, type ChatRow, type MessageRow, type ProfileRow, type ReactionRow } from './db.js'
+import { chatName, contactName, shortName, canonicalJid, thumbPath, previewPath, hasPreviewImage, mediaFile, mediaDir, jidUser, withMentions, typeLabel, pinTarget, type ConnState } from './wa.js'
 import { inHerdr, reportHerdr, doneHerdr, titleHerdr, tabNameHerdr, releaseHerdr, openChatHerdr, focusHerdr, focusNextChatHerdr, paneFocusedHerdr } from './herdr.js'
 import type { Backend } from './backend.js'
-import { waMarkup, clipTagged, esc, colorFor, setTheme, dim, faint, italic, padding, fmtTime, fmtDay, fmtWhen, daysAgo, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, fold, graphemes, wrapChars } from './format.js'
-import { decode, cached, cellSize, halfBlocks, blockGrid, blockCell, detectImageMode, detectRgb, KittyImages, RgbPainter, type BlockGrid, type Decoded, type ImageMode, type RgbCell } from './image.js'
+import { waMarkup, clipTagged, esc, colorFor, setTheme, dim, faint, italic, padding, fmtTime, fmtDay, fmtWhen, fmtWhenAt, daysAgo, dayKey, truncate, strWidth, wrapTagged, alignRight, visibleWidth, fold, graphemes, wrapChars } from './format.js'
+import { decode, cached, decodeThumb, thumbCached, cellSize, halfBlocks, blockGrid, blockCell, detectImageMode, detectRgb, KittyImages, RgbPainter, type BlockGrid, type Decoded, type ImageMode, type RgbCell } from './image.js'
 import { logger, uiLog } from './log.js'
 import { linksIn, showLinks, URL_RE } from './links.js'
 import { patchBlessedDraw, patchBlessedUnicode } from './unicode.js'
@@ -251,6 +252,19 @@ export class Ui {
   private pickerSearch = false
   private pickerHits = new Map<number, MessageRow>()
   private pickerCont = new Map<number, number>()
+  /**
+   * The list's rows as set, each row that continues another as what comes before its text (a picture's lower half,
+   * an indent) and the text, so the selection's background can go over the text; and those that have it now.
+   */
+  private pickerItems: string[] = []
+  private pickerParts = new Map<number, [string, string]>()
+  private pickerLit: number[] = []
+  /** What WhatsApp says of each chat (Wa.ensureProfile), the chats already asked for, and each row's decoded picture. */
+  private profiles = new Map<string, ProfileRow>()
+  private profileAsked = new Set<string>()
+  private pickerAvatars = new Map<number, { path: string; d: Decoded }>()
+  /** The last press on the list, and whether it was on a chat's photo (see the list's 'select'). */
+  private pickerPress: { at: number; photo: boolean } | undefined
   private pickerFound: { query: string; rows: MessageRow[] } | undefined
   private ghostAbort: AbortController | undefined
   /** Right-arrow presses with the next suggestion still on the way: accepted on arrival, one per arrow, so → → → correct in a chain. */
@@ -358,8 +372,11 @@ export class Ui {
   /** What the model says each image shows (by chat and message), null when it gave nothing; the one on its way. */
   private descriptions = new Map<string, string | null>()
   private describing: { key: string; abort: AbortController } | undefined
-  /** The image or sticker open in the popup (a click on it), and where its picture went on the screen (0-based). */
-  private viewing: MessageRow | null = null
+  /**
+   * What the popup shows (a click on it): a message's picture or a chat's photo, its file, the key its description goes
+   * by; and where the picture went on the screen (0-based).
+   */
+  private viewing: { key: string; path: string; row?: MessageRow } | null = null
   private viewerBox: blessed.Widgets.BoxElement
   private viewerImg: { d: Decoded; path: string; x: number; y: number; cols: number; rows: number } | undefined
   private mode: ImageMode
@@ -591,7 +608,7 @@ export class Ui {
     const screen = this.screen as unknown as { draw: (start: number, end: number) => void }
     const draw = screen.draw.bind(screen)
     screen.draw = (start, end) => { this.rgbPaint?.snapshot(this.screenRows('olines'), this.screenRows('lines')); draw(start, end) }
-    this.screen.on('render', () => { this.loadVisibleImages(); this.placeImages(); this.paintRgb() })
+    this.screen.on('render', () => { this.loadVisibleImages(); this.loadVisibleProfiles(); this.placeImages(); this.paintRgb() })
 
     // The mouse wheel scrolls one line per notch (by default blessed jumps half the panel, or two list entries).
     this.msgBox.removeAllListeners('wheeldown')
@@ -604,12 +621,25 @@ export class Ui {
     this.picker.on('element wheeldown', () => { this.picker.scroll(1, true); this.screen.render() })
     this.picker.on('element wheelup', () => { this.picker.scroll(-1, true); this.screen.render() })
 
-    this.picker.on('select', (_item, index) => this.pickChat(index))
+    // A click on a row already selected comes as 'select' too, before 'element click': one on its photo opens the photo.
+    this.picker.on('select', (_item, index) => {
+      if (this.pickerPress && this.pickerPress.photo && Date.now() - this.pickerPress.at < 1000) return
+      this.pickChat(index)
+    })
+    this.picker.on('element mousedown', (el: blessed.Widgets.BlessedElement, data: { x: number }) => {
+      const i = this.picker.getItemIndex(el), at = this.pickerCont.get(i) ?? i, c = this.pickerSlots[at]
+      const col = data.x - num(this.picker.aleft) - num(this.picker.ileft)
+      this.pickerPress = { at: Date.now(), photo: !!c && col < 4 && !this.pickerHits.has(at) && !!this.profiles.get(c.jid)?.avatar }
+    })
     // The click lands on the item (a child of the list) and arrives as 'element click', after blessed has already
-    // moved the selection; on a day separator it opens nothing.
-    this.picker.on('element click', (el: blessed.Widgets.BlessedElement) => {
-      const i = this.picker.getItemIndex(el), at = this.pickerCont.get(i) ?? i
-      if (this.pickerSlots[at]) this.pickChat(at)
+    // moved the selection; on a day separator it opens nothing. On a chat's photo (its first four columns, on either
+    // row) it opens the photo, large, in the popup.
+    this.picker.on('element click', (el: blessed.Widgets.BlessedElement, data: { x: number }) => {
+      const i = this.picker.getItemIndex(el), at = this.pickerCont.get(i) ?? i, c = this.pickerSlots[at]
+      if (!c) return
+      const col = data.x - num(this.picker.aleft) - num(this.picker.ileft)
+      if (col < 4 && !this.pickerHits.has(at) && this.profiles.get(c.jid)?.avatar) return this.openPhoto(c.jid)
+      if (this.pickerOpen) this.pickChat(at)
     })
     // The selection never rests on a day separator: it goes on past it the way it was going, or back when there's
     // nothing further.
@@ -621,6 +651,7 @@ export class Ui {
         if (j >= 0) return this.picker.select(j)
       }
       this.pickerAt = i
+      this.lightPickerRows(i)
     })
 
     this.tabsBar.on('click', (data: { x: number; y: number }) => {
@@ -1843,7 +1874,7 @@ export class Ui {
    * A message found, as rows of the list: its chat's name in its colour, who wrote it and, at the right edge, when;
    * then up to two lines of its text, indented, from a little before the first match, the matches in reverse video.
    */
-  private pickerHitRows(m: MessageRow, c: ChatRow, width: number): string[] {
+  private pickerHitRows(m: MessageRow, c: ChatRow, width: number): [string, [string, string][]] {
     const color = colorFor(c.jid)
     const who = m.from_me ? t('me') : c.is_group ? contactName(m.sender_jid) : ''
     const right = faint(esc(fmtWhen(m.ts)))
@@ -1861,7 +1892,7 @@ export class Ui {
       ;[...line].forEach((ch, i) => { if (at.has(i) !== on) { out += on ? '{/inverse}' : '{inverse}'; on = !on }; out += esc(ch) })
       return on ? `${out}{/inverse}` : out
     }
-    return [`${head}${' '.repeat(Math.max(1, padding(`${head}${right}`, width)))}${right}`, ...lines.slice(0, 2).map(l => indent + marked(l))]
+    return [`${head}${' '.repeat(Math.max(1, padding(`${head}${right}`, width)))}${right}`, lines.slice(0, 2).map(l => [indent, marked(l)])]
   }
 
   /** Opens the chat the way the list does: in this pane or tab ('here'), or, in Herdr, in a new pane or tab. */
@@ -1920,30 +1951,48 @@ export class Ui {
     // most recent at the bottom, each on its first row (selectable) and the rows of text after it (skipped over).
     this.pickerHits.clear()
     this.pickerCont.clear()
+    this.pickerParts.clear()
+    this.pickerAvatars.clear()
+    this.pickerLit = []
+    this.profiles = new Map(store.listProfiles().map(p => [p.jid, p]))
     const hits = this.pickerSearch && this.filter.trim().length >= 2 ? this.searchAll(this.filter) : []
     for (const m of hits) {
       const chat = store.getChat(m.chat_jid)
       if (!chat) continue
       const start = slots.length, rows = this.pickerHitRows(m, chat, width)
       this.pickerHits.set(start, m)
-      slots.push(chat); items.push(rows[0]!)
-      for (const r of rows.slice(1)) { this.pickerCont.set(slots.length, start); slots.push(null); items.push(r) }
+      slots.push(chat); items.push(rows[0])
+      for (const part of rows[1]) { this.pickerCont.set(slots.length, start); this.pickerParts.set(slots.length, part); slots.push(null); items.push(part.join('')) }
     }
     let lastBucket = ''
     this.pickerLast.clear()
+    // A blank row between chats, but for the first one and the one right under a day's separator.
+    let fresh = true
     for (const c of this.pickerSearch ? [] : this.filtered) {
       const b = bucket(c.last_ts)
       if (!words.length && b !== lastBucket) {
         lastBucket = b
         slots.push(null)
-        items.push(dim(esc(`${this.ruleChar.repeat(2)} ${b} ${this.ruleChar.repeat(Math.max(2, width - strWidth(b) - 4))}`)))
+        // Centred, as the days in the chat are.
+        const label = `${this.ruleChar.repeat(2)} ${b} ${this.ruleChar.repeat(2)}`
+        items.push(dim(esc(`${' '.repeat(Math.max(0, Math.floor((width - strWidth(label)) / 2)))}${label}`)))
+        fresh = true
       }
+      if (!fresh) { slots.push(null); items.push('') }
+      fresh = false
       this.pickerLast.set(c.jid, store.lastMessage(c.jid))
-      slots.push(c)
-      items.push('')
+      // Two rows each: the first is the one selected, the second is skipped over.
+      this.pickerCont.set(slots.length + 1, slots.length)
+      slots.push(c, null)
+      items.push('', '')
     }
     this.pickerSlots = slots
-    slots.forEach((c, i) => { if (c && !this.pickerHits.has(i)) items[i] = this.pickerItem(c, width) })
+    slots.forEach((c, i) => {
+      if (!c || this.pickerHits.has(i)) return
+      const [first, second] = this.pickerRows(c, width, i)
+      items[i] = first; items[i + 1] = second.join(''); this.pickerParts.set(i + 1, second)
+    })
+    this.pickerItems = items
     this.picker.setItems(items as unknown as string[])
     // List flush to the bottom when it's shorter than the panel, with a blank line separating it from the prompt.
     // Never shorter than one line: blessed skips an element of zero height altogether, leaving what was drawn there
@@ -1980,48 +2029,108 @@ export class Ui {
   }
 
   /**
-   * A chat's row in the list: its name in the colour it has as a sender in groups (bold with unread messages, the
-   * filter's words underlined), 👀 while the person is online and "·" when it has a tab; then the braille spinner
-   * while someone types there and an excerpt of the last message; at the right edge, how long ago (with my last
-   * message's state in the time's separator when it's today's, see myTime), and before it the unread count, both in
-   * WhatsApp's green.
+   * A chat's two rows in the list, its picture on the left of both (avatarCells). On the first, its name in the colour
+   * it has as a sender in groups (bold with unread messages, the filter's words underlined), 👀 while the person is
+   * online and "·" when it has a tab, and at the right edge when the last message was (fmtWhenAt). On the second, the
+   * chat's details (chatDetails), "a escrever…" while someone types there, and at the right edge the unread count,
+   * in WhatsApp's green. The second row comes as what goes before its text and the text (see pickerParts).
    */
-  private pickerItem(c: ChatRow, width: number): string {
-    const nameW = Math.min(28, Math.max(12, Math.floor(width * 0.35)))
-    const last = this.pickerLast.get(c.jid)
-    const typing = this.typing.has(c.jid)
+  private pickerRows(c: ChatRow, width: number, slot: number): [string, [string, string]] {
+    const [top, bottom] = this.avatarCells(c, slot)
+    const color = colorFor(c.jid)
     const eyes = !c.is_group && this.online.has(c.jid) && this.ruleChar === '─' ? ' 👀' : ''
     const open = this.tabs.includes(c.jid) ? ' ·' : ''
-    const name = truncate(chatName(c.jid), nameW - 1 - strWidth(eyes) - strWidth(open))
-    const color = colorFor(c.jid)
+    const ts = this.pickerLast.get(c.jid)?.ts ?? c.last_ts
+    const when = ts ? faint(esc(fmtWhenAt(ts))) : ''
+    const name = truncate(chatName(c.jid), Math.max(4, width - 5 - visibleWidth(when) - strWidth(eyes) - strWidth(open) - 2))
     const named = `{${color}-fg}${this.underlineMatches(name)}{/${color}-fg}`
-    const left = `${c.unread > 0 ? `{bold}${named}{/bold}` : named}${eyes}${dim(open)}`
-    const mark = typing ? `{${this.green}-fg}${spinnerFrame()}{/${this.green}-fg}` : ' '
-    const prefix = `${left}${' '.repeat(Math.max(1, nameW - visibleWidth(left)))}${mark} `
-    const ts = last?.ts ?? c.last_ts
-    const mine = last?.from_me ? last.status ?? 0 : null
-    const when = !ts ? '' : esc(mine != null && daysAgo(ts) <= 0 ? myTime(ts, mine) : fmtWhen(ts))
-    const right = c.unread > 0 ? `{${this.green}-fg}{bold}${c.unread}{/bold}  ${when}{/${this.green}-fg}` : faint(when)
-    const body = typing ? '' : last ? this.excerpt(last, !!c.is_group) : ''
-    const text = (s: string) => (typing ? `{${this.green}-fg}${esc(t('typingShort'))}{/${this.green}-fg}` : dim(esc(s)))
-    // The excerpt takes what's left; the time ends at the edge.
-    let room = width - visibleWidth(prefix) - visibleWidth(right) - 2
-    for (let i = 0; i < 4; i++) {
-      const base = `${prefix}${text(truncate(body, Math.max(0, room)))}`
-      const fill = padding(`${base}${right}`, width)
-      if (fill >= 2 || room <= 0) return `${base}${' '.repeat(Math.max(1, fill))}${right}`
-      room -= 2 - fill
-    }
-    return `${prefix}${text('')}  ${right}`
+    const first = ` ${c.unread > 0 ? `{bold}${named}{/bold}` : named}${eyes}${dim(open)}`
+    const unread = c.unread > 0 ? `{${this.green}-fg}{bold}${esc(t('unreadCount', c.unread))}{/bold}{/${this.green}-fg}` : ''
+    const room = Math.max(0, width - 5 - visibleWidth(unread) - 2)
+    const details = this.typing.has(c.jid) ? `{${this.green}-fg}${spinnerFrame()} ${esc(t('typingShort'))}{/${this.green}-fg}` : dim(esc(truncate(this.chatDetails(c), room)))
+    const second = ` ${details}`
+    const line = (lead: string, text: string, right: string) => `${lead}${text}${right ? `${' '.repeat(Math.max(1, padding(`${lead}${text}${right}`, width)))}${right}` : ''}`
+    return [line(top, first, when), [bottom, line('', second, unread)]]
   }
 
-  /** The last message, for its chat's row: who wrote it, in a group, and the text or what it is, mentions by name. */
-  private excerpt(last: MessageRow, group: boolean): string {
-    const who = group && !last.from_me ? `${contactName(last.sender_jid).split(' ')[0]}: ` : ''
-    const kind: Record<string, string> = { image: t('image'), video: t('video'), gif: t('gif'), sticker: t('sticker'), document: t('file'), audio: t('audio'), voice: t('voice'), location: t('location'), contact: t('contact'), poll: t('poll') }
-    const text = showLinks(withMentions(last.text)).replace(/\s+/g, ' ')
-    const body = last.type === 'text' ? text : last.type === 'deleted' ? t('deleted') : kind[last.type] ? `[${kind[last.type]}]${last.text ? ` ${text}` : ''}` : typeLabel(last)
-    return `${who}${body}`
+  /**
+   * A chat's picture as two rows of four cells: its picture from WhatsApp in half-blocks, or blank cells where Kitty
+   * places it (placeImages), remembered by row; without one, its initials on the chat's colour.
+   */
+  private avatarCells(c: ChatRow, slot: number): [string, string] {
+    const avatar = this.profiles.get(c.jid)?.avatar
+    const file = avatar ? path.join(mediaDir(c.jid), avatar) : null
+    const d = file ? thumbCached(file) : undefined
+    if (file && d && !(d instanceof Error) && this.mode !== 'none') {
+      // Kitty keeps images by this key: the small copy's own, apart from the big one the popup shows.
+      this.pickerAvatars.set(slot, { path: `${file}#small`, d })
+      if (this.kitty) return ['    ', '    ']
+      const [top, bottom] = halfBlocks(d, 4, 2)
+      return [top!, bottom!]
+    }
+    const words = chatName(c.jid).split(/\s+/).filter(w => /^\p{L}/u.test(w) && !/^(de|da|do|das|dos|e)$/i.test(w))
+    const initials = (words.length ? words.slice(0, 2).map(w => [...w][0]!.toUpperCase()).join('') : '#').padEnd(2)
+    const color = colorFor(c.jid)
+    return [`{${color}-bg}{bold} ${esc(initials)} {/bold}{/${color}-bg}`, `{${color}-bg}    {/${color}-bg}`]
+  }
+
+  /**
+   * What the list says of a chat under its name: for a person, their number (the lid's, when that's all there is,
+   * by the number it stands for when known) and the "about" of their profile; for a group, how many members it has.
+   */
+  private chatDetails(c: ChatRow): string {
+    const p = this.profiles.get(c.jid)
+    if (c.is_group) return p?.members != null ? t('groupMembers', p.members) : t('groupOnly')
+    const pn = c.jid.endsWith('@lid') ? store.getPn(c.jid) : c.jid
+    const digits = pn ? jidUser(pn) : ''
+    const number = /^351\d{9}$/.test(digits) ? `+351 ${digits.slice(3, 6)} ${digits.slice(6, 9)} ${digits.slice(9)}` : digits ? `+${digits}` : ''
+    return [number, p?.about?.replace(/\s+/g, ' ')].filter(Boolean).join(' · ')
+  }
+
+  /**
+   * A row that continues the selected one, with the selection's background over its text up to the row's last cell,
+   * as far as the list paints the selected row itself (a cell past the width the rows' text is laid out to).
+   */
+  private litRow(i: number): string {
+    const [lead, text] = this.pickerParts.get(i) ?? ['', this.pickerItems[i] ?? '']
+    const width = num(this.picker.width) - num(this.picker.iwidth)
+    const bg = this.bubbleBg.theirs
+    return `${lead}{${bg}-bg}${text}${' '.repeat(padding(`${lead}${text}`, width))}{/${bg}-bg}`
+  }
+
+  /** The rows that continue the one selected get its background; those that had it go back to their own look. */
+  private lightPickerRows(i: number) {
+    for (const j of this.pickerLit) this.picker.setItem(j as unknown as blessed.Widgets.BlessedElement, this.pickerItems[j] ?? '')
+    this.pickerLit = []
+    for (let j = i + 1; this.pickerCont.get(j) === i; j++) {
+      this.picker.setItem(j as unknown as blessed.Widgets.BlessedElement, this.litRow(j))
+      this.pickerLit.push(j)
+    }
+    // Its rows stay in view with it: blessed only keeps the selected one, which at the bottom left them out.
+    const list = this.picker as unknown as { childBase: number; childOffset: number }
+    const rows = num(this.picker.height) - num(this.picker.iheight), last = this.pickerLit.at(-1) ?? i
+    if (last >= list.childBase + rows) { list.childBase = last - rows + 1; list.childOffset = i - list.childBase }
+  }
+
+  /**
+   * After each frame with the list open: the profiles of the chats in view are asked for (once each per session; the
+   * server asks WhatsApp at most once a day), and their photos' small copies decoded (decodeThumb, kept for the
+   * session), the rows drawn again once they are; the most recent chats first, from the bottom of the list up.
+   */
+  private loadVisibleProfiles() {
+    if (!this.pickerOpen || this.pickerSearch) return
+    const base = (this.picker as unknown as { childBase: number }).childBase
+    const rows = num(this.picker.height) - num(this.picker.iheight)
+    for (let i = Math.min(this.pickerSlots.length, base + rows) - 1; i >= base; i--) {
+      const c = this.pickerSlots[i]
+      if (!c || this.pickerHits.has(i)) continue
+      // Only once there's a connection to ask through: asked before, at startup, the request was lost and the chat
+      // taken as asked, and only the chats scrolled to later got their photos.
+      if (!this.profileAsked.has(c.jid) && this.wa.state === 'open') { this.profileAsked.add(c.jid); this.wa.ensureProfile(c.jid) }
+      const avatar = this.profiles.get(c.jid)?.avatar
+      const file = avatar ? path.join(mediaDir(c.jid), avatar) : null
+      if (file && !thumbCached(file)) decodeThumb(file).then(() => { if (this.pickerOpen) { this.redrawPickerRows([c.jid]); this.screen.render() } })
+    }
   }
 
   /** A chat's name with the filter's words underlined wherever they match, accents and case aside. */
@@ -2078,7 +2187,13 @@ export class Ui {
     if (!this.pickerOpen) return
     const want = new Set(jids)
     const width = num(this.picker.width) - num(this.picker.iwidth) - 1
-    this.pickerSlots.forEach((c, i) => { if (c && want.has(c.jid) && !this.pickerHits.has(i)) this.picker.setItem(i as unknown as blessed.Widgets.BlessedElement, this.pickerItem(c, width)) })
+    this.pickerSlots.forEach((c, i) => {
+      if (!c || !want.has(c.jid) || this.pickerHits.has(i)) return
+      const [first, second] = this.pickerRows(c, width, i)
+      this.pickerItems[i] = first; this.pickerItems[i + 1] = second.join(''); this.pickerParts.set(i + 1, second)
+      this.picker.setItem(i as unknown as blessed.Widgets.BlessedElement, first)
+      this.picker.setItem((i + 1) as unknown as blessed.Widgets.BlessedElement, this.pickerLit.includes(i + 1) ? this.litRow(i + 1) : second.join(''))
+    })
   }
 
   // ---------- state ----------
@@ -3067,7 +3182,7 @@ export class Ui {
   /** The selected message's picture description, beside it, when images are drawn in half-blocks (which lose its detail). */
   private imageAside(row: MessageRow): string | undefined {
     const path = this.mode === 'blocks' ? this.pictureOf(row) : null
-    return path ? this.describedAs(row, path) : undefined
+    return path ? this.describedAs(`${row.chat_jid} ${row.id}`, path) : undefined
   }
 
   /**
@@ -3084,14 +3199,14 @@ export class Ui {
   }
 
   /**
-   * What the message's picture (`path`, see pictureOf) shows, from the model, ready for the screen: "a descrever…"
+   * What a picture (`path`: a message's, see pictureOf, or a chat's photo) shows, from the model, ready for the screen,
+   * by `key` (the message's chat and id, or the photo's chat): "a descrever…"
    * while it answers, nothing when it can't. Asked for once the picture is decoded, kept for the session, and given
    * up if neither the selection nor the popup is on it any more (dropDescribing). A model that doesn't answer is left
    * alone for a minute, as for the writing suggestions.
    */
-  private describedAs(row: MessageRow, path: string): string | undefined {
+  private describedAs(key: string, path: string): string | undefined {
     if (!llmEnabled) return undefined
-    const key = `${row.chat_jid} ${row.id}`
     if (this.descriptions.has(key)) { const text = this.descriptions.get(key); return text ? dim(italic(esc(text))) : undefined }
     const d = cached(path)
     if (!d || d instanceof Error) return undefined
@@ -3100,7 +3215,8 @@ export class Ui {
       this.describing = { key, abort }
       const done = () => {
         this.describing = undefined
-        if (this.current === row.chat_jid) { this.dirtyMessages = true; this.scheduleRender() }
+        this.dirtyMessages = true
+        this.scheduleRender()
       }
       describe(d.png, abort.signal).then(text => {
         if (abort.signal.aborted) return
@@ -3118,7 +3234,7 @@ export class Ui {
 
   /** A description on its way for an image neither selected nor in the popup is given up. */
   private dropDescribing() {
-    const keep = [this.selected, this.viewing].map(r => (r ? `${r.chat_jid} ${r.id}` : ''))
+    const keep = [this.selected ? `${this.selected.chat_jid} ${this.selected.id}` : '', this.viewing?.key ?? '']
     if (this.describing && !keep.includes(this.describing.key)) {
       this.describing.abort.abort()
       this.describing = undefined
@@ -3137,8 +3253,17 @@ export class Ui {
       this.wa.ensureMedia(row)
       return this.flash(t('downloading'))
     }
-    this.viewing = row
+    this.viewing = { key: `${row.chat_jid} ${row.id}`, path, row }
     this.quickFor = undefined
+    this.viewerBox.show()
+    this.renderNow()
+  }
+
+  /** Opens a chat's photo in the popup, as large as it fits, with its description: a click on it in the list. */
+  private openPhoto(jid: string) {
+    const avatar = this.profiles.get(jid)?.avatar
+    if (!avatar) return
+    this.viewing = { key: `photo ${jid}`, path: path.join(mediaDir(jid), avatar) }
     this.viewerBox.show()
     this.renderNow()
   }
@@ -3158,16 +3283,16 @@ export class Ui {
    * In half-blocks the picture is in the lines; with Kitty, placeImages puts it there.
    */
   private drawViewer() {
-    const row = this.viewing!, box = this.viewerBox
+    const view = this.viewing!, box = this.viewerBox, path = view.path
     const iw = Math.max(1, num(this.screen.width) - 4 - 2), ih = Math.max(1, num(this.screen.height) - 2 - 2)
-    const path = this.pictureOf(row)!, d = cached(path)
+    const d = cached(path)
     this.viewerImg = undefined
     if (!d) {
-      decode(path).then(() => { if (this.viewing === row) this.scheduleRender() })
+      decode(path).then(() => { if (this.viewing === view) this.scheduleRender() })
       return box.setContent(dim(t('loading')))
     }
-    if (d instanceof Error) return box.setContent(dim(t('mediaUnreadable', row.type, esc(d.message))))
-    const about = this.describedAs(row, path)
+    if (d instanceof Error) return box.setContent(dim(t('mediaUnreadable', view.row?.type ?? t('image'), esc(d.message))))
+    const about = this.describedAs(view.key, path)
     const text = about ? wrapTagged(about, Math.min(iw, 80)) : []
     const below = Math.max(llmEnabled ? 5 : 0, text.length ? text.length + 1 : 0)
     const { cols, rows } = cellSize(d.w, d.h, iw, Math.max(1, ih - below), true)
@@ -3247,6 +3372,11 @@ export class Ui {
     this.kitty.clear()
     const v = this.viewerImg
     if (v) return this.kitty.place(v.path, v.d, v.x + 1, v.y + 1, v.cols, v.rows)
+    // With the list open, the pictures of the chats whose two rows are in view.
+    if (this.pickerOpen) {
+      for (const a of this.visibleAvatars()) this.kitty.place(a.path, a.d, a.x + 1, a.y + 1, 4, 2)
+      return
+    }
     if (!this.images.length || !this.current || this.pickerOpen) return
     const clines = this.msgBox._clines
     if (!clines?.ftor) return
@@ -3263,6 +3393,14 @@ export class Ui {
       const row = num(this.msgBox.atop) + num(this.msgBox.itop) + (visTop - base) + 1
       this.kitty.place(img.path, img.d, col + img.pad, row, img.cols, visBottom - visTop, (visTop - top) / img.rows, (visBottom - top) / img.rows)
     }
+  }
+
+  /** The chat list's pictures whose two rows are both in view, and the screen cell (0-based) of their top left. */
+  private visibleAvatars(): { path: string; d: Decoded; x: number; y: number }[] {
+    const base = (this.picker as unknown as { childBase: number }).childBase
+    const rows = num(this.picker.height) - num(this.picker.iheight)
+    const x = num(this.picker.aleft) + num(this.picker.ileft), y = num(this.picker.atop) + num(this.picker.itop)
+    return [...this.pickerAvatars].filter(([i]) => i >= base && i + 1 < base + rows).map(([i, a]) => ({ ...a, x, y: y + i - base }))
   }
 
   /** blessed's frame buffers: `lines` is the frame being built, `olines` the one last drawn to the terminal. */
@@ -3309,6 +3447,14 @@ export class Ui {
         if (visTop >= visBottom) continue
         const grid = blockGrid(img.d, img.cols, img.rows)
         for (let ln = visTop; ln < visBottom; ln++) pictureRow(grid, img.cols, ln - top, x0 + img.pad, y0 + ln - base)
+      }
+    }
+    // The pictures in the chat list.
+    if (this.pickerOpen && this.mode === 'blocks') {
+      for (const a of this.visibleAvatars()) {
+        const grid = blockGrid(a.d, 4, 2)
+        pictureRow(grid, 4, 0, a.x, a.y)
+        pictureRow(grid, 4, 1, a.x, a.y + 1)
       }
     }
     // The popup's picture, over the panel.

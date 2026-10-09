@@ -369,6 +369,10 @@ export class Wa extends EventEmitter<WaEvents> {
    */
   private online = new Map<string, boolean>()
   private subscribed = new Set<string>()
+  /** The chats whose profile is waiting to be asked of WhatsApp (ensureProfile), and whether one is being asked. */
+  private profileQueue: string[] = []
+  private profileAsked = new Set<string>()
+  private profileBusy = false
   /** Per group, the members whose presence is followed, and how many of them are online. */
   private groupMembers = new Map<string, string[]>()
   private groupOnline = new Map<string, number>()
@@ -504,6 +508,8 @@ export class Wa extends EventEmitter<WaEvents> {
         if (sock.user?.lid) store.setLid(jidNormalizedUser(sock.user.lid), this.me)
         // Baileys announces "unavailable" on connect; it's activity in the terminal that sets it back to available.
         this.markAvailable(false)
+        // Profiles asked for while it was down are asked now.
+        void this.nextProfile()
         this.setState('open', this.me)
         this.refreshGroups().catch(e => logger.warn({ e }, 'refreshGroups'))
       } else if (connection === 'close') {
@@ -934,6 +940,51 @@ export class Wa extends EventEmitter<WaEvents> {
    * neither comes (the upload expired, an old message), a `.none` mark stops it being asked for again.
    * Notifies via 'messages' when done either way.
    */
+  /**
+   * A chat's picture, "about" and, for a group, how many members it has, asked of WhatsApp for the chat list at most
+   * once a day, one chat at a time; the picture, whole (shown small in the list and large when clicked), goes to the
+   * chat's media folder. A picture or "about"
+   * hidden by privacy, or missing, is stored as none; a request that fails is tried again the next day.
+   */
+  ensureProfile(jid: string) {
+    const known = store.getProfile(jid)
+    if (known && Date.now() / 1000 - known.fetched < 86400) return
+    if (!this.profileAsked.has(jid)) { this.profileAsked.add(jid); this.profileQueue.push(jid) }
+    void this.nextProfile()
+  }
+
+  private async nextProfile() {
+    const sock = this.sock
+    if (this.profileBusy || !sock || this.state !== 'open') return
+    const jid = this.profileQueue.shift()
+    if (!jid) return
+    this.profileBusy = true
+    const fetched = Math.floor(Date.now() / 1000)
+    try {
+      let about: string | null = null, members: number | null = null, avatar = ''
+      if (jid.endsWith('@g.us')) members = (await sock.groupMetadata(jid)).participants.length
+      else about = ((await sock.fetchStatus(jid))?.[0] as { status?: { status?: string | null } } | undefined)?.status?.status || null
+      const url = await sock.profilePictureUrl(jid, 'image').catch(() => undefined)
+      if (url) {
+        const res = await fetch(url)
+        if (res.ok) {
+          fs.mkdirSync(mediaDir(jid), { recursive: true })
+          fs.writeFileSync(path.join(mediaDir(jid), 'profile.jpg'), Buffer.from(await res.arrayBuffer()))
+          avatar = 'profile.jpg'
+        }
+      }
+      store.setProfile({ jid, about, members, avatar, fetched })
+      this.emit('chats')
+    } catch (e) {
+      logger.debug({ e: String(e), jid }, 'profile')
+      store.setProfile({ jid, about: null, members: null, avatar: '', fetched })
+    } finally {
+      this.profileAsked.delete(jid)
+      this.profileBusy = false
+      void this.nextProfile()
+    }
+  }
+
   ensurePreview(row: MessageRow) {
     const k = `${row.chat_jid}/${row.id}`, file = previewPath(row.chat_jid, row.id)
     if (this.previewing.has(k) || !this.sock || fs.existsSync(file) || fs.existsSync(`${file}.none`)) return

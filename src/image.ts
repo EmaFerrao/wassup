@@ -92,6 +92,47 @@ export function decode(path: string): Promise<Decoded | Error> {
 }
 
 /**
+ * Small copies of pictures, `THUMB_PX` square at most, for the chat list's photos: decoded once each and kept apart
+ * from the big pictures' cache (CACHE_MAX), where dozens of photos would push each other and the messages' images
+ * out and be decoded again at every scroll. Their `w`×`h` is the copy's own, which is what Kitty is given.
+ */
+const THUMB_PX = 64
+const thumbs = new Map<string, Decoded | Error>()
+const thumbsPending = new Map<string, Promise<Decoded | Error>>()
+
+export function thumbCached(path: string): Decoded | Error | undefined {
+  return thumbs.get(path)
+}
+
+export function decodeThumb(path: string): Promise<Decoded | Error> {
+  const hit = thumbs.get(path)
+  if (hit) return Promise.resolve(hit)
+  const p = thumbsPending.get(path)
+  if (p) return p
+  const job = (async (): Promise<Decoded | Error> => {
+    await acquire()
+    try {
+      const sharp = await loadSharp()
+      if (sharp) {
+        const img = sharp(path, { animated: false }).rotate().resize({ width: THUMB_PX, height: THUMB_PX, fit: 'cover' })
+        const png = await img.clone().png().toBuffer()
+        const { data, info } = await img.clone().ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+        return { w: info.width, h: info.height, png, rgba: Buffer.from(data), rw: info.width, rh: info.height }
+      }
+      const img = (await Jimp.read(path)).cover({ w: THUMB_PX, h: THUMB_PX })
+      return { w: img.width, h: img.height, png: Buffer.from(await img.getBuffer('image/png')), rgba: Buffer.from(img.bitmap.data), rw: img.width, rh: img.height }
+    } catch (e) {
+      return e instanceof Error ? e : new Error(String(e))
+    } finally {
+      release()
+    }
+  })()
+  thumbsPending.set(path, job)
+  job.then(r => { thumbs.set(path, r); thumbsPending.delete(path) })
+  return job
+}
+
+/**
  * Size in cells for a w×h px image, assuming cells twice as tall as they are wide. With `fill` it occupies the
  * whole available width (shrunk only if the height doesn't fit); without `fill` it never grows past its natural
  * size.

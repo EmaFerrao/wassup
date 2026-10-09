@@ -77,6 +77,8 @@ const STRINGS = {
   weekdays: { pt: 'dom seg ter qua qui sex sáb', en: 'Sun Mon Tue Wed Thu Fri Sat' },
   chatsCount: { pt: '{0} conversas', en: '{0} chats' },
   unreadCount: { pt: '{0} por ler', en: '{0} unread' },
+  groupMembers: { pt: 'grupo · {0} membros', en: 'group · {0} members' },
+  groupOnly: { pt: 'grupo', en: 'group' },
   pinned: { pt: '📌 fixou uma mensagem', en: '📌 pinned a message' },
   unpinned: { pt: '📌 desafixou uma mensagem', en: '📌 unpinned a message' },
   album: { pt: 'álbum', en: 'album' },

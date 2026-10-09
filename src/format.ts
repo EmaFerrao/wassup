@@ -113,6 +113,14 @@ export function fmtWhen(ts: number): string {
   return `${d.getDate()} ${MONTHS[d.getMonth()]}${d.getFullYear() === new Date().getFullYear() ? '' : ` ${d.getFullYear()}`}`
 }
 
+/** When a chat's last message was, for its row in the list: the time today, "ontem 21:35", "12 set 21:35", "12 set 2025". */
+export function fmtWhenAt(ts: number): string {
+  const d = new Date(ts * 1000), days = daysAgo(ts)
+  if (days <= 0) return fmtTime(ts)
+  if (days === 1) return `${t('yesterday')} ${fmtTime(ts)}`
+  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear() === new Date().getFullYear() ? fmtTime(ts) : d.getFullYear()}`
+}
+
 export function dayKey(ts: number): string {
   return new Date(ts * 1000).toDateString()
 }
