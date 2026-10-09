@@ -1840,7 +1840,7 @@ export class Ui {
     const color = colorFor(c.jid)
     const named = `{${color}-fg}${esc(truncate(chatName(c.jid), nameW - 1))}{/${color}-fg}`
     const prefix = `${named}${' '.repeat(Math.max(1, nameW - visibleWidth(named)))}  `
-    const right = faint(`${esc(fmtWhen(m.ts))} `)
+    const right = faint(esc(fmtWhen(m.ts)))
     const who = m.from_me ? `${t('me')}: ` : c.is_group ? `${contactName(m.sender_jid).split(' ')[0]}: ` : ''
     const room = Math.max(4, width - visibleWidth(prefix) - visibleWidth(right) - 2 - strWidth(who))
     let text = showLinks(withMentions(m.text)).replace(/\s+/g, ' ')
@@ -1977,8 +1977,8 @@ export class Ui {
    * A chat's row in the list: its name in the colour it has as a sender in groups (bold with unread messages, the
    * filter's words underlined), 👀 while the person is online and "·" when it has a tab; then the braille spinner
    * while someone types there and an excerpt of the last message; at the right edge, how long ago (with my last
-   * message's state as in the panel, see myTime: in the time's separator when it's today's, and "❮" once read), and
-   * before it the unread count, both in WhatsApp's green.
+   * message's state in the time's separator when it's today's, see myTime), and before it the unread count, both in
+   * WhatsApp's green.
    */
   private pickerItem(c: ChatRow, width: number): string {
     const nameW = Math.min(28, Math.max(12, Math.floor(width * 0.35)))
@@ -1994,8 +1994,7 @@ export class Ui {
     const prefix = `${left}${' '.repeat(Math.max(1, nameW - visibleWidth(left)))}${mark} `
     const ts = last?.ts ?? c.last_ts
     const mine = last?.from_me ? last.status ?? 0 : null
-    // The cell after the time is kept in every row, blank but for the read mark, so all the times line up.
-    const when = !ts ? '' : esc(mine != null && daysAgo(ts) <= 0 ? myTime(ts, mine) : fmtWhen(ts)) + (mine != null && mine >= 4 ? '❮' : ' ')
+    const when = !ts ? '' : esc(mine != null && daysAgo(ts) <= 0 ? myTime(ts, mine) : fmtWhen(ts))
     const right = c.unread > 0 ? `{${this.green}-fg}{bold}${c.unread}{/bold}  ${when}{/${this.green}-fg}` : faint(when)
     const body = typing ? '' : last ? this.excerpt(last, !!c.is_group) : ''
     const text = (s: string) => (typing ? `{${this.green}-fg}${esc(t('typingShort'))}{/${this.green}-fg}` : dim(esc(s)))
