@@ -74,7 +74,7 @@ class BackendProxy extends EventEmitter<WaEvents> implements Backend {
 
   private use(b: Backend) {
     this.inner = b
-    for (const ev of ['connection', 'chats', 'messages', 'notify', 'status', 'typing', 'reaction', 'presence', 'available', 'groupOnline'] as const) {
+    for (const ev of ['connection', 'chats', 'messages', 'notify', 'status', 'typing', 'reaction', 'presence', 'available', 'groupOnline', 'profile'] as const) {
       b.on(ev, ((...args: unknown[]) => (this.emit as (ev: string, ...a: unknown[]) => boolean)(ev, ...args)) as never)
     }
     this.emit('connection', b.state)

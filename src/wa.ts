@@ -29,6 +29,8 @@ export interface WaEvents {
   presence: [chatJid: string, online: boolean]
   /** How many of a group's followed members are online (see subscribePresence). */
   groupOnline: [groupJid: string, count: number]
+  /** A chat's photo, "about" or group size has just been stored (ensureProfile). */
+  profile: [jid: string]
   /** Whether this device shows as online to the others: from activity in a terminal until two idle minutes. */
   available: [on: boolean]
   /** Only from the remote client: the server process disappeared. */
@@ -974,7 +976,9 @@ export class Wa extends EventEmitter<WaEvents> {
         }
       }
       store.setProfile({ jid, about, members, avatar, fetched })
-      this.emit('chats')
+      // Its own event, not 'chats': the list draws only that chat's rows again, instead of being made anew (and
+      // pulled back to the selection) at every photo that arrives.
+      this.emit('profile', jid)
     } catch (e) {
       logger.debug({ e: String(e), jid }, 'profile')
       store.setProfile({ jid, about: null, members: null, avatar: '', fetched })

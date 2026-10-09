@@ -820,6 +820,11 @@ export class Ui {
 
     this.wa.on('connection', (state, detail) => this.onConnection(state, detail))
     this.wa.on('chats', () => { this.dirtyTabs = true; if (this.pickerOpen) this.refreshPicker(); this.scheduleRender() })
+    this.wa.on('profile', jid => {
+      const p = store.getProfile(jid)
+      if (p) this.profiles.set(jid, p)
+      if (this.pickerOpen) { this.redrawPickerRows([jid]); this.scheduleRender() }
+    })
     this.wa.on('typing', (jid, who) => this.onTyping(jid, who.length > 0))
     this.wa.on('available', on => { this.available = on; this.drawRules(); this.screen.render() })
     this.wa.on('groupOnline', (jid, n) => {
@@ -1920,6 +1925,17 @@ export class Ui {
     const selectedHit = this.pickerHits.get(selectedAt)?.id
     const selectedJid = selectedHit ? undefined : this.pickerSlots[selectedAt]?.jid
     const sameFilter = this.pickerFilterShown === this.filter
+    // Made anew while open with the same filter (a message arriving, the history coming in), the list stays where
+    // it's being looked at: at the bottom if it was there, otherwise with its first chat in view on the same row,
+    // rather than scrolled back to the selection, which the wheel may have left out of view.
+    const list = this.picker as unknown as { childBase: number; childOffset: number }
+    const keepView = sameFilter && this.pickerFocus === undefined && this.pickerSlots.length > 0
+    const atEnd = list.childBase + num(this.picker.height) - num(this.picker.iheight) >= this.pickerSlots.length
+    let anchor: { jid: string; row: number } | undefined
+    for (let i = list.childBase; keepView && !anchor && i < this.pickerSlots.length; i++) {
+      const c = this.pickerSlots[this.pickerCont.get(i) ?? i]
+      if (c && !this.pickerHits.has(i)) anchor = { jid: c.jid, row: (this.pickerCont.get(i) ?? i) - list.childBase }
+    }
     this.pickerFilterShown = this.filter
     // Most recent at the bottom, like the messages; the default selection is the last one (the most recent).
     this.chats = store.listChats().filter(c => !c.archived).reverse()
@@ -2017,12 +2033,16 @@ export class Ui {
     this.pickerAt = keep >= 0 ? keep : Math.max(0, last)
     this.picker.select(this.pickerAt)
     // The chat goes back to the row of the screen it was on, as far as the list's ends allow.
+    const visible = num(this.picker.height) - num(this.picker.iheight)
     if (this.pickerFocusRow !== undefined && keep >= 0) {
-      const list = this.picker as unknown as { childBase: number; childOffset: number }
-      const visible = num(this.picker.height) - num(this.picker.iheight)
       const base = Math.max(0, Math.min(keep - this.pickerFocusRow, slots.length - visible))
       list.childBase = base
       list.childOffset = keep - base
+    } else if (keepView) {
+      const at = anchor ? slots.findIndex((c, i) => c?.jid === anchor.jid && !this.pickerHits.has(i)) : -1
+      const base = atEnd || at < 0 ? Math.max(0, slots.length - visible) : Math.max(0, Math.min(at - anchor!.row, slots.length - visible))
+      list.childBase = base
+      list.childOffset = this.pickerAt - base
     }
     this.pickerFocusRow = undefined
     this.drawInput()
