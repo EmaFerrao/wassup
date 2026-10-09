@@ -1364,7 +1364,8 @@ export class Ui {
       this.replyTo = null
       this.drawInput()
       this.screen.render()
-      await this.wa.send(jid, text, replyTo?.id)
+      const { text: out, mentions } = this.withMentionIds(jid, text)
+      await this.wa.send(jid, out, replyTo?.id, mentions)
       // My own message only appears once the server echoes it back; the most recent one of mine with the heart is then searched for.
       if (reaction(text)) this.heartFor(r => r.from_me === 1 && r.text === text && Date.now() - r.ts * 1000 < 30000, text)
     } catch (e) {
@@ -2013,6 +2014,34 @@ export class Ui {
    * own after a space or at the start, puts its emoji first, those that don't start with ":" too ("<3", ";)").
    * Only with the focus on the input: a draft put back with it elsewhere (closing a tab) opens nothing.
    */
+  /**
+   * Who can be mentioned in a group: those who wrote in it, most recent first, with a known name. Each goes by its
+   * first name, or its whole name when another one shares the first; the mention goes to their lid when it's known,
+   * the id groups use now, otherwise to the id they wrote with.
+   */
+  private mentionables(group: string): { jid: string; name: string; token: string }[] {
+    const people = store.recentSenders(group, 500).map(sender => {
+      const name = contactName(sender)
+      const jid = sender.endsWith('@lid') ? sender : store.getLid(sender) ?? sender
+      return { jid, name, first: name.split(' ')[0]! }
+    }).filter(p => !p.name.startsWith('lid:') && !p.name.startsWith('+') && p.jid !== this.wa.me)
+    return people.map(p => ({ jid: p.jid, name: p.name, token: people.some(o => o !== p && o.first === p.first) ? p.name : p.first }))
+  }
+
+  /** In a group, each "@" and a member's name in the text becomes "@" and their number, and they the ones mentioned. */
+  private withMentionIds(chatJid: string, text: string): { text: string; mentions: string[] } {
+    if (!chatJid.endsWith('@g.us') || !text.includes('@')) return { text, mentions: [] }
+    const mentions: string[] = []
+    // The longer names first, so "@Ana Silva" isn't taken as "@Ana".
+    for (const p of this.mentionables(chatJid).sort((a, b) => b.token.length - a.token.length)) {
+      const re = new RegExp(`(?<![\\p{L}\\p{N}_])@${p.token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}])`, 'gu')
+      const out = text.replace(re, `@${jidUser(p.jid)}`)
+      if (out !== text && !mentions.includes(p.jid)) mentions.push(p.jid)
+      text = out
+    }
+    return { text, mentions }
+  }
+
   private updateSuggestions(ghostDelay = 150) {
     const chars = graphemes(this.inputValue)
     const at = Math.min(this.cursor, chars.length)
@@ -2021,9 +2050,13 @@ export class Ui {
     const face = writing ? emoticonAt(before, chars.slice(at).join('')) : null
     const m = writing ? /(^|[^\w:]):([^\s:]*)$/.exec(before) : null
     const typed = m ? graphemes(`:${m[2]}`).length : 0
+    // In a group, "@" and the start of any of a member's names lists them, as "@" and the name the mention goes by.
+    const mention = writing && this.current?.endsWith('@g.us') ? /(^|[^\p{L}\p{N}_@])@([\p{L}\p{M}]*)$/u.exec(before) : null
+    const who = mention ? this.mentionables(this.current!).filter(p => fold(p.name).split(/\s+/).some(w => w.startsWith(fold(mention[2]!)))) : []
     const options = [
       ...face ? [{ emoji: face.emoji, code: face.face, length: graphemes(face.face).length }] : [],
       ...(m ? completeEmoji(m[2]!) : []).map(o => ({ ...o, length: typed })),
+      ...who.map(p => ({ emoji: `@${p.token}`, code: p.name, length: graphemes(`@${mention![2]}`).length })),
     ].filter((o, i, all) => all.findIndex(p => p.emoji === o.emoji) === i)
     const same = options.length === this.suggestions.length && options.every((o, i) => o.emoji === this.suggestions[i]!.emoji)
     this.suggestions = options
@@ -2288,14 +2321,15 @@ export class Ui {
     this.suggest.show()
   }
 
-  /** The `:prefix` or the smiley gives way to the chosen emoji, followed by a space. */
+  /** The `:prefix`, the smiley or the `@name` gives way to the chosen emoji or mention, followed by a space. */
   private acceptSuggestion() {
     const o = this.suggestions[this.suggestIndex]!
     const chars = graphemes(this.inputValue)
     const at = Math.min(this.cursor, chars.length)
-    const before = [...chars.slice(0, at - o.length), o.emoji, ' ']
-    this.inputValue = before.join('') + chars.slice(at).join('')
-    this.cursor = before.length
+    const before = [...chars.slice(0, at - o.length), o.emoji, ' '].join('')
+    this.inputValue = before + chars.slice(at).join('')
+    // Counted in graphemes: a mention ("@Ana") is several.
+    this.cursor = graphemes(before).length
     this.suggestions = []
     this.drawSuggestions()
     this.drawInput()

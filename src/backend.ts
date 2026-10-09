@@ -10,7 +10,8 @@ export interface Backend extends EventEmitter<WaEvents> {
   readonly me: string
   readonly state: ConnState
   readonly qr: string | undefined
-  send(chatJid: string, text: string, replyTo?: string): Promise<void>
+  /** `mentions`: the jids mentioned in a group, each written in the text as "@" and its number. */
+  send(chatJid: string, text: string, replyTo?: string, mentions?: string[]): Promise<void>
   react(chatJid: string, msgId: string, emoji: string): Promise<void>
   edit(chatJid: string, msgId: string, text: string): Promise<void>
   sendFile(chatJid: string, filePath: string, caption?: string): Promise<void>

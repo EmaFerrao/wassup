@@ -125,6 +125,7 @@ const q = {
   getContact: db.prepare(`SELECT * FROM contacts WHERE jid = ?`),
   setLid: db.prepare(`INSERT OR REPLACE INTO lids (lid, pn) VALUES (?, ?)`),
   getPn: db.prepare(`SELECT pn FROM lids WHERE lid = ?`),
+  getLid: db.prepare(`SELECT lid FROM lids WHERE pn = ?`),
   upsertMessage: db.prepare(`
     INSERT INTO messages (id, chat_jid, sender_jid, from_me, ts, type, text, push_name, quoted,
       media_path, media_mime, media_name, media_w, media_h, status, raw)
@@ -234,6 +235,9 @@ export const store = {
   },
   getPn(lid: string): string | undefined {
     return (q.getPn.get(lid) as { pn: string } | undefined)?.pn
+  },
+  getLid(pn: string): string | undefined {
+    return (q.getLid.get(pn) as { lid: string } | undefined)?.lid
   },
 
   upsertMessage(m: Omit<MessageRow, 'media_err'>) {

@@ -752,9 +752,9 @@ export class Wa extends EventEmitter<WaEvents> {
   }
 
   /** Sends text; with `replyTo` (id of a message in this chat) it goes as a reply, with the quote. */
-  async send(chatJid: string, text: string, replyTo?: string) {
+  async send(chatJid: string, text: string, replyTo?: string, mentions?: string[]) {
     const quoted = replyTo ? this.rawMessage(chatJid, replyTo) : undefined
-    const sent = await this.sock!.sendMessage(chatJid, { text }, quoted ? { quoted } : undefined)
+    const sent = await this.sock!.sendMessage(chatJid, mentions?.length ? { text, mentions } : { text }, quoted ? { quoted } : undefined)
     if (sent) { store.transaction(() => this.storeMessage(sent, false)); this.emit('messages', chatJid); this.emit('chats') }
   }
 

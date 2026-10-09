@@ -73,7 +73,9 @@ and on startup the terminal is asked for its real background colour to pick ligh
 - **Input**: grows with the text up to half the screen; the rule above it shows 👀 near its right end while you show as
   online, a braille spinner instead while you type; Enter sends, Shift+Enter or Ctrl+J start a new line, and pasting
   several lines keeps them. Ctrl-U clears, Shift-Backspace deletes a word (with the Kitty keyboard protocol). `:` and
-  a letter open the emoji list; ↑/↓, Enter, Tab, → or a click pick one.
+  a letter open the emoji list; ↑/↓, Enter, Tab, → or a click pick one. In a group, `@` lists those who wrote in it,
+  most recent first, narrowed by the start of any of their names (`@lem` finds Rita Lemos); the one picked goes in as
+  `@Rita` (the whole name when two share the first), and the message goes out mentioning them, as the phone does.
 - Esc closes, in order: the filter, the list, the active tab. Closing the last tab quits. Ctrl-C quits at once;
   Ctrl-R redraws the screen.
 - **Several terminals**: the first process is the server with the WhatsApp connection; the next ones connect to it
