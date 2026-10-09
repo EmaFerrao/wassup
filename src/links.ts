@@ -106,7 +106,7 @@ const SHOWN_MAX = 60
 
 /**
  * Social networks and the like, and short links, whose paths are mostly identifiers that say nothing to whoever
- * reads them (`instagram.com/p/DeNKVAJuamr`, `youtu.be/SA-v8z87GAk`, `maps.app.goo.gl/dFstnkQYmxpS2MWT7`).
+ * reads them (`instagram.com/p/C0aBcD3eFgH`, `youtu.be/Xy7aB3cD9eF`, `maps.app.goo.gl/AbC123dEf456GhI78`).
  */
 const NOISY = /(?:^|\.)(?:facebook\.com|fb\.com|fb\.watch|instagram\.com|threads\.(?:net|com)|tiktok\.com|x\.com|twitter\.com|youtube\.com|youtu\.be|linkedin\.com|spotify\.com|spotify\.link|pinterest\.[a-z.]+|pin\.it|reddit\.com|redd\.it|bsky\.app|snapchat\.com|chat\.whatsapp\.com|(?:maps|photos)\.app\.goo\.gl|forms\.gle|share\.google)$/i
 /** Of those, the short links, whose path is only ever an identifier. */
@@ -125,8 +125,8 @@ function caseSwitches(s: string): number {
 
 /**
  * An opaque identifier, as a part of a path: five or more letters, digits, "_" or "-", all digits, or digits with
- * capitals, or digits in two or more places among letters (`1de58pw59f`), or capitals and small letters switching
- * three or more times. Names, even with a digit (`play7scout`), aren't. On the short links (ID_ONLY) any such part is.
+ * capitals, or digits in two or more places among letters (`4kq81zr7tp`), or capitals and small letters switching
+ * three or more times. Names, even with a digit (`zeca_rio7`), aren't. On the short links (ID_ONLY) any such part is.
  */
 function opaque(part: string, idOnly: boolean): boolean {
   if (!/^[A-Za-z0-9_-]{5,}$/.test(part)) return false
@@ -138,7 +138,7 @@ function opaque(part: string, idOnly: boolean): boolean {
  * way to "…" (the domain stays whole, and the first and last parts of the path, then the query), and past that its
  * end. The parameters that are left after cleaning (a search, an id, a video's start) stay. From the sites in NOISY
  * only the domain and the readable parts of the path are shown, each run of identifiers made one "…", without the
- * parameters: `facebook.com/share/v/…`, `instagram.com/stories/half.caught/…`, `youtube.com/watch`.
+ * parameters: `facebook.com/share/v/…`, `instagram.com/stories/rita.lemos/…`, `youtube.com/watch`.
  */
 export function shortUrl(url: string): string {
   const m = /^https?:\/\/(?:www\.)?([^/?#]+)([^?#]*)(.*)$/i.exec(url)

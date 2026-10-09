@@ -1,5 +1,12 @@
 # AGENTS.md
 
+## Real data
+
+No real data in the code, its comments, the documentation or commit messages: names, numbers, lids, message ids,
+links, group names or message text taken from the user's WhatsApp (the local database, the log, a screenshot). Examples
+are invented, and checked against the local database not to match anything in it ("Rita Lemos", `@123456789012345`,
+`instagram.com/p/C0aBcD3eFgH`, "Clube de Leitura"); a real case needed for a test stays out of the repository.
+
 ## Commits
 
 Never commit or push unless explicitly asked — implementing a change is not authorization to record it, and a previous "push" in the same session does not authorize the next one. When asked to "push", that means commit **and** push to `main` by fast-forward (`git push origin <branch>:main`), after `npm run check` passes.

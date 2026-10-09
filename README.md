@@ -38,7 +38,7 @@ texts, the emoji names and the language of the writing suggestions.
 ## Interface
 
 The tab bar at the top with the connection state on the right, messages across the full width under it, and the input
-at the bottom, with the chat's first name as the prompt, in the colour the person's name has in groups (`Ema ❯ `, with
+at the bottom, with the chat's first name as the prompt, in the colour the person's name has in groups (`Rita ❯ `, with
 👀 over the name on the rule above while they're online, and in a group one per member online, up to five, among the 30
 who wrote most recently, and a braille spinner in place of the 👀 while they type; the first two for a contact with
 more than two names, or a group's name). No frames or backgrounds of its own: the colours are the terminal theme's,
@@ -107,7 +107,7 @@ without what only tracks who shared them (`fbclid`, `utm_…`, `igsh`, `si` and 
 [ClearURLs](https://github.com/ClearURLs/Rules)' rules, redirections through a site undone) and shortened (a long
 path cut in the middle); from social networks and short links (Facebook, Instagram, YouTube, Spotify, TikTok, X,
 `maps.app.goo.gl` …) only the readable parts stay, the opaque identifiers made `…` and the parameters left out
-(`instagram.com/reel/…`, `instagram.com/stories/half.caught/…`, `youtube.com/watch`). A click copies the whole clean
+(`instagram.com/reel/…`, `instagram.com/stories/rita.lemos/…`, `youtube.com/watch`). A click copies the whole clean
 link.
 
 ### Images

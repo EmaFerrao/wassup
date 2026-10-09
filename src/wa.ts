@@ -86,7 +86,7 @@ function mentioned(digits: string): { jid: string; name: string } | null {
 }
 
 /**
- * Mentions with the person's first name in place of the number when they're a known contact: "@110827554213968"
+ * Mentions with the person's first name in place of the number when they're a known contact: "@123456789012345"
  * becomes "@Ana". `show` draws each one found from the jid and first name; by default "@" and the name.
  */
 export function withMentions(text: string, show: (jid: string, first: string) => string = (_jid, first) => `@${first}`): string {
@@ -141,7 +141,7 @@ const PARTICLES = new Set(['de', 'da', 'do', 'das', 'dos', 'e'])
 
 /**
  * A name's first word; with `two`, when it has more than two names, its first two, with any particle between them
- * kept ("Ana Maria Costa": "Ana Maria", "João da Silva Santos": "João da Silva", "Paula Costa": "Paula").
+ * kept ("Ana Maria Costa": "Ana Maria", "João da Silva Santos": "João da Silva", "Rita Lemos": "Rita").
  */
 export function firstNames(name: string, two: boolean): string | null {
   const words = name.split(/\s+/).filter(Boolean)

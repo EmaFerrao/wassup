@@ -308,7 +308,7 @@ export class Ui {
   /** What's left unsent in each chat: switching tabs swaps the input, so nothing goes to the wrong person. */
   private drafts = new Map<string, { value: string; cursor: number }>()
   private reactTo: MessageRow | null = null
-  /** Columns the prompt takes on the input's first line ("Ema ❯ "), and the continuation lines' indent. */
+  /** Columns the prompt takes on the input's first line ("Rita ❯ "), and the continuation lines' indent. */
   private promptWidth = 2
   /** How wide the chat's name is at the start of the prompt (0 with none), where a click opens the chat list. */
   private promptNameWidth = 0
@@ -1740,9 +1740,9 @@ export class Ui {
     this.chats = store.listChats().filter(c => !c.archived).reverse()
     const f = fold(this.filter)
     // The filter is taken word by word, every one of them somewhere in the name (or the number), in any order:
-    // "ana russo" finds Ana Lobo Russo. The best matches go to the bottom, next to the prompt and the default
-    // selection: names that start with the first word and have each other one starting a word ("ana": Ana Costa);
-    // above them, names where every word starts one ("costa": Ana Costa, after a space, hyphen or any non-letter);
+    // "irene viegas" finds Irene Teles Viegas. The best matches go to the bottom, next to the prompt and the default
+    // selection: names that start with the first word and have each other one starting a word ("ana": Ana Viegas);
+    // above them, names where every word starts one ("viegas": Ana Viegas, after a space, hyphen or any non-letter);
     // on top, the rest (Mariana, a number). Each group keeps its order, most recent at the bottom.
     const words = f.split(/\s+/).filter(Boolean)
     const matches = this.chats.filter(c => {
@@ -2303,9 +2303,9 @@ export class Ui {
   }
 
   private drawInput() {
-    // One line at minimum (grows with the text), the prompt on the first ("Ema ❯ ": the chat's first name, in the
+    // One line at minimum (grows with the text), the prompt on the first ("Rita ❯ ": the chat's first name, in the
     // colour it has in groups, with 👀 above it on the rule while they're online and a braille spinner beside them
-    // while they type; "Lourinhasaurus ❯ " for a group; just "❯ " for a chat known only by a number), text wrapped
+    // while they type; "Clube de Leitura ❯ " for a group; just "❯ " for a chat known only by a number), text wrapped
     // by word (never mid-word) and continuation indented under the text.
     // When the text has more lines than fit, the ones around the cursor are shown, with the cursor on the bottom one whenever possible. With
     // "chats" open, the same line is used to type the filter. When replying, reacting or editing, the line
