@@ -51,17 +51,18 @@ and on startup the terminal is asked for its real background colour to pick ligh
   stays quiet.
 - **Chats**: `wa` starts on the list, and `/`, or a click on the chat's name in the prompt, opens it again, under the
   app's name, most recent at the bottom, under day separators (today, yesterday, this week, older), a blank row
-  between chats. Each takes two rows, its photo from WhatsApp on the left of both (four cells by two, real pixels with
-  Kitty, half-blocks otherwise; its initials on its colour without one): on the first its name in its colour, 👀 while
-  the person is online, and when the last message was (`21:35`, `ontem 21:35`, `12 set 21:35`); on the second the
-  person's number and the "about" of their profile, or a group's number of members, "typing…" while someone types, and
-  the unread count. Photos, "abouts" and group sizes are asked of WhatsApp for the chats in view, at most once a day,
-  and kept; a click on a photo opens it large, with its description, as images do. Typing after `wassup ❯` filters it
-  word by word, ignoring accents and case, with the matches underlined; Enter, Tab, → or a click opens. Ctrl+F there
-  searches the messages of every chat instead (`procurar ❯`, again or Esc back to the names): from two characters on,
-  the list holds those that have all the words, the most recent at the bottom, each as its chat, who wrote it and
-  when, and two lines of its text from a little before the match, the matches in reverse video; Enter or a click opens
-  the chat on that message.
+  between chats. Each takes two rows, its photo from WhatsApp at the right edge of both (four cells by two, real
+  pixels with Kitty, half-blocks otherwise; its initials on its colour without one); on a wide screen the list stops
+  at 80 columns, so the photo stays near the name. On the first row, when the last message was (`21:35`, `ontem
+  21:35`, `12 set 21:35`) in a column of its own, the name in its colour and 👀 while the person is online. On the
+  second, the unread count under the time, the "about" of the person's profile under the name, or "typing…" while
+  someone types, and against the photo the person's number or a group's number of members. Photos, "abouts" and group
+  sizes are asked of WhatsApp for the chats in view, at most once a day, and kept; a click on a photo opens it large,
+  with its description, as images do. Typing after `wassup ❯` filters it word by word, ignoring accents and case, with
+  the matches underlined; Enter, Tab, → or a click opens. Ctrl+F there searches the messages of every chat instead
+  (`procurar ❯`, again or Esc back to the names): from two characters on, the list holds those that have all the
+  words, the most recent at the bottom, each as its chat, who wrote it and when, and two lines of its text from a
+  little before the match, the matches in reverse video; Enter or a click opens the chat on that message.
 - **Messages**: yours on the right, each in a bubble with WhatsApp Web's colours where the terminal takes 24-bit
   colour (yours, on a dark theme, toned down to the brightness of theirs) and two discreet greys otherwise, with the
   time outside it, yours with their state in its separator (`14 06` not sent yet, `14.06` sent, `14:06` delivered;

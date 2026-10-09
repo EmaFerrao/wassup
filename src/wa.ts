@@ -965,7 +965,7 @@ export class Wa extends EventEmitter<WaEvents> {
     try {
       let about: string | null = null, members: number | null = null, avatar = ''
       if (jid.endsWith('@g.us')) members = (await sock.groupMetadata(jid)).participants.length
-      else about = ((await sock.fetchStatus(jid))?.[0] as { status?: { status?: string | null } } | undefined)?.status?.status || null
+      else about = ((await sock.fetchStatus(jid))?.[0] as { status?: { status?: string | null } } | undefined)?.status?.status?.trim() || null
       const url = await sock.profilePictureUrl(jid, 'image').catch(() => undefined)
       if (url) {
         const res = await fetch(url)
